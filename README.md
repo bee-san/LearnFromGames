@@ -270,8 +270,11 @@ tools/score_ocr.py corpus --show
 ```
 
 `fakegame` is a dialogue box whose text types itself out and advances on a tap
-or a button, with a tone as its "voice". `tools/virtual_pad.py` plays a gamepad
-on the emulator. Do not use `uiautomator dump` while testing: it suspends
+or a button, with a tone as its "voice". Started with `--ez music true` it
+plays music throughout instead, and speaks `voice.s16le` (16 kHz, 16-bit, mono;
+the tests' own is `app/src/test/resources/sound/voice.s16le`) from its external
+files folder on two lines in three, which is how voice trimming is checked.
+`tools/virtual_pad.py` plays a gamepad on the emulator. Do not use `uiautomator dump` while testing: it suspends
 accessibility services while it runs.
 
 ## Layout

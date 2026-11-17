@@ -17,20 +17,47 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import kotlin.math.PI
+import kotlin.math.sin
 
 /**
  * A dialogue box over a flat ground. A tap or any button shows the next page;
  * its text types itself out, as a visual novel's does. Every input is logged
  * (`adb logcat -s FakeVN`), so a test can tell what reached the game.
+ *
+ * Sound, for testing sentence audio: each new page plays a short tone. Started
+ * with `--ez music true`, music plays throughout instead, and a new page plays
+ * the recording `voice.s16le` (16 kHz, 16-bit, mono) from the app's external
+ * files folder when one has been pushed there, except on every third page,
+ * which stays unvoiced.
  */
 class GameActivity : Activity() {
     private lateinit var game: GameView
+    private var music: AudioTrack? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         game = GameView(this)
+        if (intent.getBooleanExtra("music", false)) {
+            game.voice = getExternalFilesDir(null)?.resolve("voice.s16le")?.takeIf { it.canRead() }?.readBytes()
+            music = game.play(music(), 22_050, loop = true)
+        }
         setContentView(game)
         window.decorView.windowInsetsController?.hide(WindowInsets.Type.systemBars())
+    }
+
+    override fun onDestroy() {
+        music?.release()
+        super.onDestroy()
+    }
+
+    /** Four seconds of a chord with a moving melody over it, never quiet, so loudness alone cannot find a voice in it. */
+    private fun music() = ShortArray(22_050 * 4) { i ->
+        val t = i / 22_050.0
+        val melody = doubleArrayOf(523.25, 587.33, 659.25, 783.99)[(t * 4).toInt() % 4]
+        (1800 * sin(2 * PI * 220.0 * t) + 1400 * sin(2 * PI * 277.18 * t) + 1400 * sin(2 * PI * 329.63 * t) + 1500 * sin(2 * PI * melody * t)).toInt().toShort()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -97,12 +124,27 @@ class GameActivity : Activity() {
             invalidate()
         }
 
-        /** A stand-in for a voiced line: a second and a bit of tone, played as game sound. */
+        /** With music playing: the recorded voice for a new page, when there is one. */
+        var voice: ByteArray? = null
+        private var music = false
+
+        /** A stand-in for a voiced line, played as game sound: the recording, or a second and a bit of tone. */
         private fun speak() {
             val rate = 22_050
-            val samples = ShortArray(rate * 12 / 10) { i ->
-                (kotlin.math.sin(i * 2.0 * Math.PI * (330 + page * 60) / rate) * 9000).toInt().toShort()
+            val recording = voice
+            val track = when {
+                recording != null -> if (page % 3 == 2) return else play(
+                    ShortArray(recording.size / 2).also { ByteBuffer.wrap(recording).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(it) },
+                    16_000,
+                )
+                music -> return
+                else -> play(ShortArray(rate * 12 / 10) { i -> (sin(i * 2.0 * PI * (330 + page * 60) / rate) * 9000).toInt().toShort() }, rate)
             }
+            handler.postDelayed({ track.release() }, track.bufferSizeInFrames * 1000L / track.sampleRate + 1300)
+        }
+
+        fun play(samples: ShortArray, rate: Int, loop: Boolean = false): AudioTrack {
+            if (loop) music = true
             val track = AudioTrack.Builder()
                 .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).build())
                 .setAudioFormat(
@@ -113,8 +155,9 @@ class GameActivity : Activity() {
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build()
             track.write(samples, 0, samples.size)
+            if (loop) track.setLoopPoints(0, samples.size, -1)
             track.play()
-            handler.postDelayed({ track.release() }, 2500)
+            return track
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
