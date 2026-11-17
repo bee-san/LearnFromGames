@@ -8,6 +8,7 @@ import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.ReadingStats.Gap
 import io.github.beesan.lfg.core.ReadingStats.Stamp
 import io.github.beesan.lfg.core.Segmenter
+import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.core.TextCursor
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.ocr.Vocr
@@ -19,6 +20,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
 
 class CursorTest {
     private val words = listOf("昨日", "の", "夜", "森", "奥", "で", "不思議", "な", "光", "を", "見た", "ん", "だ", "でも", "近づいたら", "消えて", "しまった", "ユイ")
@@ -150,7 +152,7 @@ class CursorTest {
     }
 
     @Test
-    fun totalsPerDayAndPerGame() {
+    fun totalsPerDay() {
         val zone = ZoneId.of("UTC")
         val base = LocalDate.of(2026, 11, 17).atTime(21, 0).atZone(zone).toEpochSecond().toDouble()
         val stamps = List(6) { Stamp(base + it * 10, 20, "a") } + List(2) { Stamp(base + 86_400 + it * 10, 30, "b") }
@@ -161,7 +163,31 @@ class CursorTest {
         // Five 10 s gaps, and the last line credited at the session's pace: 20 chars at 2 chars/s.
         assertEquals(60.0, days[1].seconds, 1e-9)
         assertEquals(7200, days[1].charsPerHour)
-        assertEquals(listOf("a", "b"), ReadingStats.byGame(stamps, zone).map { it.gameId })
+    }
+
+    @Test
+    fun aPeriodAddsUpItsDaysAndTheSameLengthBefore() {
+        // 17 November 2026 is a Tuesday, so the 30 days start on Monday 19 October.
+        val today = LocalDate.of(2026, 11, 17)
+        fun day(back: Long, chars: Int) = ReadingStats.DayTotals(today.minusDays(back), 10, chars, chars / 5.0)
+        val days = listOf(day(0, 1000), day(3, 500), day(35, 750), day(90, 9))
+
+        val month = StatsPeriod.DAYS_30.view(days, today, Locale.UK)
+        assertEquals(30, month.bars.size)
+        assertEquals(StatsPeriod.Totals(1500, 20, 300.0), month.totals)
+        assertEquals(StatsPeriod.Totals(750, 10, 150.0), month.before)
+        assertEquals(2, month.daysRead)
+        assertEquals(1000, month.bars.last().chars)
+        assertEquals("19 October – 17 November 2026", month.range)
+        assertEquals(listOf("19 Oct", ""), month.bars.take(2).map { it.axis })
+        assertEquals("Up 100% on the 30 days before", StatsPeriod.change(1500.0, 750.0, month.beforeName))
+
+        val year = StatsPeriod.MONTHS_12.view(days, today, Locale.UK)
+        assertEquals(12, year.bars.size)
+        assertEquals(2259, year.totals.chars)
+        assertEquals(1500, year.bars.last().chars)
+        assertEquals(listOf("Dec 2025", "Jan 2026", "Feb"), year.bars.take(3).map { it.axis })
+        assertNull(year.before)
     }
 
     @Test

@@ -97,7 +97,7 @@ class CardMaker(
         val added = card.copy(noteId = noteId, state = Card.STATE_ADDED, pictureName = pictureName.takeIf { pictureHtml.isNotEmpty() })
         db.cards().update(added)
         store.attachNote(card.lineId, noteId)
-        if (prefs().sentenceAudio) media.audioFor(added, target, content.lineStartMs)
+        media.audioFor(added, target, content.lineStartMs)
         return CardResult.Added(noteId)
     }
 }

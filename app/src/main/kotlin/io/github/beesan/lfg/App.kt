@@ -5,6 +5,7 @@ import android.app.Application
 import io.github.beesan.lfg.anki.AnkiBridge
 import io.github.beesan.lfg.anki.CardMaker
 import io.github.beesan.lfg.anki.MediaAttacher
+import io.github.beesan.lfg.anki.Speech
 import io.github.beesan.lfg.data.LfgDatabase
 import io.github.beesan.lfg.data.LineStore
 import io.github.beesan.lfg.dict.DictState
@@ -24,7 +25,7 @@ class App : Application() {
     val dictionaries by lazy { DictionaryRepository(this) }
     val anki by lazy { AnkiBridge(this) }
     val settings by lazy { Settings(this) }
-    val media by lazy { MediaAttacher(this, scope, anki, database) }
+    val media by lazy { MediaAttacher(this, scope, anki, database, { settings.prefs.value }, Speech(this)) }
     val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media")) }
     val models by lazy { ModelStore(this) }
 

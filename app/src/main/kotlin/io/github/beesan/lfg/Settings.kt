@@ -17,6 +17,8 @@ data class Prefs(
     val secondScreenPanel: Boolean = true,
     /** Sentence audio from a rolling buffer of game sound. Needs screen recording consent each session. */
     val sentenceAudio: Boolean = false,
+    /** Android's voice reads the line onto a card the game gave no voice. */
+    val spokenLines: Boolean = true,
     /** An animated picture of the moments before the card was made, instead of a still. */
     val animatedPicture: Boolean = false,
 ) {
@@ -41,6 +43,7 @@ class Settings(context: Context) {
             engine = store.getString("engine", d.engine) ?: d.engine,
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
             sentenceAudio = store.getBoolean("sentenceAudio", d.sentenceAudio),
+            spokenLines = store.getBoolean("spokenLines", d.spokenLines),
             animatedPicture = store.getBoolean("animatedPicture", d.animatedPicture),
         )
     }
@@ -53,6 +56,7 @@ class Settings(context: Context) {
             .putString("engine", next.engine)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)
             .putBoolean("sentenceAudio", next.sentenceAudio)
+            .putBoolean("spokenLines", next.spokenLines)
             .putBoolean("animatedPicture", next.animatedPicture)
             .apply()
         _prefs.value = next

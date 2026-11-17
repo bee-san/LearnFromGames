@@ -36,10 +36,6 @@ object ReadingStats {
         val charsPerHour: Int get() = if (seconds < 1.0) 0 else (chars / seconds * 3600).toInt()
     }
 
-    data class GameTotals(val gameId: String, val lines: Int, val chars: Int, val seconds: Double) {
-        val charsPerHour: Int get() = if (seconds < 1.0) 0 else (chars / seconds * 3600).toInt()
-    }
-
     fun dayOf(timestamp: Double, zone: ZoneId): LocalDate =
         Instant.ofEpochMilli((timestamp * 1000).toLong()).atZone(zone).minusHours(DAY_STARTS_AT_HOUR).toLocalDate()
 
@@ -94,17 +90,6 @@ object ReadingStats {
                 seconds = ofDay.groupBy { it.gameId }.values.sumOf(::sessionSeconds),
             )
         }.sortedByDescending { it.day }
-
-    /** Most-read game first. */
-    fun byGame(stamps: List<Stamp>, zone: ZoneId): List<GameTotals> =
-        stamps.groupBy { it.gameId }.map { (game, ofGame) ->
-            GameTotals(
-                gameId = game,
-                lines = ofGame.size,
-                chars = ofGame.sumOf { it.chars },
-                seconds = ofGame.groupBy { dayOf(it.timestamp, zone) }.values.sumOf(::sessionSeconds),
-            )
-        }.sortedByDescending { it.chars }
 
     data class Streaks(val current: Int, val longest: Int)
 
