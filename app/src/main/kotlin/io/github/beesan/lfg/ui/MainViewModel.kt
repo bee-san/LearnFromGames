@@ -103,7 +103,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val stats: StateFlow<StatsState> = app.database.lines().stamps().map { stamps ->
         withContext(Dispatchers.Default) {
             val zone = ZoneId.systemDefault()
-            val all = stamps.map { ReadingStats.Stamp(it.timestamp, it.chars, it.gameId) }
+            val all = stamps.map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }
             val days = ReadingStats.byDay(all, zone)
             StatsState(
                 days = days,

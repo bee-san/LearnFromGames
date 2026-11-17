@@ -57,7 +57,7 @@ Everything runs on the device. The only network use is fetching the readers' mod
 | Controller | L3 + R3 lookup mode: word, line and character steps, held repeat, entry change, add, close. |
 | Dictionaries and lines | Add, order and remove Yomitan dictionaries. Full entry rendering. Cards from a stored line after the session. |
 | Sound, then motion | Sentence audio added to a card when the next line appears, trimmed to the voice by Silero VAD. Android's voice for a card without one. Animated WebP of the line appearing. |
-| Stats | Reading time, characters, speed and streak over 7 days, 30 days, 12 months or all time, against the period before, and a bar for each day or month. On GameSentenceMiner's reading-time rule. |
+| Stats | Reading time, characters, speed and streak over 7 days, 30 days, 12 months or all time, against the period before, and a bar for each day or month. On [Rubi](https://github.com/bee-san/Rubi_for_vita)'s reading-time rule. |
 
 ### Against real apps
 

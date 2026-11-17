@@ -28,8 +28,9 @@ enum class StatsPeriod(val label: String) {
         val seconds: Double,
     )
 
-    data class Totals(val chars: Int, val lines: Int, val seconds: Double) {
-        val charsPerHour: Int get() = if (seconds < 1.0) 0 else (chars / seconds * 3600).toInt()
+    /** [timedChars]: the characters of the lines that got a time, which alone count towards speed. */
+    data class Totals(val chars: Int, val timedChars: Int, val lines: Int, val seconds: Double) {
+        val charsPerHour: Int get() = ReadingStats.perHour(timedChars, seconds)
     }
 
     data class View(
@@ -79,10 +80,11 @@ enum class StatsPeriod(val label: String) {
 
         val sums = bars.map { doubleArrayOf(0.0, 0.0) }
         var chars = 0
+        var timed = 0
         var lines = 0
         var seconds = 0.0
         var read = 0
-        var before = Totals(0, 0, 0.0)
+        var before = Totals(0, 0, 0, 0.0)
         val beforeStart = start.minusDays(bars.size.toLong())
         for (d in days) {
             if (d.day >= start && d.day <= today) {
@@ -90,11 +92,12 @@ enum class StatsPeriod(val label: String) {
                 sums[i][0] += d.chars.toDouble()
                 sums[i][1] += d.seconds
                 chars += d.chars
+                timed += d.timedChars
                 lines += d.lines
                 seconds += d.seconds
                 if (d.lines > 0) read++
             } else if (byDay && d.day >= beforeStart && d.day < start) {
-                before = Totals(before.chars + d.chars, before.lines + d.lines, before.seconds + d.seconds)
+                before = Totals(before.chars + d.chars, before.timedChars + d.timedChars, before.lines + d.lines, before.seconds + d.seconds)
             }
         }
         val range = when (this) {
@@ -105,7 +108,7 @@ enum class StatsPeriod(val label: String) {
         return View(
             range = range,
             bars = bars.mapIndexed { i, b -> b.copy(chars = sums[i][0].toInt(), seconds = sums[i][1]) },
-            totals = Totals(chars, lines, seconds),
+            totals = Totals(chars, timed, lines, seconds),
             before = if (byDay) before else null,
             beforeName = if (byDay) "the ${bars.size} days before" else "",
             daysRead = read,
