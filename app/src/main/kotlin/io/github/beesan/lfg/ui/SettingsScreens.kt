@@ -284,7 +284,7 @@ fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit,
 
 @Composable
 fun MediaScreen(prefs: Prefs, recording: Boolean, onChange: ((Prefs) -> Prefs) -> Unit, onStartRecording: () -> Unit, onBack: () -> Unit) = Page("Sound and pictures", onBack) {
-    Card("Sentence audio", "The voice in the game's sound between a line and the next, added to the card. Android asks for screen recording each session.") {
+    Card("Sentence audio", "The voice in the game’s sound between a line and the next, added to the card. Android asks for screen recording each session.") {
         OnOff(prefs.sentenceAudio) { v -> onChange { it.copy(sentenceAudio = v) } }
     }
     if (prefs.sentenceAudio) {
@@ -292,7 +292,7 @@ fun MediaScreen(prefs: Prefs, recording: Boolean, onChange: ((Prefs) -> Prefs) -
             if (!recording) LfgButton("Start", onStartRecording, primary = true)
         }
     }
-    Card("Spoken line", "Android's voice reads the line onto cards with no voice from the game.") {
+    Card("Spoken line", "Android’s voice reads the line onto cards with no voice from the game.") {
         OnOff(prefs.spokenLines) { v -> onChange { it.copy(spokenLines = v) } }
     }
     Card("Animated picture", "The moments around the line as a short moving picture, instead of a still.") {
