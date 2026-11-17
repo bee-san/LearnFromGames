@@ -28,9 +28,9 @@ LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSent
 - **Or never let go of the controller.** L3 + R3 turns the pad into a text cursor: by word, by line, by character. The game receives nothing until you leave.
 - **Uses the second screen.** On a two-screen handheld the entry opens on the screen the game is not on. On one screen it is a popup.
 - **One press to Anki.** Cards go to AnkiDroid with the sentence, the word marked, the definition and a picture of the game. Kiku, Lapis and Senren note types are found by themselves; without one, the app makes its own.
-- **Sentence audio and moving pictures**, if you switch them on: the game's own sound for the line, and an animated picture of it appearing.
+- **Sentence audio and moving pictures**, if you switch them on: the game's own voice for the line, with the music around it cut away, and an animated picture of it appearing. A line the game does not speak is read by Android's voice instead.
 - **Your dictionaries.** JMdict is fetched at first run; add any Yomitan dictionary zip and it is shown with its own styling.
-- **Every line is kept**, so you can mine after the session and see characters, time and reading speed per day and per game.
+- **Every line is kept**, so you can mine after the session and see reading time, characters, speed and your streak.
 
 ## How it works
 
@@ -56,8 +56,8 @@ Everything runs on the device. The only network use is fetching the readers' mod
 | Tap, read, mine | First run from a clean install. Background reading. Tap strips, the second-screen panel, the one-screen popup. Add card with the picture. Lines saved. |
 | Controller | L3 + R3 lookup mode: word, line and character steps, held repeat, entry change, add, close. |
 | Dictionaries and lines | Add, order and remove Yomitan dictionaries. Full entry rendering. Cards from a stored line after the session. |
-| Sound, then motion | Sentence audio added to a card when the next line appears. Animated WebP of the line appearing. |
-| Stats | Characters, lines, time and speed per day and per game, streaks, on GameSentenceMiner's reading-time rule. |
+| Sound, then motion | Sentence audio added to a card when the next line appears, trimmed to the voice by Silero VAD. Android's voice for a card without one. Animated WebP of the line appearing. |
+| Stats | Reading time, characters, speed and streak over 7 days, 30 days, 12 months or all time, against the period before, and a bar for each day or month. On [Rubi](https://github.com/bee-san/Rubi_for_vita)'s reading-time rule. |
 
 ### Against real apps
 
@@ -270,8 +270,11 @@ tools/score_ocr.py corpus --show
 ```
 
 `fakegame` is a dialogue box whose text types itself out and advances on a tap
-or a button, with a tone as its "voice". `tools/virtual_pad.py` plays a gamepad
-on the emulator. Do not use `uiautomator dump` while testing: it suspends
+or a button, with a tone as its "voice". Started with `--ez music true` it
+plays music throughout instead, and speaks `voice.s16le` (16 kHz, 16-bit, mono;
+the tests' own is `app/src/test/resources/sound/voice.s16le`) from its external
+files folder on two lines in three, which is how voice trimming is checked.
+`tools/virtual_pad.py` plays a gamepad on the emulator. Do not use `uiautomator dump` while testing: it suspends
 accessibility services while it runs.
 
 ## Layout
@@ -304,9 +307,10 @@ The app is GPL-3.0-or-later, as hoshidicts is.
   published for Chromium; no licence for them was found, so the app downloads
   them from Chromium's package store and never ships them.
 - libwebp is BSD-3-Clause. AnkiDroid's API is LGPL-3.0. ONNX Runtime is MIT.
+- Silero VAD is MIT. Its model ships in `app/src/main/assets/vad`.
 
 ## Thanks
 
-LFG stands on [GameSentenceMiner](https://github.com/bpwhelan/GameSentenceMiner), [hoshidicts](https://github.com/bee-san/hoshidicts), [VOCR](https://github.com/bee-san/vita-vn-ocr), [meikiocr](https://github.com/rtr46/meikiocr), [screenai_ocr](https://github.com/AuroraWright/screenai_ocr), [AnkiDroid](https://github.com/ankidroid/Anki-Android), [Jitendex](https://jitendex.org) and JMdict, and on the Kiku, Lapis and Senren note types.
+LFG stands on [GameSentenceMiner](https://github.com/bpwhelan/GameSentenceMiner), [hoshidicts](https://github.com/bee-san/hoshidicts), [VOCR](https://github.com/bee-san/vita-vn-ocr), [meikiocr](https://github.com/rtr46/meikiocr), [screenai_ocr](https://github.com/AuroraWright/screenai_ocr), [AnkiDroid](https://github.com/ankidroid/Anki-Android), [Silero VAD](https://github.com/snakers4/silero-vad), [Jitendex](https://jitendex.org) and JMdict, and on the Kiku, Lapis and Senren note types.
 
 The plan and screen designs this was built from: <https://claude.ai/artifact/PahaxprErjPmLGocbz6pPW>

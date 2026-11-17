@@ -31,7 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -72,13 +72,8 @@ data class DictionariesState(val busy: Boolean = false, val error: String? = nul
 
 data class StatsState(
     val days: List<ReadingStats.DayTotals> = emptyList(),
-    val games: List<Pair<String, ReadingStats.GameTotals>> = emptyList(),
     val streaks: ReadingStats.Streaks = ReadingStats.Streaks(0, 0),
-) {
-    val lines get() = days.sumOf { it.lines }
-    val chars get() = days.sumOf { it.chars }
-    val seconds get() = days.sumOf { it.seconds }
-}
+)
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as App
@@ -105,15 +100,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val games: StateFlow<List<Game>> =
         app.database.games().all().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val stats: StateFlow<StatsState> = combine(app.database.lines().stamps(), app.database.games().all()) { stamps, games ->
+    val stats: StateFlow<StatsState> = app.database.lines().stamps().map { stamps ->
         withContext(Dispatchers.Default) {
             val zone = ZoneId.systemDefault()
-            val all = stamps.map { ReadingStats.Stamp(it.timestamp, it.chars, it.gameId) }
+            val all = stamps.map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }
             val days = ReadingStats.byDay(all, zone)
-            val titles = games.associate { it.id to it.title }
             StatsState(
                 days = days,
-                games = ReadingStats.byGame(all, zone).map { (titles[it.gameId] ?: "Unknown") to it },
                 streaks = ReadingStats.streaks(days.map { it.day }, ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, zone)),
             )
         }

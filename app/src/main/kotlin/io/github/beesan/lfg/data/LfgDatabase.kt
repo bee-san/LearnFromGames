@@ -30,7 +30,8 @@ interface LineDao {
     @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND created_at > :afterMs ORDER BY created_at LIMIT 1")
     suspend fun nextAfter(gameId: String, afterMs: Long): GameLine?
 
-    @Query("SELECT timestamp, char_count AS chars, game_id AS gameId FROM game_lines WHERE source != 'practice' ORDER BY timestamp")
+    /** The text too: stats count its letters, not every code point as `char_count` does. */
+    @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' ORDER BY timestamp")
     fun stamps(): Flow<List<LineStamp>>
 
     /** Pictures no card was made from, older than [before] (milliseconds). */
@@ -50,7 +51,7 @@ interface LineDao {
     suspend fun setNoteIds(id: String, noteIds: String, now: Long)
 }
 
-data class LineStamp(val timestamp: Double, val chars: Int, val gameId: String)
+data class LineStamp(val timestamp: Double, val text: String, val gameId: String)
 
 @Dao
 interface GameDao {

@@ -170,31 +170,6 @@ class SampleRing(private val capacity: Int) {
         if (to <= from) return null
         return ShortArray((to - from).toInt()) { data[((from + it) % capacity).toInt()] }
     }
-
-    companion object {
-        /**
-         * Drops the quiet before the first sound and after the last, keeping a
-         * short margin, so a clip cut by line times does not start or end in
-         * dead air. A clip with no sound at all comes back empty.
-         */
-        fun trimSilence(samples: ShortArray, sampleRate: Int, threshold: Int = 500, marginMs: Int = 150): ShortArray {
-            val window = sampleRate / 50
-            fun loud(start: Int): Boolean {
-                var peak = 0
-                for (i in start until minOf(start + window, samples.size)) peak = maxOf(peak, kotlin.math.abs(samples[i].toInt()))
-                return peak >= threshold
-            }
-            var first = 0
-            while (first < samples.size && !loud(first)) first += window
-            if (first >= samples.size) return ShortArray(0)
-            var last = (samples.size - 1) / window * window
-            while (last > first && !loud(last)) last -= window
-            val margin = sampleRate * marginMs / 1000
-            val from = (first - margin).coerceAtLeast(0)
-            val to = (last + window + margin).coerceAtMost(samples.size)
-            return samples.copyOfRange(from, to)
-        }
-    }
 }
 
 /** Holds the screen recording consent and reads the game's sound into [SoundCapture]. */

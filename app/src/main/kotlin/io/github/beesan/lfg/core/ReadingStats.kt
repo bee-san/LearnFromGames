@@ -6,105 +6,172 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /**
- * GameSentenceMiner's reading-time rules (its util/stats/stats_util.py), which
- * need nothing but line times and lengths: the gap after a line counts as
- * reading it, capped at 2.5 times what that line should take at the session's
- * own median pace, and never more than five minutes.
+ * Reading time and speed by Rubi's adaptive rule (Rubi_for_vita's
+ * tools/reading_stats.py and core/history_lines.c, in the same integers).
+ * Lines go in time order across all games, and each is credited the time to
+ * the next one, at most 2.5 times what the game's pace would take for it,
+ * 2 s to 5 minutes. A change of game is a break. There are no sessions.
  */
 object ReadingStats {
-    const val MAX_SEC_PER_CHAR = 3.0
-    const val ABSOLUTE_CEILING = 300.0
-    const val MIN_CHARS_FOR_SPEED = 5
-    const val MIN_GAP_FOR_SPEED = 1.0
-    const val ADAPTIVE_FLOOR_SECONDS = 2.0
-    const val ADAPTIVE_TOLERANCE = 2.5
+    /** The pace is in units of 64 µs a character, in 16 bits; 0 means not learned yet. */
+    private const val PACE_UNIT_SHIFT = 6
+    const val PACE_START = 18_750 // 1.2 s a character, 3,000 an hour
+    const val PACE_MIN = 32
+    private const val PACE_MAX = 0xFFFF
+    private const val CAP_FLOOR_US = 2_000_000L
+    private const val CAP_CEILING_US = 300_000_000L
+    private const val CAP_PER_UNIT_US = 160L // 2.5 × 64 µs
+    private const val PACE_MIN_CHARS = 5
+    private const val PACE_MIN_GAP_US = 1_000_000L
+
+    /** Skip mode: this many lines in a row, of [SKIM_CHARS] or more, each credited under [SKIM_GAP_US]. */
+    private const val SKIM_GAP_US = 1_000_000L
+    private const val SKIM_CHARS = 12
+    private const val SKIM_LINES = 3
 
     /** The day turns over at 04:00, so a session past midnight stays on its evening. */
     const val DAY_STARTS_AT_HOUR = 4L
 
-    /** A gap after a line: how long until the next one, and how long the line was. */
-    data class Gap(val seconds: Double, val chars: Int)
-
-    data class Stamp(val timestamp: Double, val chars: Int, val gameId: String)
+    /** One saved line: when, how many counted characters ([characters]), and whose. */
+    data class Stamp(
+        val timestamp: Double,
+        val chars: Int,
+        val gameId: String,
+        val us: Long = Math.round(timestamp * 1e6),
+    )
 
     data class DayTotals(
         val day: LocalDate,
         val lines: Int,
+        /** Every counted character, skip mode's lines left out. */
         val chars: Int,
+        /** The characters of the lines that got a time: only these count towards speed. */
+        val timedChars: Int,
         val seconds: Double,
     ) {
-        val charsPerHour: Int get() = if (seconds < 1.0) 0 else (chars / seconds * 3600).toInt()
+        val charsPerHour: Int get() = perHour(timedChars, seconds)
     }
 
-    data class GameTotals(val gameId: String, val lines: Int, val chars: Int, val seconds: Double) {
-        val charsPerHour: Int get() = if (seconds < 1.0) 0 else (chars / seconds * 3600).toInt()
-    }
+    fun perHour(timedChars: Int, seconds: Double): Int = if (seconds < 1.0) 0 else (timedChars * 3600.0 / seconds).toInt()
 
     fun dayOf(timestamp: Double, zone: ZoneId): LocalDate =
         Instant.ofEpochMilli((timestamp * 1000).toLong()).atZone(zone).minusHours(DAY_STARTS_AT_HOUR).toLocalDate()
 
-    private fun speedSample(gap: Gap): Double? {
-        if (gap.chars < MIN_CHARS_FOR_SPEED || !gap.seconds.isFinite()) return null
-        if (gap.seconds < MIN_GAP_FOR_SPEED || gap.seconds > ABSOLUTE_CEILING) return null
-        return gap.chars / gap.seconds
-    }
+    /** Unicode 17.0's Han, Hiragana and Katakana letters (and the combining dakuten), first and last code point. */
+    private val JAPANESE_LETTERS = intArrayOf(
+        0x3005, 0x3007, 0x3021, 0x3029, 0x3031, 0x3035, 0x3038, 0x303C, 0x3041, 0x3096,
+        0x3099, 0x309A, 0x309D, 0x309F, 0x30A1, 0x30FA, 0x30FC, 0x30FF, 0x31F0, 0x31FF,
+        0x3400, 0x4DBF, 0x4E00, 0x9FFF, 0xF900, 0xFA6D, 0xFA70, 0xFAD9, 0xFF66, 0xFF9F,
+        0x16FE3, 0x16FE3, 0x16FF2, 0x16FF6, 0x1AFF0, 0x1AFF3, 0x1AFF5, 0x1AFFB, 0x1AFFD, 0x1AFFE,
+        0x1B000, 0x1B122, 0x1B132, 0x1B132, 0x1B150, 0x1B152, 0x1B155, 0x1B155, 0x1B164, 0x1B167,
+        0x20000, 0x2A6DF, 0x2A700, 0x2B81D, 0x2B820, 0x2CEAD, 0x2CEB0, 0x2EBE0, 0x2EBF0, 0x2EE5D,
+        0x2F800, 0x2FA1D, 0x30000, 0x3134A, 0x31350, 0x33479,
+    )
 
-    fun medianCharsPerSecond(gaps: List<Gap>): Double {
-        val speeds = gaps.mapNotNull(::speedSample).sorted()
-        if (speeds.isEmpty()) return 0.0
-        val mid = speeds.size / 2
-        return if (speeds.size % 2 == 1) speeds[mid] else (speeds[mid - 1] + speeds[mid]) / 2.0
-    }
-
-    fun capSeconds(chars: Int, medianCps: Double): Double {
-        if (chars <= 0) return 0.0
-        val cap = if (medianCps.isFinite() && medianCps > 0) {
-            maxOf(ADAPTIVE_FLOOR_SECONDS, chars / medianCps * ADAPTIVE_TOLERANCE)
-        } else {
-            maxOf(ADAPTIVE_FLOOR_SECONDS, chars * MAX_SEC_PER_CHAR)
+    private fun counts(cp: Int): Boolean {
+        if (cp < 0x80) return cp in 0x30..0x39 || cp in 0x41..0x5A || cp in 0x61..0x7A
+        var i = 0
+        while (i < JAPANESE_LETTERS.size && cp >= JAPANESE_LETTERS[i]) {
+            if (cp <= JAPANESE_LETTERS[i + 1]) return true
+            i += 2
         }
-        return minOf(cap, ABSOLUTE_CEILING)
+        return false
     }
 
-    fun readingSeconds(gaps: List<Gap>): Double {
-        val median = medianCharsPerSecond(gaps)
-        return gaps.sumOf { minOf(it.seconds, capSeconds(it.chars, median)) }
+    /** The characters of a line that count as read: Japanese letters and ASCII letters and digits, no punctuation, spaces or symbols. */
+    fun characters(text: String): Int = text.codePoints().filter(::counts).count().toInt()
+
+    data class Credit(val us: Long, val pace: Int)
+
+    /**
+     * The microseconds credited to a line of [chars] characters whose next line
+     * came [gapUs] (> 0) later, and the game's pace after it. The pace is a
+     * running 75th percentile: 3/32 up after a line read more slowly than it,
+     * 1/32 down after one read faster.
+     */
+    fun adaptiveCredit(gapUs: Long, chars: Int, pace: Int): Credit {
+        val gap = minOf(gapUs, 0xFFFFFFFFL)
+        var p = if (pace == 0) PACE_START else pace
+        val expect = p.toLong() * chars
+        val cap = maxOf(if (expect >= CAP_CEILING_US / CAP_PER_UNIT_US) CAP_CEILING_US else expect * CAP_PER_UNIT_US, CAP_FLOOR_US)
+        var after = pace
+        if (chars >= PACE_MIN_CHARS && gap in PACE_MIN_GAP_US..CAP_CEILING_US) {
+            p = if ((gap shr PACE_UNIT_SHIFT) > expect) p + 3 * (p shr 5) else p - (p shr 5)
+            after = p.coerceIn(PACE_MIN, PACE_MAX)
+        }
+        return Credit(minOf(gap, cap), after)
     }
 
     /**
-     * Gaps of one session: lines in time order, each paired with the time to
-     * the next. The last line has no next one, so it is credited its cap at the
-     * session's pace.
+     * [lines]: the microseconds each line was credited (0: none, a break) and
+     * its characters, in order. The indexes of the lines skip mode takes out:
+     * three skimmed lines of 12 or more characters in a row, and every skimmed
+     * line after them, until a line is read or the interval breaks. Shorter
+     * skimmed lines neither count towards the three nor end the run.
      */
-    private fun sessionSeconds(stamps: List<Stamp>): Double {
-        if (stamps.isEmpty()) return 0.0
-        val sorted = stamps.sortedBy { it.timestamp }
-        val gaps = sorted.zipWithNext { a, b -> Gap(b.timestamp - a.timestamp, a.chars) }
-        val median = medianCharsPerSecond(gaps)
-        return readingSeconds(gaps) + capSeconds(sorted.last().chars, median) / ADAPTIVE_TOLERANCE
+    fun skippedLines(lines: List<Pair<Long, Int>>): List<Int> {
+        val out = ArrayList<Int>()
+        val run = ArrayList<Int>()
+        var skip = false
+        lines.forEachIndexed { i, (credit, chars) ->
+            if (credit == 0L || credit >= SKIM_GAP_US) {
+                run.clear()
+                skip = false
+            } else if (skip) {
+                out += i
+            } else if (chars >= SKIM_CHARS) {
+                run += i
+                if (run.size == SKIM_LINES) {
+                    out += run
+                    run.clear()
+                    skip = true
+                }
+            }
+        }
+        return out
     }
 
-    /** A session is one game on one day. Newest day first. */
-    fun byDay(stamps: List<Stamp>, zone: ZoneId): List<DayTotals> =
-        stamps.groupBy { dayOf(it.timestamp, zone) }.map { (day, ofDay) ->
-            DayTotals(
-                day = day,
-                lines = ofDay.size,
-                chars = ofDay.sumOf { it.chars },
-                seconds = ofDay.groupBy { it.gameId }.values.sumOf(::sessionSeconds),
-            )
-        }.sortedByDescending { it.day }
+    /** What one line was given: its time in microseconds (null: none), or skipped (neither characters nor time). */
+    data class Read(val us: Long?, val skipped: Boolean)
 
-    /** Most-read game first. */
-    fun byGame(stamps: List<Stamp>, zone: ZoneId): List<GameTotals> =
-        stamps.groupBy { it.gameId }.map { (game, ofGame) ->
-            GameTotals(
-                gameId = game,
-                lines = ofGame.size,
-                chars = ofGame.sumOf { it.chars },
-                seconds = ofGame.groupBy { dayOf(it.timestamp, zone) }.values.sumOf(::sessionSeconds),
-            )
-        }.sortedByDescending { it.chars }
+    /** [stamps] in time order. */
+    fun credit(stamps: List<Stamp>): List<Read> {
+        val paces = HashMap<String, Int>()
+        val credits = ArrayList<Pair<Long, Int>>(stamps.size)
+        for (i in stamps.indices) {
+            val line = stamps[i]
+            val next = stamps.getOrNull(i + 1)
+            var us = 0L
+            // Another game's line next, the same time or an earlier one: no interval. The last line has none either.
+            if (next != null && next.gameId == line.gameId && next.us > line.us) {
+                val c = adaptiveCredit(next.us - line.us, line.chars, paces[line.gameId] ?: 0)
+                us = c.us
+                paces[line.gameId] = c.pace
+            }
+            credits += us to line.chars
+        }
+        val skipped = skippedLines(credits).toHashSet()
+        return credits.mapIndexed { i, (us, _) -> Read(if (us == 0L || i in skipped) null else us, i in skipped) }
+    }
+
+    /** Newest day first. The pace is learned across the whole history, not day by day. */
+    fun byDay(stamps: List<Stamp>, zone: ZoneId): List<DayTotals> {
+        val sorted = stamps.sortedBy { it.us }
+        val reads = credit(sorted)
+        class Sum(var lines: Int = 0, var chars: Int = 0, var timed: Int = 0, var us: Long = 0)
+        val days = HashMap<LocalDate, Sum>()
+        sorted.forEachIndexed { i, line ->
+            val sum = days.getOrPut(dayOf(line.timestamp, zone)) { Sum() }
+            val read = reads[i]
+            sum.lines++
+            if (!read.skipped) sum.chars += line.chars
+            if (read.us != null) {
+                sum.timed += line.chars
+                sum.us += read.us
+            }
+        }
+        return days.map { (day, s) -> DayTotals(day, s.lines, s.chars, s.timed, s.us / 1e6) }.sortedByDescending { it.day }
+    }
 
     data class Streaks(val current: Int, val longest: Int)
 

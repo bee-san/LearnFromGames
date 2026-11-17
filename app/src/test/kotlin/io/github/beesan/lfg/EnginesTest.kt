@@ -102,16 +102,6 @@ class EnginesTest {
         assertNull(SampleRing(10).clip(0, 1000, 100))
     }
 
-    @Test
-    fun silenceAroundTheSpeechIsTrimmed() {
-        val rate = 1000
-        val samples = ShortArray(3000) { if (it in 1000 until 2000) 8000 else 20 }
-        val trimmed = SampleRing.trimSilence(samples, rate, threshold = 500, marginMs = 100)
-        // One second of sound and a tenth either side.
-        assertTrue("was ${trimmed.size}", trimmed.size in 1180..1240)
-        assertEquals(0, SampleRing.trimSilence(ShortArray(3000) { 20 }, rate).size)
-    }
-
     // ── entries as HTML ──────────────────────────────────────────────────────
 
     private val sense = """[{"content":{"content":[{"content":"to see","tag":"li"},{"content":"to look","tag":"li"}],"data":{"content":"glossary"},"lang":"en","style":{"listStyleType":"circle"},"tag":"ul"},"type":"structured-content"}]"""

@@ -1,18 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -21,20 +29,29 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.anki.AnkiStatus
 import io.github.beesan.lfg.core.ReadingStats
+import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
@@ -43,6 +60,8 @@ import java.text.SimpleDateFormat
 import java.time.ZoneId
 import java.util.Date
 import java.util.Locale
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 @Composable
 private fun Page(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
@@ -94,7 +113,7 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Card("Controls", "The lookup shortcut", { onOpen(Page.CONTROLS) })
     Card("Text recognition", "The engine that reads the game", { onOpen(Page.RECOGNITION) })
     Card("Games", "Rename a game, turn tap strips off for it", { onOpen(Page.GAMES) })
-    Card("Sound and pictures", "Sentence audio and animated pictures on cards", { onOpen(Page.MEDIA) })
+    Card("Sound and pictures", "Sentence audio, spoken lines and animated pictures", { onOpen(Page.MEDIA) })
     Card("Practice line", "Try a lookup and a card without a game", { onOpen(Page.PRACTICE) })
 }
 
@@ -265,13 +284,16 @@ fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit,
 
 @Composable
 fun MediaScreen(prefs: Prefs, recording: Boolean, onChange: ((Prefs) -> Prefs) -> Unit, onStartRecording: () -> Unit, onBack: () -> Unit) = Page("Sound and pictures", onBack) {
-    Card("Sentence audio", "The game's sound from the moment a line appears until the next, added to the card. Android asks for screen recording each session.") {
+    Card("Sentence audio", "The voice in the game’s sound between a line and the next, added to the card. Android asks for screen recording each session.") {
         OnOff(prefs.sentenceAudio) { v -> onChange { it.copy(sentenceAudio = v) } }
     }
     if (prefs.sentenceAudio) {
         Card("This session", if (recording) "Listening to game sound" else "Not listening yet") {
             if (!recording) LfgButton("Start", onStartRecording, primary = true)
         }
+    }
+    Card("Spoken line", "Android’s voice reads the line onto cards with no voice from the game.") {
+        OnOff(prefs.spokenLines) { v -> onChange { it.copy(spokenLines = v) } }
     }
     Card("Animated picture", "The moments around the line as a short moving picture, instead of a still.") {
         OnOff(prefs.animatedPicture) { v -> onChange { it.copy(animatedPicture = v) } }
@@ -283,66 +305,164 @@ private fun duration(seconds: Double): String {
     return if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
 }
 
-/** Screens over the line table: characters, lines and time per day and per game, speed, streaks. */
+/** Reading time, characters, speed and streak over a period, and a bar a day or a month. */
 @Composable
-fun StatsScreen(stats: StatsState, onBack: () -> Unit) = Page("Stats", onBack) {
-    if (stats.days.isEmpty()) {
-        Text("Nothing has been read yet.", color = Lfg.Dim, fontSize = 15.sp)
-        return@Page
-    }
-    val today = remember { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, ZoneId.systemDefault()) }
-    Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-        Figure("%,d".format(stats.chars), "characters")
-        Figure("%,d".format(stats.lines), "lines")
-        Figure(duration(stats.seconds), "reading")
-        Figure(if (stats.seconds < 1) "–" else "%,d".format((stats.chars / stats.seconds * 3600).toInt()), "characters an hour")
-        Figure("${stats.streaks.current}", if (stats.streaks.current == 1) "day in a row" else "days in a row")
-        Figure("${stats.streaks.longest}", "longest run")
-    }
-    Table("By day", stats.days.take(60).map { d ->
-        listOf(MainViewModel.dayLabel(d.day, today), "%,d".format(d.chars), "%,d".format(d.lines), duration(d.seconds), if (d.charsPerHour == 0) "–" else "%,d".format(d.charsPerHour))
-    })
-    Table("By game", stats.games.map { (title, g) ->
-        listOf(title, "%,d".format(g.chars), "%,d".format(g.lines), duration(g.seconds), if (g.charsPerHour == 0) "–" else "%,d".format(g.charsPerHour))
-    })
-    Text(
-        "Reading time counts the gap after each line, capped at 2.5 times what the line should take at that session's own pace and never more than 5 minutes. The day turns over at 04:00.",
-        color = Lfg.Dim, fontSize = 13.sp, lineHeight = 18.sp,
-    )
-}
-
-@Composable
-private fun Figure(value: String, label: String) {
-    Column {
-        Text(value, color = Lfg.Text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-        Text(label, color = Lfg.Dim, fontSize = 13.sp)
-    }
-}
-
-@Composable
-private fun Table(title: String, rows: List<List<String>>) {
-    Column {
-        Text(title, color = Lfg.Text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
-        TableRow(listOf("", "Characters", "Lines", "Time", "Per hour"), header = true)
-        rows.forEach { TableRow(it, header = false) }
-    }
-}
-
-@Composable
-private fun TableRow(cells: List<String>, header: Boolean) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
-        cells.forEachIndexed { i, cell ->
-            Text(
-                cell,
-                color = if (header) Lfg.Dim else Lfg.Text,
-                fontSize = if (header) 13.sp else 15.sp,
-                fontWeight = if (i == 0 && !header) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 1,
-                modifier = Modifier.weight(if (i == 0) 2f else 1f),
+fun StatsScreen(stats: StatsState, onBack: () -> Unit) {
+    var period by rememberSaveable { mutableStateOf(StatsPeriod.DAYS_30) }
+    var showTime by rememberSaveable { mutableStateOf(false) }
+    var picked by remember(period) { mutableIntStateOf(-1) }
+    Page("Stats", onBack, actions = {
+        Choice(StatsPeriod.entries.map { it.name to it.label }, period.name) { period = StatsPeriod.valueOf(it) }
+    }) {
+        if (stats.days.isEmpty()) {
+            Text("Nothing has been read yet.", color = Lfg.Dim, fontSize = 15.sp)
+            return@Page
+        }
+        val today = remember { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, ZoneId.systemDefault()) }
+        val view = remember(stats, period) { period.view(stats.days, today) }
+        val t = view.totals
+        val before = view.before
+        Text(view.range, color = Lfg.Dim, fontSize = 14.sp)
+        HorizontalDivider(color = Lfg.Border)
+        Row(Modifier.fillMaxWidth()) {
+            Tile(
+                "Reading time", durationParts(t.seconds),
+                when {
+                    before != null -> StatsPeriod.change(t.seconds, before.seconds, view.beforeName)
+                    t.seconds > 0 -> duration(t.seconds / view.dayCount) + " a day on average"
+                    else -> ""
+                },
             )
+            Tile("Characters", listOf("%,d".format(t.chars) to ""), if (t.lines == 1) "1 line" else "%,d lines".format(t.lines))
+            Tile(
+                "Speed", listOf((if (t.charsPerHour == 0) "–" else "%,d".format(t.charsPerHour)) to "an hour"),
+                if (before != null && t.charsPerHour > 0) StatsPeriod.change(t.charsPerHour.toDouble(), before.charsPerHour.toDouble(), view.beforeName) else "",
+            )
+            Tile("Streak", listOf("${stats.streaks.current}" to if (stats.streaks.current == 1) "day" else "days"), "Longest ${stats.streaks.longest}")
+        }
+        HorizontalDivider(color = Lfg.Border)
+
+        val value = { b: StatsPeriod.Bar -> if (showTime) b.seconds / 3600 else b.chars.toDouble() }
+        val amount = { b: StatsPeriod.Bar -> if (showTime) duration(b.seconds) else "%,d characters".format(b.chars) }
+        val top = view.bars.maxBy(value)
+        val readout = when {
+            picked in view.bars.indices -> view.bars[picked].let { b -> if (b.chars == 0) "${b.name} · Nothing read" else "${b.name} · ${amount(b)}" }
+            top.chars == 0 -> "Nothing read"
+            else -> "Read on ${view.daysRead} of ${view.dayCount} ${if (view.dayCount == 1) "day" else "days"} · Most: ${amount(top)}, ${top.name}"
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
+            Text(if (period.byDay) "Each day" else "Each month", color = Lfg.Text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(readout, color = Lfg.Dim, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = 16.dp))
+            Choice(listOf("chars" to "Characters", "time" to "Time"), if (showTime) "time" else "chars") { showTime = it == "time" }
+        }
+        BarChart(view.bars.map(value), view.bars.map { it.axis }, showTime, picked, view.bars.map { "${it.name} · ${amount(it)}" }) {
+            picked = if (picked == it) -1 else it
         }
     }
-    HorizontalDivider(color = if (header) Lfg.BorderStrong else Lfg.Border)
+}
+
+/** A figure with its units smaller beside it, under its name. */
+@Composable
+private fun RowScope.Tile(label: String, parts: List<Pair<String, String>>, sub: String) {
+    Column(Modifier.weight(1f).padding(top = 14.dp, bottom = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, color = Lfg.Dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            buildAnnotatedString {
+                parts.forEachIndexed { i, (n, unit) ->
+                    append(n)
+                    if (unit.isNotEmpty()) {
+                        withStyle(SpanStyle(fontSize = 16.sp, color = Lfg.Dim, fontWeight = FontWeight.Normal)) {
+                            append(if (i < parts.size - 1) " $unit " else " $unit")
+                        }
+                    }
+                }
+            },
+            color = Lfg.Text, fontSize = 32.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        )
+        if (sub.isNotEmpty()) Text(sub, color = Lfg.Dim, fontSize = 13.sp)
+    }
+}
+
+/**
+ * Bars on round grid lines, with their labels underneath. A bar is picked
+ * with a tap or the pad, which puts its day in the line above.
+ */
+@Composable
+private fun BarChart(values: List<Double>, axis: List<String>, hours: Boolean, picked: Int, names: List<String>, onPick: (Int) -> Unit) {
+    val (step, lines) = gridFor(values.maxOrNull() ?: 0.0, hours)
+    val height = 200.dp
+    val label = { v: Double ->
+        when {
+            hours && v < 1 -> "${(v * 60).roundToInt()} min"
+            hours -> "${v.roundToInt()} h"
+            v >= 1000 -> (v / 1000).let { if (it % 1.0 == 0.0) "${it.toInt()}k" else "%.1fk".format(it) }
+            else -> v.roundToInt().toString()
+        }
+    }
+    val top = step * lines
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+        Box(Modifier.width(48.dp).height(height)) {
+            for (k in 1..lines) {
+                Text(
+                    label(step * k), color = Lfg.Dim, fontSize = 11.sp, maxLines = 1,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp).offset(y = height * (1 - k.toFloat() / lines) - 7.dp),
+                )
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Box(Modifier.fillMaxWidth().height(height)) {
+                Canvas(Modifier.matchParentSize()) {
+                    for (k in 1..lines) {
+                        val y = size.height * (1 - k.toFloat() / lines)
+                        drawLine(Lfg.Soft, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+                    }
+                    drawLine(Lfg.BorderStrong, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 1.dp.toPx())
+                }
+                Row(Modifier.matchParentSize()) {
+                    values.forEachIndexed { i, v ->
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clickable { onPick(i) }.semantics { contentDescription = names[i] },
+                            contentAlignment = Alignment.BottomCenter,
+                        ) {
+                            val fraction = if (top > 0) (v / top).toFloat().coerceIn(0f, 1f) else 0f
+                            Box(
+                                Modifier.fillMaxWidth(0.7f).widthIn(max = 18.dp).fillMaxHeight(fraction)
+                                    .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                                    .background(if (picked < 0 || picked == i) Lfg.Accent else Lfg.Soft),
+                            )
+                        }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                axis.forEach { a ->
+                    Box(Modifier.weight(1f)) {
+                        Text(
+                            a, color = Lfg.Dim, fontSize = 12.sp, maxLines = 1, softWrap = false,
+                            modifier = Modifier.wrapContentWidth(Alignment.Start, unbounded = true),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A round step and how many lines of it reach the highest bar: up to four. */
+private fun gridFor(max: Double, hours: Boolean): Pair<Double, Int> {
+    val steps = if (hours) {
+        listOf(0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 20.0, 25.0, 50.0, 100.0, 200.0, 250.0, 500.0, 1000.0)
+    } else {
+        generateSequence(1.0) { it * 10 }.take(10).flatMap { sequenceOf(it, it * 2, it * 5) }.toList()
+    }
+    val step = steps.firstOrNull { ceil(max / it) <= 4 } ?: steps.last()
+    return step to ceil(max / step).toInt().coerceAtLeast(1)
+}
+
+/** "23 h 40 min" as numbers and their units. */
+private fun durationParts(seconds: Double): List<Pair<String, String>> {
+    val minutes = (seconds / 60).toLong()
+    return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
 enum class Page { HOME, LINE, STATS, SETTINGS, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }
