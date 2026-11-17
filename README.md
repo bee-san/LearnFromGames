@@ -93,6 +93,28 @@ Everything runs on the device. The only network use is fetching the readers' mod
 - The popup on a one-screen device shows the entry as plain text; full
   rendering is on the panel and in the app.
 
+### How fast it is
+
+`tools/bench.sh` runs the stand-in game through three phases and prints the
+app's CPU use and its own step timings (logcat tag `LfgPerf`). These figures
+are from the release build on a 4-core x86_64 emulator with software graphics,
+at 1080p; they say where the time goes, not what a handheld will show.
+
+| Phase | Before | After |
+| --- | --- | --- |
+| The same line sitting on screen | 31.5% of a core | 7.6% |
+| Advancing a line every 4 s | 48.2% | 40.0% |
+| Advancing and looking a word up | 53.1% | 45.2% |
+| From text read to text tappable | read + 180 ms for the picture | read + 8 ms |
+
+What changed: a picture identical to the last one is not copied or probed
+again (the probe was 110 ms of every look); after ten seconds unchanged the
+screen is looked at half as often; the screenshot is copied off the main
+thread; and the card's picture is written behind the reading instead of in
+front of it. What is left, per look: copying the screenshot out of graphics
+memory (40 ms here), the probe on a changing screen (90 ms), and a full
+reading per new line (320 ms with ScreenAI). A lookup is 4–60 ms.
+
 <details>
 <summary><b>How well it reads</b> (scores on a drawn test set)</summary>
 
@@ -267,7 +289,7 @@ accessibility services while it runs.
   - `ui` — set-up, lines, settings, stats
 - `fakegame` — the stand-in game
 - `third_party/hoshidicts`, `third_party/libwebp` — submodules; `third_party/vocr` — VOCR's runtime, copied
-- `tools` — `build_screenai.sh`, `make_test_screens.py`, `make_ocr_corpus.py`, `score_ocr.py`, `virtual_pad.py`
+- `tools` — `build_screenai.sh`, `make_test_screens.py`, `make_ocr_corpus.py`, `score_ocr.py`, `bench.sh`, `virtual_pad.py`
 
 ## Licences
 

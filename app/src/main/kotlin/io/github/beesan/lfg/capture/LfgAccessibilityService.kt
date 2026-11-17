@@ -19,6 +19,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import io.github.beesan.lfg.App
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.lookup.LookupController
@@ -196,11 +197,18 @@ class LfgAccessibilityService : AccessibilityService() {
 
     // ── pictures ─────────────────────────────────────────────────────────────
 
+    /** Screenshots are copied out of the graphics memory here, not on the thread that draws the overlays. */
+    private val shots = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     private suspend fun captureLoop() {
         var lastFront: String? = null
+        var ticks = 0
+        var stillLooks = 0
         while (scope.isActive) {
-            delay(INTERVAL_MS)
-            val now = findFront()
+            // A screen that has not changed for a while is looked at half as often, until it does.
+            delay(if (stillLooks >= RESTING_AFTER) INTERVAL_MS * 2 else INTERVAL_MS)
+            if (++ticks % PERF_EVERY == 0) Perf.report().takeIf { it.isNotEmpty() }?.let { Log.i("LfgPerf", it) }
+            val now = Perf.measure("front") { findFront() }
             front = now
             if (now?.game?.packageName != lastFront) {
                 lastFront = now?.game?.packageName
@@ -217,18 +225,23 @@ class LfgAccessibilityService : AccessibilityService() {
             val windowShot = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
             // A picture of the whole screen would show our own mark and popup; one of the game's window does not.
             if (!windowShot && overlays.drawingOnGame) continue
+            val shotAt = System.nanoTime()
             val bitmap = (if (windowShot) windowScreenshot(now.windowId) else null)
             val whole = bitmap == null
             val frame = bitmap ?: (if (overlays.drawingOnGame) null else displayScreenshot(now.displayId)) ?: continue
+            Perf.add("shot", System.nanoTime() - shotAt)
             try {
-                withContext(Dispatchers.Default) {
+                val still = withContext(Dispatchers.Default) {
+                    Perf.measure("frame") {
                     pipeline.onFrame(
                         frame, now.game, now.displayId, System.currentTimeMillis(),
                         if (whole) 0 else now.bounds.left, if (whole) 0 else now.bounds.top,
                         // A picture of the game's own window has nothing else in it.
                         if (whole) now.covered else emptyList(),
                     )
+                    }
                 }
+                stillLooks = if (still) stillLooks + 1 else 0
             } catch (e: Exception) {
                 Log.w(TAG, "reading a frame failed", e)
             } finally {
@@ -346,7 +359,7 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun copy(result: ScreenshotResult): Bitmap? {
         val buffer = result.hardwareBuffer
         return try {
-            Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+            Perf.measure("shot.copy") { Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false) }
         } catch (e: Exception) {
             Log.w(TAG, "could not copy the screenshot", e)
             null
@@ -358,7 +371,7 @@ class LfgAccessibilityService : AccessibilityService() {
     /** A software copy of a screen, or null when Android refuses (it allows about three a second). */
     private suspend fun displayScreenshot(displayId: Int): Bitmap? = suspendCancellableCoroutine { continuation ->
         try {
-            takeScreenshot(displayId, mainExecutor, object : TakeScreenshotCallback {
+            takeScreenshot(displayId, shots, object : TakeScreenshotCallback {
                 override fun onSuccess(result: ScreenshotResult) {
                     val bitmap = copy(result)
                     if (continuation.isActive) continuation.resume(bitmap) else bitmap?.recycle()
@@ -379,7 +392,7 @@ class LfgAccessibilityService : AccessibilityService() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return null
         return suspendCancellableCoroutine { continuation ->
             try {
-                takeScreenshotOfWindow(windowId, mainExecutor, object : TakeScreenshotCallback {
+                takeScreenshotOfWindow(windowId, shots, object : TakeScreenshotCallback {
                     override fun onSuccess(result: ScreenshotResult) {
                         val bitmap = copy(result)
                         if (continuation.isActive) continuation.resume(bitmap) else bitmap?.recycle()
@@ -418,6 +431,12 @@ class LfgAccessibilityService : AccessibilityService() {
 
         // Android answers a service's screenshot request at most once per 333 ms.
         private const val INTERVAL_MS = 350L
+
+        /** Timings go to the log (tag LfgPerf) every this many looks at the screen. */
+        private const val PERF_EVERY = 60
+
+        /** Looks at an unchanged screen (about ten seconds of them) before the pace halves. */
+        private const val RESTING_AFTER = 28
         private const val PICTURE_DAYS = 14
         private const val BARS_GRACE_MS = 8_000L
 

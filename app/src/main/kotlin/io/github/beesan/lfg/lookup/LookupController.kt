@@ -97,7 +97,7 @@ class LookupController(
         if (index !in target.text.indices) return
         selecting?.cancel()
         selecting = scope.launch {
-            val entries = lookup(target.text.substring(index))
+            val entries = io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index)) }
             val first = entries.firstOrNull()
             val length = first?.matched?.length ?: Character.charCount(target.text.codePointAt(index))
             val end = (index + length).coerceAtMost(target.text.length)
@@ -187,7 +187,7 @@ class LookupController(
             val lines = _state.value.lines
             val geometry = lines.map { it.geometry ?: TextLine(it.text, io.github.beesan.lfg.core.Box(0, 0, 0, 0), emptyList()) }
             val starts = lines.map { line ->
-                Segmenter.wordStarts(line.text) { rest -> lookup(rest).firstOrNull()?.matched?.length ?: 0 }
+                io.github.beesan.lfg.core.Perf.measure("segment") { Segmenter.wordStarts(line.text) { rest -> lookup(rest).firstOrNull()?.matched?.length ?: 0 } }
             }
             if (_state.value.lines !== lines || !_state.value.controllerMode) return@launch
             val built = TextCursor(geometry, starts)
