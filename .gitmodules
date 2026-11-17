@@ -1,0 +1,6 @@
+[submodule "third_party/hoshidicts"]
+	path = third_party/hoshidicts
+	url = https://github.com/bee-san/hoshidicts.git
+[submodule "third_party/libwebp"]
+	path = third_party/libwebp
+	url = https://github.com/webmproject/libwebp.git

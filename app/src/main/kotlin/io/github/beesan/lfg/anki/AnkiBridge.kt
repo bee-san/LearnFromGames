@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package io.github.beesan.lfg.anki
+
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import com.ichi2.anki.FlashCardsContract
+import com.ichi2.anki.api.AddContentApi
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
+
+/** Where cards go: decided once at set-up, saved, and reused for every card. */
+@Serializable
+data class AnkiTarget(
+    val modelId: Long,
+    val modelName: String,
+    val deckId: Long,
+    val deckName: String,
+    val family: Family,
+    val fields: List<String>,
+    /** True when the app created the note type and deck itself. */
+    val created: Boolean = false,
+)
+
+enum class AnkiStatus { NOT_INSTALLED, NEEDS_PERMISSION, READY }
+
+/**
+ * Everything said to AnkiDroid, through its content provider API. It answers
+ * while AnkiDroid is closed. None of this has run on a device yet: the plan's
+ * "Prove first" list still has AnkiDroid answering after a cold start on AYN
+ * firmware as an open question.
+ */
+class AnkiBridge(private val context: Context) {
+    private val prefs = context.getSharedPreferences("anki", Context.MODE_PRIVATE)
+    private val api by lazy { AddContentApi(context) }
+
+    fun status(): AnkiStatus = when {
+        AddContentApi.getAnkiDroidPackageName(context) == null -> AnkiStatus.NOT_INSTALLED
+        ContextCompat.checkSelfPermission(context, AddContentApi.READ_WRITE_PERMISSION) !=
+            PackageManager.PERMISSION_GRANTED -> AnkiStatus.NEEDS_PERMISSION
+        else -> AnkiStatus.READY
+    }
+
+    var target: AnkiTarget?
+        get() = prefs.getString(KEY_TARGET, null)?.let {
+            try {
+                Json.decodeFromString<AnkiTarget>(it)
+            } catch (_: Exception) {
+                null
+            }
+        }
+        private set(value) {
+            prefs.edit().apply {
+                if (value == null) remove(KEY_TARGET) else putString(KEY_TARGET, Json.encodeToString(value))
+            }.apply()
+        }
+
+    /**
+     * Picks where cards go and saves the choice. Tried in order: an installed
+     * Kiku, Lapis or Senren note type with the deck holding most of its notes;
+     * otherwise a note type and deck of the app's own.
+     */
+    fun chooseTarget(): AnkiTarget {
+        val models = api.modelList ?: emptyMap()
+        val candidates = models.mapNotNull { (id, name) ->
+            if (NoteTypes.family(name) == null) return@mapNotNull null
+            val fields = api.getFieldList(id)?.toList() ?: return@mapNotNull null
+            NoteTypes.Candidate(id, name, fields, noteIds(id, limit = Int.MAX_VALUE).size)
+        }
+        val choice = NoteTypes.choose(candidates)
+        val chosen = if (choice != null) {
+            val deck = busiestDeck(choice.candidate.id) ?: ownDeck()
+            AnkiTarget(choice.candidate.id, choice.candidate.name, deck.first, deck.second, choice.family, choice.candidate.fields)
+        } else {
+            ownTarget(models)
+        }
+        target = chosen
+        return chosen
+    }
+
+    private fun ownTarget(models: Map<Long, String>): AnkiTarget {
+        val deck = ownDeck()
+        val existing = models.entries.firstOrNull { (id, name) ->
+            name == NoteTypes.OWN_MODEL && api.getFieldList(id)?.toList() == NoteTypes.OWN_FIELDS
+        }
+        val modelId = existing?.key ?: api.addNewCustomModel(
+            NoteTypes.OWN_MODEL,
+            NoteTypes.OWN_FIELDS.toTypedArray(),
+            arrayOf("Card 1"),
+            arrayOf(NoteTypes.OWN_FRONT),
+            arrayOf(NoteTypes.OWN_BACK),
+            NoteTypes.OWN_CSS,
+            deck.first,
+            0,
+        ) ?: error("AnkiDroid would not create the note type.")
+        return AnkiTarget(modelId, NoteTypes.OWN_MODEL, deck.first, deck.second, Family.OWN, NoteTypes.OWN_FIELDS, created = existing == null)
+    }
+
+    private fun ownDeck(): Pair<Long, String> {
+        api.deckList?.entries?.firstOrNull { it.value == NoteTypes.OWN_DECK }?.let { return it.key to it.value }
+        val id = api.addNewDeck(NoteTypes.OWN_DECK) ?: error("AnkiDroid would not create the deck.")
+        return id to NoteTypes.OWN_DECK
+    }
+
+    private fun noteIds(modelId: Long, limit: Int): List<Long> {
+        val ids = mutableListOf<Long>()
+        context.contentResolver.query(
+            FlashCardsContract.Note.CONTENT_URI, arrayOf(FlashCardsContract.Note._ID), "mid:$modelId", null, null,
+        )?.use { cursor ->
+            while (cursor.moveToNext() && ids.size < limit) ids += cursor.getLong(0)
+        }
+        return ids
+    }
+
+    /** The deck holding most of a note type's notes, judged from a sample so a large collection stays quick. */
+    private fun busiestDeck(modelId: Long): Pair<Long, String>? {
+        val decks = api.deckList ?: return null
+        val counts = HashMap<Long, Int>()
+        for (noteId in noteIds(modelId, limit = DECK_SAMPLE)) {
+            val cards = Uri.withAppendedPath(FlashCardsContract.Note.CONTENT_URI, "$noteId/cards")
+            context.contentResolver.query(cards, arrayOf(FlashCardsContract.Card.DECK_ID), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) counts.merge(cursor.getLong(0), 1, Int::plus)
+            }
+        }
+        val best = counts.filterKeys { it in decks }.maxByOrNull { it.value } ?: return null
+        return best.key to decks.getValue(best.key)
+    }
+
+    /**
+     * True when nothing in AnkiDroid has ever been through a sync. If the
+     * account already holds cards elsewhere, the first sync keeps one side
+     * only, so it is better done before the first card is made here.
+     */
+    fun neverSynced(): Boolean {
+        context.contentResolver.query(
+            FlashCardsContract.Note.CONTENT_URI, arrayOf(FlashCardsContract.Note.USN), "", null, null,
+        )?.use { cursor ->
+            var seen = 0
+            while (cursor.moveToNext() && seen < 500) {
+                if (cursor.getInt(0) >= 0) return false
+                seen++
+            }
+        }
+        return true
+    }
+
+    /** True when the target's note type and deck are still there with the same fields. */
+    fun targetStillValid(target: AnkiTarget): Boolean =
+        api.getFieldList(target.modelId)?.toList() == target.fields && api.deckList?.containsKey(target.deckId) == true
+
+    fun isDuplicate(target: AnkiTarget, expression: String): Boolean =
+        api.findDuplicateNotes(target.modelId, expression)?.isNotEmpty() == true
+
+    /** Stores a picture in AnkiDroid's media folder and returns the `<img>` tag for the field, or null. */
+    fun addPicture(file: File, preferredName: String): String? = addMedia(file, preferredName, "image")
+
+    private fun addMedia(file: File, preferredName: String, type: String): String? {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+        val anki = AddContentApi.getAnkiDroidPackageName(context) ?: return null
+        context.grantUriPermission(anki, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return try {
+            api.addMediaFromUri(uri, preferredName, type)
+        } finally {
+            context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    /** Stores a sound in AnkiDroid's media folder and returns the `[sound:…]` tag for the field, or null. */
+    fun addSound(file: File, preferredName: String): String? = addMedia(file, preferredName, "audio")
+
+    /**
+     * Sets one field of a note that already exists, leaving the rest as they
+     * are: how a card gains its audio without being remade.
+     */
+    fun setField(noteId: Long, index: Int, value: String): Boolean {
+        val fields = api.getNote(noteId)?.fields ?: return false
+        if (index !in fields.indices) return false
+        fields[index] = value
+        return api.updateNoteFields(noteId, fields)
+    }
+
+    /** Adds the note and returns its id, or null when AnkiDroid refuses it. */
+    fun addNote(target: AnkiTarget, fields: Array<String>, tags: Set<String>): Long? =
+        api.addNote(target.modelId, target.deckId, fields, tags)
+
+    companion object {
+        private const val KEY_TARGET = "target"
+        private const val DECK_SAMPLE = 60
+        const val PERMISSION = AddContentApi.READ_WRITE_PERMISSION
+        const val ANKIDROID_PACKAGE = "com.ichi2.anki"
+    }
+}

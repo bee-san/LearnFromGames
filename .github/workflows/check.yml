@@ -1,0 +1,31 @@
+name: Check
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platforms;android-36 build-tools;36.0.0 ndk;29.0.14206865
+      # hoshidicts needs CMake 3.31; the SDK's own CMake packages are older.
+      - name: CMake and Ninja
+        run: |
+          pipx install cmake==3.31.6
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          cmake --version
+      - uses: gradle/actions/setup-gradle@v4
+      # Without ScreenAI's library the app still builds and reads with meikiocr; the meikiocr
+      # tests skip themselves when the models are not in the Hugging Face cache.
+      - run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :fakegame:assembleDebug

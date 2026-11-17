@@ -1,0 +1,16 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+.cxx/
+app/release/
+/host-build/
+# Built by tools/build_screenai.sh; not kept in git.
+app/src/main/jniLibs/
+/arm64-tests/
+# The release key and where to find it.
+keystore.properties
+*.jks
+*.keystore

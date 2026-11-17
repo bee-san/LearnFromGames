@@ -1,0 +1,15 @@
+--- a/cpp/src/recognizer.cc
++++ b/cpp/src/recognizer.cc
+@@ -1139,6 +1139,12 @@
+     }
+     order = kept;
+     for (const auto& [key, which] : second) {
++      // LearnFromGames: a second-pass recognizer whose files are not installed (only the Japanese ones are)
++      // leaves these lines with their first-pass result instead of failing the whole page.
++      if (!Get(key)) {
++        order.insert(order.end(), which.begin(), which.end());
++        continue;
++      }
+       if (!run_pass(key, which)) return false;
+       order.insert(order.end(), which.begin(), which.end());
+     }

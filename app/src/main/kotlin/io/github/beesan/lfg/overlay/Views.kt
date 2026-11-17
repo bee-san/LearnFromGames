@@ -1,0 +1,207 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package io.github.beesan.lfg.overlay
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.BackgroundColorSpan
+import android.text.style.ForegroundColorSpan
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import io.github.beesan.lfg.dict.Entry
+import io.github.beesan.lfg.lookup.CardButton
+import io.github.beesan.lfg.lookup.LookupState
+
+/** The app's palette as plain colour ints, for the Views drawn over the game. */
+internal object Ink {
+    const val BG = 0xFF22232C.toInt()
+    const val SURFACE = 0xFF2B2B36.toInt()
+    const val BORDER = 0xFF454653.toInt()
+    const val BORDER_STRONG = 0xFF747586.toInt()
+    const val TEXT = 0xFFE8E5EB.toInt()
+    const val DIM = 0xFFAAA8B2.toInt()
+    const val ACCENT = 0xFFB1A5EE.toInt()
+    const val FILL = 0xFFA89CE4.toInt()
+    const val SOFT = 0xFF353247.toInt()
+    const val ON_FILL = 0xFF211D30.toInt()
+    const val WASH = 0x3DB1A5EE
+}
+
+internal fun Context.dp(value: Float): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics).toInt()
+
+internal fun rounded(fill: Int, stroke: Int, radius: Float, strokeWidth: Int = 1) = GradientDrawable().apply {
+    setColor(fill)
+    cornerRadius = radius
+    if (strokeWidth > 0) setStroke(strokeWidth, stroke)
+}
+
+internal fun Context.label(sizeSp: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
+    setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
+    setTextColor(color)
+    if (bold) typeface = Typeface.DEFAULT_BOLD
+    includeFontPadding = false
+}
+
+/** The Add card button. A plain TextView: a Button would want focus, and nothing here may take it. */
+@SuppressLint("ViewConstructor")
+internal class CardButtonView(context: Context, onPress: () -> Unit) : TextView(context) {
+    init {
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        minHeight = context.dp(44f)
+        setPadding(context.dp(18f), 0, context.dp(18f), 0)
+        isFocusable = false
+        setOnClickListener { onPress() }
+        show(CardButton.ADD)
+    }
+
+    fun show(state: CardButton) {
+        val enabled = state == CardButton.ADD
+        text = when (state) {
+            CardButton.ADD -> "Add card"
+            CardButton.ADDING -> "Adding…"
+            CardButton.IN_ANKI -> "In Anki"
+            CardButton.WAITING -> "Waiting for AnkiDroid"
+        }
+        isEnabled = enabled
+        setTextColor(if (enabled) Ink.ON_FILL else Ink.DIM)
+        background = rounded(if (enabled) Ink.FILL else Ink.SOFT, if (enabled) Ink.FILL else Ink.SOFT, context.dp(5f).toFloat())
+    }
+}
+
+/** One dictionary entry as text: the headword, its reading, how it was inflected, and the senses. */
+internal class EntryView(context: Context) : LinearLayout(context) {
+    private val term = context.label(28f, Ink.TEXT, bold = true)
+    private val reading = context.label(15f, Ink.DIM)
+    private val path = context.label(12.5f, Ink.DIM)
+    private val senses = context.label(15f, Ink.TEXT)
+    private val scroll = ScrollView(context)
+
+    init {
+        orientation = VERTICAL
+        val head = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.BOTTOM
+            addView(term)
+            addView(reading, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f); bottomMargin = context.dp(3f) })
+        }
+        addView(head)
+        addView(path, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(2f) })
+        senses.setLineSpacing(context.dp(3f).toFloat(), 1f)
+        scroll.isVerticalScrollBarEnabled = false
+        scroll.isFocusable = false
+        scroll.addView(senses)
+        addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = context.dp(6f) })
+    }
+
+    fun show(entry: Entry?, message: String?) {
+        if (entry == null) {
+            term.text = ""
+            reading.text = ""
+            path.text = ""
+            senses.text = message ?: ""
+            return
+        }
+        term.text = entry.expression
+        reading.text = if (entry.reading != entry.expression) entry.reading else ""
+        path.text = entry.path
+        path.visibility = if (entry.path.isEmpty()) View.GONE else View.VISIBLE
+        senses.text = entry.senses().mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n")
+        scroll.scrollTo(0, 0)
+    }
+
+    /** The right stick scrolls the entry. */
+    fun scrollBy(dy: Int) = scroll.smoothScrollBy(0, dy)
+
+    /** For a wrapped height: the popup grows with the entry up to a cap rather than filling its window. */
+    fun wrapSenses(maxHeight: Int) {
+        scroll.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6f) }
+        senses.maxHeight = maxHeight
+    }
+}
+
+/**
+ * The lines on screen as text, each character tappable, with the looked-up
+ * word marked. This is the bottom-screen twin of the tap strips over the game.
+ */
+@SuppressLint("ViewConstructor")
+/** More pieces of text than this on screen is a menu or a page, not a dialogue box. */
+private const val MANY = 4
+
+internal class LinesView(context: Context, private val onTap: (line: Int, index: Int) -> Unit) : TextView(context) {
+    private var starts = IntArray(0)
+    private var texts: List<String> = emptyList()
+
+    /** Which of the state's lines each shown one is. */
+    private var shown = IntArray(0)
+
+    init {
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 21f)
+        setTextColor(Ink.TEXT)
+        setLineSpacing(context.dp(8f).toFloat(), 1f)
+        isFocusable = false
+    }
+
+    fun show(state: LookupState) {
+        // A dialogue box is a line or two and is shown whole. A menu is dozens of pieces of text:
+        // once a word is picked in it, only its own piece is shown, so the entry stays on screen.
+        shown = if (state.selected && state.lines.size > MANY) intArrayOf(state.line) else IntArray(state.lines.size) { it }
+        texts = shown.map { state.lines[it].text }
+        starts = IntArray(texts.size)
+        val joined = StringBuilder()
+        texts.forEachIndexed { i, t ->
+            if (i > 0) joined.append('\n')
+            starts[i] = joined.length
+            joined.append(t)
+        }
+        val span = SpannableString(joined)
+        val at = shown.indexOf(state.line)
+        if (state.selected && at >= 0 && state.spanEnd > state.spanStart) {
+            val from = starts[at] + state.spanStart
+            val to = starts[at] + state.spanEnd
+            span.setSpan(BackgroundColorSpan(Ink.WASH), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            span.setSpan(ForegroundColorSpan(Ink.ACCENT), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        text = span
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) return true
+        if (event.actionMasked != MotionEvent.ACTION_UP) return super.onTouchEvent(event)
+        val layout = layout ?: return true
+        val x = event.x - totalPaddingLeft + scrollX
+        val y = event.y - totalPaddingTop + scrollY
+        val row = layout.getLineForVertical(y.toInt())
+        if (y < 0 || y > layout.height || x < layout.getLineLeft(row) || x > layout.getLineRight(row)) return true
+        // The caret nearest the touch sits on one side of the character under it.
+        var offset = layout.getOffsetForHorizontal(row, x)
+        if (offset > layout.getLineStart(row) && layout.getPrimaryHorizontal(offset) > x) offset--
+        val line = starts.indexOfLast { it <= offset }
+        if (line < 0) return true
+        val index = offset - starts[line]
+        if (index in texts[line].indices) onTap(shown[line], if (Character.isLowSurrogate(texts[line][index]) && index > 0) index - 1 else index)
+        return true
+    }
+}
+
+/** `A Add card · B Close · ◀ ▶ Word · ▲ ▼ Line`: what replaces the button while the controller drives. */
+internal fun Context.keyHints(confirm: String, close: String): TextView = label(12.5f, Ink.DIM).apply {
+    text = "$confirm Add card    $close Close    ◀ ▶ Word    ▲ ▼ Line    L1 R1 Entry"
+    setPadding(0, dp(6f), 0, 0)
+}
+
+internal fun wrap() = ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+
+internal val TRANSPARENT = Color.TRANSPARENT

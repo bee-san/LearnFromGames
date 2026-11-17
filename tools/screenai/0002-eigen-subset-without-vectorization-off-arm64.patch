@@ -1,0 +1,14 @@
+--- a/cpp/src/recognizer_curve.cc
++++ b/cpp/src/recognizer_curve.cc
+@@ -11,6 +11,11 @@
+ // The thin-plate-spline system is solved with the same Eigen version and float mode as the original (vendored in
+ // third_party/eigen; other Eigen versions round differently). The namespace is renamed so these template
+ // instantiations never merge with the (older) Eigen inside the TensorFlow Lite libraries.
++// LearnFromGames: the vendored Eigen subset only carries the arm64 (NEON) packet headers, so on other targets
++// (the x86_64 Android build) Eigen is used without explicit vectorization. arm64 is unchanged.
++#if !defined(__aarch64__)
++#define EIGEN_DONT_VECTORIZE
++#endif
+ #define Eigen screenai_eigen
+ #include "../../third_party/eigen/Eigen/Core"
+ #include "../../third_party/eigen/Eigen/LU"
