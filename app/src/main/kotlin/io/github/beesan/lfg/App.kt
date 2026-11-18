@@ -10,6 +10,7 @@ import io.github.beesan.lfg.data.LfgDatabase
 import io.github.beesan.lfg.data.LineStore
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionaryRepository
+import io.github.beesan.lfg.dict.WordAudio
 import io.github.beesan.lfg.dict.DictionaryWorker
 import io.github.beesan.lfg.ocr.ModelStore
 import io.github.beesan.lfg.widget.StatsWidgets
@@ -28,10 +29,11 @@ class App : Application() {
     val database by lazy { LfgDatabase.open(this) }
     val lines by lazy { LineStore(database) { StatsWidgets.requestUpdate(this) } }
     val dictionaries by lazy { DictionaryRepository(this) }
+    val wordAudio by lazy { WordAudio(this) }
     val anki by lazy { AnkiBridge(this) }
     val settings by lazy { Settings(this) }
     val media by lazy { MediaAttacher(this, scope, anki, database, { settings.prefs.value }, Speech(this)) }
-    val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media")) }
+    val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media"), wordAudio) }
     val models by lazy { ModelStore(this) }
 
     override fun onCreate() {

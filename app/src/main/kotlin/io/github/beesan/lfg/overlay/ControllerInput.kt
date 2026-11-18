@@ -82,6 +82,7 @@ class ControllerInput(
             confirm, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (down && event.repeatCount == 0) controller.addCard()
             close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) onClose()
             // On release, and not when the two were the shortcut being pressed.
+            KeyEvent.KEYCODE_BUTTON_Y -> if (down && event.repeatCount == 0) controller.playAudio()
             KeyEvent.KEYCODE_BUTTON_L1 -> if (!down && !chordActive()) controller.previousEntry()
             KeyEvent.KEYCODE_BUTTON_R1 -> if (!down && !chordActive()) controller.nextEntry()
             else -> return KeyEvent.isGamepadButton(event.keyCode)

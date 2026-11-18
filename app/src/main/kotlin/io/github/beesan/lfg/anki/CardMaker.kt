@@ -6,6 +6,7 @@ import io.github.beesan.lfg.capture.FrameRing
 import io.github.beesan.lfg.data.Card
 import io.github.beesan.lfg.data.LfgDatabase
 import io.github.beesan.lfg.data.LineStore
+import io.github.beesan.lfg.dict.WordAudio
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -33,6 +34,7 @@ class CardMaker(
     private val prefs: () -> Prefs,
     private val media: MediaAttacher,
     private val mediaDir: File,
+    private val wordAudio: WordAudio? = null,
 ) {
     suspend fun add(lineId: String, content: CardContent): CardResult = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -88,7 +90,16 @@ class CardMaker(
         val picture = moving ?: content.picturePath?.let(::File)?.takeIf { it.isFile }
         val pictureHtml = picture?.let { anki.addPicture(it, pictureName) } ?: ""
         moving?.delete()
-        val fields = NoteTypes.fill(target.family, target.fields, content, pictureHtml)
+        // The word said by a person, from the word audio, when the note type has a field for it.
+        val soundName = "lfg_word_${card.createdAt}"
+        val sound = if (wordAudio != null && NoteTypes.hasWordAudioField(target.family, target.fields)) {
+            wordAudio.export(content.expression, content.reading, mediaDir, soundName)
+        } else {
+            null
+        }
+        val soundTag = sound?.let { anki.addSound(it, soundName) } ?: ""
+        sound?.delete()
+        val fields = NoteTypes.fill(target.family, target.fields, content, pictureHtml, soundTag)
         val noteId = anki.addNote(target, fields, setOf("LFG", NoteTypes.gameTag(content.gameName)))
         if (noteId == null) {
             db.cards().update(card.copy(state = Card.STATE_FAILED))

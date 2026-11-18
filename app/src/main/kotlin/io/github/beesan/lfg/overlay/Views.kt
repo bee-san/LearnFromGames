@@ -18,7 +18,9 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import io.github.beesan.lfg.App
 import io.github.beesan.lfg.dict.Entry
+import io.github.beesan.lfg.dict.Pronunciation
 import io.github.beesan.lfg.lookup.CardButton
 import io.github.beesan.lfg.lookup.LookupState
 
@@ -85,6 +87,9 @@ internal class EntryView(context: Context) : LinearLayout(context) {
     private val term = context.label(28f, Ink.TEXT, bold = true)
     private val reading = context.label(15f, Ink.DIM)
     private val path = context.label(12.5f, Ink.DIM)
+    private val meta = context.label(12.5f, Ink.DIM)
+    private val audio = (context.applicationContext as? App)?.wordAudio
+    private var shown: Entry? = null
     private val senses = context.label(15f, Ink.TEXT)
     private val scroll = ScrollView(context)
 
@@ -97,6 +102,9 @@ internal class EntryView(context: Context) : LinearLayout(context) {
             addView(reading, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f); bottomMargin = context.dp(3f) })
         }
         addView(head)
+        // A tap on the word says it, when there is word audio for it.
+        head.setOnClickListener { shown?.let { audio?.play(it) } }
+        addView(meta, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(2f) })
         addView(path, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(2f) })
         senses.setLineSpacing(context.dp(3f).toFloat(), 1f)
         scroll.isVerticalScrollBarEnabled = false
@@ -110,11 +118,16 @@ internal class EntryView(context: Context) : LinearLayout(context) {
             term.text = ""
             reading.text = ""
             path.text = ""
+            meta.visibility = View.GONE
+            shown = null
             senses.text = message ?: ""
             return
         }
         term.text = entry.expression
-        reading.text = if (entry.reading != entry.expression) entry.reading else ""
+        shown = entry
+        reading.text = (if (entry.reading != entry.expression) entry.reading else "") + if (audio?.has(entry) == true) "  🔊" else ""
+        meta.text = Pronunciation.summary(entry)
+        meta.visibility = if (meta.text.isEmpty()) View.GONE else View.VISIBLE
         path.text = entry.path
         path.visibility = if (entry.path.isEmpty()) View.GONE else View.VISIBLE
         senses.text = entry.senses().mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n")
@@ -198,7 +211,7 @@ internal class LinesView(context: Context, private val onTap: (line: Int, index:
 
 /** `A Add card · B Close · ◀ ▶ Word · ▲ ▼ Line`: what replaces the button while the controller drives. */
 internal fun Context.keyHints(confirm: String, close: String): TextView = label(12.5f, Ink.DIM).apply {
-    text = "$confirm Add card    $close Close    ◀ ▶ Word    ▲ ▼ Line    L1 R1 Entry"
+    text = "$confirm Add card    $close Close    Y Listen    ◀ ▶ Word    ▲ ▼ Line    L1 R1 Entry"
     setPadding(0, dp(6f), 0, 0)
 }
 

@@ -33,6 +33,21 @@ data class Glossary(
     val termTags: String = "",
 )
 
+@Serializable
+data class FrequencyValue(val value: Int = 0, val display: String = "")
+
+/** One frequency dictionary's figures for an entry. */
+@Serializable
+data class Frequency(val dictionary: String = "", val values: List<FrequencyValue> = emptyList())
+
+/** One pitch accent: the mora after which the pitch drops (0 for none), or a pattern of H and L. */
+@Serializable
+data class PitchValue(val position: Int = 0, val pattern: String = "")
+
+/** One pitch dictionary's accents for an entry. */
+@Serializable
+data class Pitch(val dictionary: String = "", val values: List<PitchValue> = emptyList())
+
 /** One dictionary entry found from a character of a line. */
 @Serializable
 data class Entry(
@@ -46,6 +61,8 @@ data class Entry(
     val rules: String = "",
     val score: Int = 0,
     val glossaries: List<Glossary> = emptyList(),
+    val frequencies: List<Frequency> = emptyList(),
+    val pitches: List<Pitch> = emptyList(),
 ) {
     /** `見た → 見る · past`, or empty when the word was not inflected. */
     val path: String

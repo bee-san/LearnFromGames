@@ -12,6 +12,8 @@ import io.github.beesan.lfg.core.TextCursor
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.data.LineStore
 import io.github.beesan.lfg.dict.Entry
+import io.github.beesan.lfg.dict.Pronunciation
+import io.github.beesan.lfg.dict.WordAudio
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,6 +69,7 @@ class LookupController(
     private val cards: CardMaker,
     private val anki: AnkiBridge,
     private val store: LineStore,
+    private val audio: WordAudio? = null,
 ) {
     private val _state = MutableStateFlow(LookupState())
     val state: StateFlow<LookupState> = _state
@@ -128,6 +131,11 @@ class LookupController(
         _state.update { if (it.entry === entry && it.button == CardButton.ADD) it.copy(button = CardButton.IN_ANKI) else it }
     }
 
+    /** Says the shown word, from the word audio when it is installed. */
+    fun playAudio() {
+        _state.value.entry?.let { audio?.play(it) }
+    }
+
     fun nextEntry() = stepEntry(+1)
     fun previousEntry() = stepEntry(-1)
 
@@ -149,6 +157,8 @@ class LookupController(
             val content = CardContent(
                 expression = entry.expression, reading = entry.reading, sentence = line.text,
                 spanStart = state.spanStart, spanEnd = state.spanEnd, senses = entry.senses(),
+                pitchPositions = Pronunciation.accents(entry).map { it.position },
+                frequencyRank = Pronunciation.frequencyRank(entry),
                 gameName = line.gameName, picturePath = line.framePath, lineStartMs = line.appearedAtMs,
             )
             val result = cards.add(lineId, content)

@@ -118,7 +118,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsState())
 
     /** Lookup in a stored line, for a card made after the session. */
-    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines)
+    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio)
 
     private val _styles = MutableStateFlow<List<EntryHtml.Style>>(emptyList())
     val styles: StateFlow<List<EntryHtml.Style>> = _styles
@@ -135,6 +135,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch { LfgAccessibilityService.running.collect { refresh() } }
+        viewModelScope.launch { app.wordAudio.refreshInfo() }
         viewModelScope.launch {
             dictionary.collect {
                 _styles.value = app.dictionaries.styles()
@@ -288,6 +289,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     } catch (_: Exception) {
         null
     } ?: ""
+
+    val wordAudio = app.wordAudio.info
+
+    /** "Add word audio…": local-audio-yomichan's android.db, copied in. */
+    fun addWordAudio(uri: Uri) {
+        if (_dictionaries.value.busy) return
+        _dictionaries.value = DictionariesState(busy = true, progress = "Copying word audio…")
+        viewModelScope.launch {
+            val error = app.wordAudio.install({ app.contentResolver.openInputStream(uri) }) {
+                _dictionaries.value = DictionariesState(busy = true, progress = it)
+            }
+            _dictionaries.value = DictionariesState(error = error)
+        }
+    }
+
+    fun removeWordAudio() = viewModelScope.launch(Dispatchers.IO) { app.wordAudio.remove() }
 
     fun moveDictionary(title: String, up: Boolean) = viewModelScope.launch { app.dictionaries.move(title, up) }
     fun removeDictionary(title: String) = viewModelScope.launch { app.dictionaries.remove(title) }

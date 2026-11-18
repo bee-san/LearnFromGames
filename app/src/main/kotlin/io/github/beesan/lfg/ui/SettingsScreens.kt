@@ -59,6 +59,7 @@ import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
+import io.github.beesan.lfg.dict.WordAudio
 import io.github.beesan.lfg.ocr.ModelState
 import java.text.SimpleDateFormat
 import java.time.ZoneId
@@ -130,6 +131,9 @@ fun DictionariesScreen(
     onMove: (String, Boolean) -> Unit,
     onRemove: (String) -> Unit,
     onSources: () -> Unit,
+    wordAudio: WordAudio.Info?,
+    onAddAudio: () -> Unit,
+    onRemoveAudio: () -> Unit,
     onBack: () -> Unit,
 ) = Page("Dictionaries", onBack, actions = { LfgButton(if (busy.busy) "Adding…" else "Add dictionary…", onAdd, primary = true, enabled = !busy.busy) }) {
     val date = remember { SimpleDateFormat("d MMMM yyyy", Locale.getDefault()) }
@@ -147,6 +151,20 @@ fun DictionariesScreen(
     Row {
         Text("Entries show in this order. ", color = Lfg.Dim, fontSize = 14.sp)
         Text("Show sources", color = Lfg.Accent, fontSize = 14.sp, modifier = Modifier.clickable(onClick = onSources))
+    }
+    HorizontalDivider(color = Lfg.Border)
+    if (wordAudio == null) {
+        Card(
+            "Word audio",
+            "Words said by people, from the android.db that the Local Audio Server add-on for Anki makes on a computer. " +
+                "Copy it to this device and add it; LFG keeps its own copy, so the one you picked can be deleted after. Entries get a " +
+                "play button, Y says the word in a game, and cards get it in their ExpressionAudio field.",
+        ) { LfgButton("Add android.db…", onAddAudio, enabled = !busy.busy) }
+    } else {
+        Card("Word audio", wordAudio.summary + " · from local-audio-yomichan") {
+            LfgButton("Replace…", onAddAudio, enabled = !busy.busy)
+            LfgButton("Remove", onRemoveAudio, enabled = !busy.busy)
+        }
     }
 }
 
@@ -206,7 +224,7 @@ fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: (
     Card("Entry on the other screen", "On a two-screen handheld the entry shows on the screen the game is not on.") {
         OnOff(prefs.secondScreenPanel) { v -> onChange { it.copy(secondScreenPanel = v) } }
     }
-    Text("In lookup: D-pad ◀ ▶ word, ▲ ▼ line, left stick one character, L1 R1 entry, right stick scroll.", color = Lfg.Dim, fontSize = 14.sp)
+    Text("In lookup: D-pad ◀ ▶ word, ▲ ▼ line, left stick one character, L1 R1 entry, Y listen to the word, right stick scroll.", color = Lfg.Dim, fontSize = 14.sp)
 }
 
 private fun modelStatus(state: ModelState, ready: String) = when (state) {

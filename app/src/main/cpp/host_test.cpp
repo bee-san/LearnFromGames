@@ -23,6 +23,9 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "could not open %s\n", argv[2]);
       return 1;
     }
+    // Its frequencies and pitch accents too; a dictionary without them is refused for those, which is fine here.
+    session.add_dictionary(argv[2], lfg::DictKind::Frequency);
+    session.add_dictionary(argv[2], lfg::DictKind::Pitch);
     std::puts(session.lookup(argv[3], 8, 16).c_str());
     return 0;
   }

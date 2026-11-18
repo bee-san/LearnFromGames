@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
             val styles by model.styles.collectAsStateWithLifecycle()
             val dictionaries by model.dictionaries.collectAsStateWithLifecycle()
             val sources by model.sources.collectAsStateWithLifecycle()
+            val wordAudio by model.wordAudio.collectAsStateWithLifecycle()
             val recording by SoundCapture.running.collectAsStateWithLifecycle()
             var page by rememberSaveable { mutableStateOf(Page.HOME) }
             val saved = rememberSaveableStateHolder()
@@ -72,6 +73,9 @@ class MainActivity : ComponentActivity() {
             }
             val pickZip = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) model.addDictionary(uri)
+            }
+            val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                if (uri != null) model.addWordAudio(uri)
             }
             val recordConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                 val data = result.data
@@ -169,6 +173,9 @@ class MainActivity : ComponentActivity() {
                             onMove = { title, up -> model.moveDictionary(title, up) },
                             onRemove = { model.removeDictionary(it) },
                             onSources = { page = Page.SOURCES },
+                            wordAudio = wordAudio,
+                            onAddAudio = { pickAudio.launch(arrayOf("*/*")) },
+                            onRemoveAudio = { model.removeWordAudio() },
                             onBack = ::back,
                         )
                         page == Page.SOURCES -> SourcesScreen(sources, ::back)

@@ -20,6 +20,10 @@ data class CardContent(
     val picturePath: String? = null,
     /** When the line began to appear on screen, if it was read from a game just now: where its sound starts. */
     val lineStartMs: Long? = null,
+    /** Where the word's pitch drops, one per accent the pitch dictionaries give. */
+    val pitchPositions: List<Int> = emptyList(),
+    /** The word's frequency rank, averaged over the frequency dictionaries, for sorting. */
+    val frequencyRank: Int? = null,
 )
 
 enum class Family { SENREN, LAPIS, KIKU, OWN }
@@ -44,19 +48,20 @@ object NoteTypes {
         "Expression", "ExpressionReading", "MainDefinition", "Sentence", "Picture", "SentenceAudio", "Glossary", "MiscInfo",
     )
 
-    private enum class Slot { EXPRESSION, READING, FURIGANA, DEFINITION, GLOSSARY, SENTENCE, PICTURE, AUDIO, MISC }
+    private enum class Slot { EXPRESSION, READING, FURIGANA, DEFINITION, GLOSSARY, SENTENCE, PICTURE, AUDIO, WORD_AUDIO, PITCH, FREQUENCY, MISC }
 
     private val KIKU_LAPIS = mapOf(
         "Expression" to Slot.EXPRESSION, "ExpressionReading" to Slot.READING, "ExpressionFurigana" to Slot.FURIGANA,
         "MainDefinition" to Slot.DEFINITION, "Glossary" to Slot.GLOSSARY, "Sentence" to Slot.SENTENCE,
-        "Picture" to Slot.PICTURE, "SentenceAudio" to Slot.AUDIO, "MiscInfo" to Slot.MISC,
+        "Picture" to Slot.PICTURE, "SentenceAudio" to Slot.AUDIO, "ExpressionAudio" to Slot.WORD_AUDIO,
+        "PitchPosition" to Slot.PITCH, "FreqSort" to Slot.FREQUENCY, "MiscInfo" to Slot.MISC,
     )
 
     // Senren's names are matched without case or punctuation, as Hachidori's fieldKey does.
     private val SENREN = mapOf(
         "word" to Slot.EXPRESSION, "reading" to Slot.READING, "definition" to Slot.DEFINITION,
         "glossary" to Slot.GLOSSARY, "sentence" to Slot.SENTENCE, "picture" to Slot.PICTURE, "sentenceaudio" to Slot.AUDIO,
-        "miscinfo" to Slot.MISC,
+        "wordaudio" to Slot.WORD_AUDIO, "pitchpositions" to Slot.PITCH, "freqsort" to Slot.FREQUENCY, "miscinfo" to Slot.MISC,
     )
 
     private fun fieldKey(name: String) = name.lowercase().filter { it.isLetterOrDigit() }
@@ -91,7 +96,7 @@ object NoteTypes {
         }.sortedWith(compareByDescending<Choice> { it.candidate.noteCount }.thenBy { it.candidate.id }).firstOrNull()
 
     /** The value of every field of the note type, in its own order. Unmapped fields stay empty. */
-    fun fill(family: Family, fields: List<String>, content: CardContent, pictureHtml: String = ""): Array<String> {
+    fun fill(family: Family, fields: List<String>, content: CardContent, pictureHtml: String = "", wordAudio: String = ""): Array<String> {
         val lookupFamily = if (family == Family.OWN) Family.LAPIS else family
         val definition = definitionHtml(content.senses)
         val hasDefinitionField = fields.any { slotOf(lookupFamily, it) == Slot.DEFINITION }
@@ -114,10 +119,24 @@ object NoteTypes {
                 Slot.PICTURE -> pictureHtml
                 // Sound arrives after the card: it is cut when the next line appears.
                 Slot.AUDIO -> ""
+                Slot.WORD_AUDIO -> wordAudio
+                // Yomitan's {pitch-accent-positions}: one number alone, several as a list.
+                Slot.PITCH -> when (content.pitchPositions.size) {
+                    0 -> ""
+                    1 -> content.pitchPositions[0].toString()
+                    else -> content.pitchPositions.joinToString("", "<ol>", "</ol>") { "<li>$it</li>" }
+                }
+                Slot.FREQUENCY -> content.frequencyRank?.toString() ?: ""
                 Slot.MISC -> Sentence.escapeHtml(content.gameName)
                 null -> ""
             }
         }.toTypedArray()
+    }
+
+    /** Whether the note type has a field for the word's own sound. */
+    fun hasWordAudioField(family: Family, fields: List<String>): Boolean {
+        val lookupFamily = if (family == Family.OWN) Family.LAPIS else family
+        return fields.any { slotOf(lookupFamily, it) == Slot.WORD_AUDIO }
     }
 
     /** Which field of the note type takes the sentence's sound, if it has one. */

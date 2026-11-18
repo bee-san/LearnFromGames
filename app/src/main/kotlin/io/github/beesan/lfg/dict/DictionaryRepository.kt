@@ -29,7 +29,7 @@ data class InstalledDictionary(
     /** What the dictionary holds, for its row: `Japanese–English terms`-style detail is not stored, so counts are shown. */
     val summary: String
         get() = listOfNotNull(
-            terms.takeIf { it > 0 }?.let { "%,d terms".format(it) },
+            terms.takeIf { it > 0 }?.let { "%,d %s".format(it, if (it == 1L) "term" else "terms") },
             frequencies.takeIf { it > 0 }?.let { "frequencies" },
             pitches.takeIf { it > 0 }?.let { "pitch accents" },
             kanji.takeIf { it > 0 }?.let { "%,d kanji".format(it) },

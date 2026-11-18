@@ -101,6 +101,25 @@ void append_term(std::string& out, const hd_lookup_result& r) {
     }
     out += "]}";
   }
+  out += "],";
+  key(out, "pitches");
+  out.push_back('[');
+  for (size_t i = 0; i < t.pitches_count; ++i) {
+    if (i) out.push_back(',');
+    const hd_pitch_entry& p = t.pitches[i];
+    out.push_back('{');
+    field(out, "dictionary", view(p.dict_name));
+    key(out, "values");
+    out.push_back('[');
+    for (size_t j = 0; j < p.pitches_count; ++j) {
+      if (j) out.push_back(',');
+      out.push_back('{');
+      number(out, "position", p.pitches[j].position);
+      field(out, "pattern", view(p.pitches[j].pattern), false);
+      out.push_back('}');
+    }
+    out += "]}";
+  }
   out += "]}";
 }
 

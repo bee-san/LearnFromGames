@@ -74,7 +74,7 @@ class LfgAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         app = application as App
         pipeline = ReadingPipeline(app.lines, File(filesDir, "frames"))
-        controller = LookupController(scope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines)
+        controller = LookupController(scope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio)
         overlays = OverlayHost(
             service = this,
             controller = controller,
