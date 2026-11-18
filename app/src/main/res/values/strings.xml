@@ -4,10 +4,8 @@
     <string name="service_description">Reads Japanese text in the game on screen so a word can be looked up and made into an Anki card. Pictures of the screen stay on this device.</string>
     <string name="widget_today_label">Today</string>
     <string name="widget_today_description">Today\'s reading time and characters against your daily goals, as rings</string>
-    <string name="widget_today_title">Today</string>
     <string name="widget_week_label">Last 7 days</string>
     <string name="widget_week_description">The week\'s reading time and a bar for each day, with your daily goal</string>
-    <string name="widget_week_title">Last 7 days</string>
     <string name="widget_preview_streak">Streak 4</string>
     <string name="widget_preview_time">42 min of 1 h</string>
     <string name="widget_preview_chars">1,824 of 5,000 chars</string>
