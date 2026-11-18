@@ -310,7 +310,10 @@ class Vjdict(file: File) : Closeable {
         fun u64(offset: Long): Long = at(offset, 8).getLong(index(offset)).also { if (it < 0) throw damaged("it points outside itself") }
         fun bytes(offset: Long, n: Int): ByteArray {
             val out = ByteArray(n)
-            at(offset, n).get(index(offset), out)
+            // ByteBuffer.get(index, array) is Android 14's; Android 13 (the AYN Thor's) has only the relative get.
+            val piece = at(offset, n).duplicate()
+            piece.position(index(offset))
+            piece.get(out)
             return out
         }
 
