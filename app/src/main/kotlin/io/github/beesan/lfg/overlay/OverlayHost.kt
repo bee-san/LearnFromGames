@@ -357,12 +357,6 @@ class OverlayHost(
         override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean = input.onMotion(event) || super.dispatchGenericMotionEvent(event)
     }
 
-    private fun pager(state: LookupState): String {
-        val entry = state.entry ?: return ""
-        val count = if (state.entries.size > 1) "${state.entryIndex + 1}/${state.entries.size} · " else ""
-        return count + entry.sources.joinToString { it.substringBefore(" [") }
-    }
-
     private fun hints(context: Context): TextView {
         val swap = prefs().swapConfirm
         return context.keyHints(if (swap) "B" else "A", if (swap) "A" else "B")
@@ -375,11 +369,9 @@ class OverlayHost(
      */
     @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
     private inner class PopupView(context: Context) : LinearLayout(context) {
-        val entry = EntryWebView(context, media) { link -> onLink(link) }
+        val entry = EntryWebView(context, media) { onEntryLink(it) }
         private val message = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
-        private var shownEntries: List<Entry>? = null
-        private var shownIndex = 0
 
         init {
             orientation = VERTICAL
@@ -400,25 +392,25 @@ class OverlayHost(
             }
         }
 
-        private fun onLink(link: android.net.Uri) {
-            val index = link.lastPathSegment?.toIntOrNull() ?: return
-            when ("${link.scheme}://${link.host}") {
-                EntryHtml.CARD_URL -> controller.addCard(index)
-                EntryHtml.AUDIO_URL.substringBeforeLast('/') -> controller.playAudio(index)
-            }
-        }
-
         fun show(state: LookupState) {
-            // L1 and R1 move the controller's entry; the list follows it.
-            val scroll = state.entries === shownEntries && state.entryIndex != shownIndex
-            shownEntries = state.entries
-            shownIndex = state.entryIndex
-            entry.showList(state.entries, styles(), state.buttons.map { cardState(it) }, state.entryIndex, scroll, state.message)
+            showEntries(entry, state)
             message.text = state.message.takeIf { state.entries.isNotEmpty() } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.GONE
         }
     }
+
+    /** A button in the entry list: an entry's card or audio button, by its place in the list. */
+    private fun onEntryLink(link: android.net.Uri) {
+        val index = link.lastPathSegment?.toIntOrNull() ?: return
+        when ("${link.scheme}://${link.host}") {
+            EntryHtml.CARD_URL -> controller.addCard(index)
+            EntryHtml.AUDIO_URL.substringBeforeLast('/') -> controller.playAudio(index)
+        }
+    }
+
+    private fun showEntries(view: EntryWebView, state: LookupState) =
+        view.showList(state.entries, styles(), state.buttons.map { cardState(it) }, state.entryIndex, state.message)
 
     private fun cardState(button: CardButton) = when (button) {
         CardButton.ADD -> "add"
@@ -427,17 +419,15 @@ class OverlayHost(
         CardButton.WAITING -> "waiting"
     }
 
-    /** The bottom screen: the line to tap, the entry, and Add card where a thumb already rests. */
+    /** The bottom screen: the line to tap, then every entry of the lookup in one scrolling list, as in the popup. */
     @SuppressLint("ViewConstructor")
     private inner class PanelView(context: Context) : LinearLayout(context) {
         private val lines = LinesView(context) { line, index -> controller.select(line, index) }
 
         /** The entry in full: pictures, tables and each dictionary's own styling. */
-        val entry = EntryWebView(context, media)
+        val entry = EntryWebView(context, media) { onEntryLink(it) }
         private val historyList = LinearLayout(context)
         private val historyScroll = ScrollView(context)
-        private val button = CardButtonView(context) { controller.addCard() }
-        private val pager = context.label(12.5f, Ink.DIM)
         private val message = context.label(12.5f, Ink.DIM)
         private val stripsToggle = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
@@ -479,10 +469,8 @@ class OverlayHost(
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(pad, context.dp(10f), pad, context.dp(12f))
-                addView(button, wrap())
                 addView(hints, wrap())
                 addView(View(context), LayoutParams(0, 1, 1f))
-                addView(pager, wrap())
                 addView(stripsToggle, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(14f) })
             }
             stripsToggle.minHeight = context.dp(40f)
@@ -503,11 +491,8 @@ class OverlayHost(
             val showEntry = state.selected && (state.entry != null || state.message != null)
             entry.visibility = if (showEntry) View.VISIBLE else View.GONE
             historyScroll.visibility = if (showEntry) View.GONE else View.VISIBLE
-            if (showEntry) entry.show(state.entry, styles(), state.message)
-            button.show(state.button)
-            button.visibility = if (state.entry == null || state.controllerMode) View.GONE else View.VISIBLE
+            if (showEntry) showEntries(entry, state)
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.GONE
-            pager.text = pager(state)
             message.text = state.message.takeIf { state.entry != null } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
             stripsToggle.text = if (stripsOn) "Tap on game: on" else "Tap on game: off"

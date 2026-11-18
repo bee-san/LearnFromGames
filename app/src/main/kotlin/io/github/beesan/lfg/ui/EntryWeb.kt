@@ -37,6 +37,8 @@ class EntryWebView(
     private val audio = (context.applicationContext as? App)?.wordAudio
     private var loaded = false
     private var pending: String? = null
+    private var listed: List<Entry>? = null
+    private var listedCurrent = 0
 
     init {
         setBackgroundColor(0xFF22232C.toInt())
@@ -83,10 +85,14 @@ class EntryWebView(
     /**
      * Every entry of a lookup with each one's card button in [states]
      * (`add`, `adding`, `in-anki`, `waiting`) and [current] marked as the
-     * controller's; [scroll] brings that one into view. Only a new lookup
-     * reloads the page, so the scroll stays put when a button changes.
+     * controller's. Only a new lookup reloads the page, so the scroll stays
+     * put when a button changes; when L1 or R1 moves the controller to
+     * another entry, the list scrolls to it.
      */
-    fun showList(entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, scroll: Boolean, message: String?) {
+    fun showList(entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, message: String?) {
+        val scroll = entries === listed && current != listedCurrent
+        listed = entries
+        listedCurrent = current
         if (entries.isEmpty()) {
             load(EntryHtml.page(null, styles, message))
             return

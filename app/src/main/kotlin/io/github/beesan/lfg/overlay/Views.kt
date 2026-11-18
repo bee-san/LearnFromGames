@@ -11,13 +11,9 @@ import android.text.Spanned
 import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
-import android.view.Gravity
 import android.view.MotionEvent
-import android.view.View
 import android.view.ViewGroup
-import android.widget.LinearLayout
 import android.widget.TextView
-import io.github.beesan.lfg.lookup.CardButton
 import io.github.beesan.lfg.lookup.LookupState
 
 /** The app's palette as plain colour ints, for the Views drawn over the game. */
@@ -48,34 +44,6 @@ internal fun Context.label(sizeSp: Float, color: Int, bold: Boolean = false) = T
     setTextColor(color)
     if (bold) typeface = Typeface.DEFAULT_BOLD
     includeFontPadding = false
-}
-
-/** The Add card button. A plain TextView: a Button would want focus, and nothing here may take it. */
-@SuppressLint("ViewConstructor")
-internal class CardButtonView(context: Context, onPress: () -> Unit) : TextView(context) {
-    init {
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-        typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.CENTER
-        minHeight = context.dp(44f)
-        setPadding(context.dp(18f), 0, context.dp(18f), 0)
-        isFocusable = false
-        setOnClickListener { onPress() }
-        show(CardButton.ADD)
-    }
-
-    fun show(state: CardButton) {
-        val enabled = state == CardButton.ADD
-        text = when (state) {
-            CardButton.ADD -> "Add card"
-            CardButton.ADDING -> "Adding…"
-            CardButton.IN_ANKI -> "In Anki"
-            CardButton.WAITING -> "Waiting for AnkiDroid"
-        }
-        isEnabled = enabled
-        setTextColor(if (enabled) Ink.ON_FILL else Ink.DIM)
-        background = rounded(if (enabled) Ink.FILL else Ink.SOFT, if (enabled) Ink.FILL else Ink.SOFT, context.dp(5f).toFloat())
-    }
 }
 
 /**
