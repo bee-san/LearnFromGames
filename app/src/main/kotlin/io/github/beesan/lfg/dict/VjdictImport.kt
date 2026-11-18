@@ -23,10 +23,13 @@ object VjdictImport {
 
     /**
      * The .vjdict in [picked]: the file itself, or a `*.vjdict` entry of a zip that
-     * has no index.json, streamed out into [cacheDir]. Null for anything else, which
-     * is then imported as a Yomitan zip, as before.
+     * has no index.json, streamed out into [cacheDir]. Of several (Rubi's release
+     * zip also holds its names dictionary), [preferred] wins. Its attribution is
+     * the `<name>-attribution.txt` beside it, as Rubi ships it, or an
+     * ATTRIBUTION.md. Null for anything else, which is then imported as a
+     * Yomitan zip, as before.
      */
-    fun find(picked: File, pickedName: String, cacheDir: File): Found? {
+    fun find(picked: File, pickedName: String, cacheDir: File, preferred: String = RubiDictionarySource.ENTRY): Found? {
         val head = ByteArray(8)
         val n = picked.inputStream().use { it.readNBytes(head, 0, 8) }
         if (n == 8 && Vjdict.magicVersion(head) != 0) return Found(picked, pickedName, null, temporary = false)
@@ -39,11 +42,14 @@ object VjdictImport {
         zip.use {
             if (zip.getEntry("index.json") != null) return null
             val entries = zip.entries().toList().filter { !it.isDirectory }
-            val vjdict = entries.filter { it.name.endsWith(".vjdict", ignoreCase = true) }.firstOrNull { entry ->
-                val magic = ByteArray(8)
-                zip.getInputStream(entry).use { it.readNBytes(magic, 0, 8) } == 8 && Vjdict.magicVersion(magic) != 0
-            } ?: return null
-            val attribution = ATTRIBUTION_FILES.firstNotNullOfOrNull { wanted ->
+            val vjdict = entries.filter { it.name.endsWith(".vjdict", ignoreCase = true) }
+                .sortedByDescending { it.name.substringAfterLast('/').equals(preferred, ignoreCase = true) }
+                .firstOrNull { entry ->
+                    val magic = ByteArray(8)
+                    zip.getInputStream(entry).use { it.readNBytes(magic, 0, 8) } == 8 && Vjdict.magicVersion(magic) != 0
+                } ?: return null
+            val own = vjdict.name.substringAfterLast('/').substringBeforeLast('.') + "-attribution.txt"
+            val attribution = (listOf(own) + ATTRIBUTION_FILES).firstNotNullOfOrNull { wanted ->
                 entries.firstOrNull { it.name.substringAfterLast('/').equals(wanted, ignoreCase = true) }
             }?.let { entry ->
                 zip.getInputStream(entry).use { String(it.readNBytes(MAX_ATTRIBUTION), Charsets.UTF_8) }.trim().takeIf { it.isNotEmpty() }
@@ -158,26 +164,33 @@ object VjdictImport {
         }
         val json = Json().raw("{\"title\":").string(title).raw(",\"format\":3,\"revision\":").string(revision)
             .raw(",\"description\":").string(description)
-            .raw(",\"attribution\":").string(attribution?.let(::oneLine) ?: DEFAULT_ATTRIBUTION)
+            .raw(",\"attribution\":").string(attribution?.let(::reflow) ?: DEFAULT_ATTRIBUTION)
         if (dict.version == 3) json.raw(",\"frequencyMode\":\"rank-based\"")
         json.raw('}')
         return json.bytes.copyOf(json.size)
     }
 
-    /**
-     * hoshidicts keeps index.json's strings as written, escapes and all (the Sources
-     * screen would show `\n` for a line break), so they are written with nothing
-     * to escape.
-     */
+    /** The title and description are written with nothing to escape: the title is also a folder's name. */
     private fun plain(text: String): String = text.replace('"', '\'').replace('\\', '/').replace('\t', ' ')
 
-    /** Lines become ` · `-joined text, without Markdown's heading marks. */
-    private fun oneLine(text: String): String = text.lines()
-        .map { plain(it.trim().trimStart('#', '>', ' ')) }
-        .filter { it.isNotEmpty() }
-        .joinToString(" · ")
+    /**
+     * Text wrapped at a fixed width, as Rubi's attribution is, as paragraphs: each
+     * paragraph's lines joined by spaces, a list item ("- ") on a line of its own,
+     * a blank line between paragraphs, and no Markdown heading marks.
+     */
+    fun reflow(text: String): String = text.replace("\r\n", "\n").trim().split(Regex("""\n[ \t]*\n""")).mapNotNull { paragraph ->
+        val out = StringBuilder()
+        for (line in paragraph.lines()) {
+            val t = line.trim().trimStart('#', '>').trim()
+            if (t.isEmpty()) continue
+            if (out.isNotEmpty()) out.append(if (t.startsWith("- ") || t.startsWith("* ")) '\n' else ' ')
+            out.append(t)
+        }
+        out.takeIf { it.isNotEmpty() }?.toString()
+    }.joinToString("\n\n")
 
-    private fun sha256(file: File): String {
+    /** The file's SHA-256 in lower-case hex. */
+    fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(1 shl 16)
@@ -366,7 +379,7 @@ object VjdictImport {
     private const val MAX_ATTRIBUTION = 64 * 1024
     private const val BORROWED_AFTER = 1 shl 24
     private val HOSHIDICTS_RULES = Vjdict.RULE_NAMES.take(6)
-    private val ATTRIBUTION_FILES = listOf("ATTRIBUTION.md", "plaintext-attribution.txt")
+    private val ATTRIBUTION_FILES = listOf("ATTRIBUTION.md")
     private const val DEFAULT_ATTRIBUTION =
         "This dictionary came from a Rubi .vjdict file. Its sources' attribution travels with that file."
 }

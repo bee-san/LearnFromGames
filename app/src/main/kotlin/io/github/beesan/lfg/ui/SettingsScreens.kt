@@ -126,6 +126,8 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
 fun DictionariesScreen(
     state: DictState,
     busy: DictionariesState,
+    /** How the automatic download of Bee's Ultimate Dictionary is going, while it is. */
+    fetching: String?,
     onAdd: () -> Unit,
     onMove: (String, Boolean) -> Unit,
     onRemove: (String) -> Unit,
@@ -135,6 +137,7 @@ fun DictionariesScreen(
     val date = remember { SimpleDateFormat("d MMMM yyyy", Locale.getDefault()) }
     busy.error?.let { Text(it, color = Lfg.Error, fontSize = 14.sp) }
     busy.progress?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
+    fetching?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
     val list = (state as? DictState.Ready)?.dictionaries ?: emptyList()
     if (list.isEmpty()) Text("No dictionary is installed.", color = Lfg.Dim, fontSize = 15.sp)
     list.forEachIndexed { i, d ->

@@ -63,6 +63,11 @@ class DictionaryRepository(private val context: Context) {
     private val _state = MutableStateFlow<DictState>(installed().let { if (it.isEmpty()) DictState.Missing else DictState.Ready(it) })
     val state: StateFlow<DictState> = _state
 
+    private val _fetching = MutableStateFlow<String?>(null)
+
+    /** How the download of Bee's Ultimate Dictionary is going, in words; null when it is not under way. */
+    val fetching: StateFlow<String?> = _fetching
+
     fun installed(): List<InstalledDictionary> = prefs.getString(KEY_INSTALLED, null)?.let {
         try {
             DictJson.decodeFromString<List<InstalledDictionary>>(it)
@@ -209,7 +214,7 @@ class DictionaryRepository(private val context: Context) {
         } catch (_: Exception) {
             null
         }
-        fun field(name: String) = (index?.get(name) as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
+        fun field(name: String) = unescape((index?.get(name) as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "")
         DictionarySource(d.title, field("revision"), field("author"), field("url"), field("attribution"), field("description"))
     }
 
@@ -249,12 +254,122 @@ class DictionaryRepository(private val context: Context) {
         }
     }
 
+    /**
+     * hoshidicts stores index.json's strings still escaped and escapes them again, so a
+     * line break reads back as a backslash and an n. Read once more as a JSON string,
+     * they are the dictionary's own text; anything that is not one stays as it is.
+     */
+    private fun unescape(text: String): String = if ('\\' !in text) text else try {
+        DictJson.decodeFromString<String>("\"" + text + "\"")
+    } catch (_: Exception) {
+        text
+    }
+
+    /** Bee's Ultimate Dictionary has been installed once (and perhaps removed since): it is never fetched again. */
+    fun rubiSettled(): Boolean = prefs.getBoolean(KEY_RUBI_DONE, false) || installed().any { it.title == RubiDictionarySource.TITLE }
+
+    /**
+     * Downloads Bee's Ultimate Dictionary from Rubi's latest release, checks it
+     * against the release's checksums, converts it and puts it first. Once: after
+     * that, removing it is final. Returns false when it should be tried again (no
+     * network, a download cut short); a release whose contents fail
+     * [MAX_RUBI_FAILURES] times is not downloaded again. Only the import itself
+     * waits for, and holds up, other dictionaries being added.
+     */
+    suspend fun ensureRubiDictionary(): Boolean {
+        if (rubiSettled()) {
+            prefs.edit().putBoolean(KEY_RUBI_DONE, true).apply()
+            return true
+        }
+        val title = RubiDictionarySource.TITLE
+        val asset = try {
+            withContext(Dispatchers.IO) { RubiDictionarySource.candidates(fetchText(RubiDictionarySource.RELEASES_URL)) }
+                .firstOrNull { prefs.getInt(KEY_RUBI_FAILED + it.release, 0) < MAX_RUBI_FAILURES }
+        } catch (_: Exception) {
+            return false
+        } ?: return true // Nothing to try until Rubi releases again.
+        val cache = context.cacheDir
+        // The most it holds at once is the zip and the dictionary out of it (then the Yomitan zip, 47 MB, and the import, 111 MB).
+        if (cache.usableSpace < asset.size + 2 * RUBI_DICTIONARY_BYTES) return true
+        val zip = File(cache, "rubi-${asset.release}.zip")
+        val yomitan = File(cache, "rubi-${asset.release}-yomitan.zip")
+        var found: VjdictImport.Found? = null
+        // Only a connection that failed before the zip was opened leaves it, for the next try to carry on from (its checksum is checked again).
+        var keepZip = false
+        try {
+            val sums = withContext(Dispatchers.IO) { fetchText(asset.sumsUrl) }
+            val want = RubiDictionarySource.checksum(sums, asset.name) ?: throw BadRelease("Rubi ${asset.release} lists no checksum for its zip.")
+            var shown = -1L
+            withContext(Dispatchers.IO) {
+                // A download cut short last time carries on from where it stopped.
+                if (zip.length() != asset.size) downloadTo(asset.url, zip, resume = true) { done ->
+                    val mb = done shr 20
+                    if (mb != shown) {
+                        shown = mb
+                        _fetching.value = "Downloading $title… $mb of ${asset.size shr 20} MB"
+                    }
+                }
+            }
+            _fetching.value = "Checking $title…"
+            if (zip.length() < asset.size) error("The download was cut short.")
+            if (withContext(Dispatchers.IO) { VjdictImport.sha256(zip) } != want) {
+                throw BadRelease("Rubi ${asset.release}'s zip does not match its checksum.")
+            }
+            found = withContext(Dispatchers.IO) { VjdictImport.find(zip, asset.name, cache) }
+                ?: throw BadRelease("Rubi ${asset.release} holds no dictionary.")
+            zip.delete()
+            withContext(Dispatchers.IO) {
+                VjdictImport.toYomitan(found.file, found.name, found.attribution, yomitan) { _fetching.value = "Converting $title… $it%" }
+            }
+            found.file.delete()
+            _fetching.value = "Importing $title…"
+            installing.withLock {
+                val outcome = importZip(yomitan)
+                if (!outcome.success || outcome.terms < RubiDictionarySource.MIN_TERMS) {
+                    if (outcome.title.isNotEmpty() && installed().none { it.title == outcome.title }) File(root, outcome.title).deleteRecursively()
+                    throw BadRelease(outcome.error.ifEmpty { "Rubi ${asset.release}'s dictionary has only ${outcome.terms} entries." })
+                }
+                register(outcome, first = true)
+            }
+            prefs.edit().putBoolean(KEY_RUBI_DONE, true).apply()
+            return true
+        } catch (e: BadRelease) {
+            android.util.Log.w("LfgDictionaries", e.message ?: "bad release")
+            prefs.edit().putInt(KEY_RUBI_FAILED + asset.release, prefs.getInt(KEY_RUBI_FAILED + asset.release, 0) + 1).apply()
+            return false
+        } catch (e: VjdictException) {
+            android.util.Log.w("LfgDictionaries", "Rubi ${asset.release}: ${e.message}")
+            prefs.edit().putInt(KEY_RUBI_FAILED + asset.release, prefs.getInt(KEY_RUBI_FAILED + asset.release, 0) + 1).apply()
+            return false
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Android stopped the work (the network went): it carries on from here next time.
+            keepZip = found == null && zip.length() <= asset.size
+            throw e
+        } catch (e: Exception) {
+            // The connection, most likely: what was downloaded stays for the next try.
+            android.util.Log.w("LfgDictionaries", "Rubi ${asset.release}: ${e.message}")
+            keepZip = found == null && zip.length() <= asset.size
+            return false
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) {
+                if (!keepZip) zip.delete()
+                yomitan.delete()
+                found?.takeIf { it.temporary }?.file?.delete()
+            }
+            _fetching.value = null
+        }
+    }
+
+    /** What is wrong with a release's contents rather than with the connection: it counts against the release. */
+    private class BadRelease(message: String) : Exception(message)
+
     private suspend fun importZip(zip: File): ImportOutcome = withContext(native) {
         root.mkdirs()
         DictJson.decodeFromString<ImportOutcome>(Hoshidicts.import(zip.path, root.path, lowRam = false))
     }
 
-    private suspend fun register(outcome: ImportOutcome) {
+    /** [first]: it goes to the top of the list, so its entries show first. */
+    private suspend fun register(outcome: ImportOutcome, first: Boolean = false) {
         val added = InstalledDictionary(
             title = outcome.title,
             path = File(root, outcome.title).path,
@@ -264,7 +379,8 @@ class DictionaryRepository(private val context: Context) {
             kanji = outcome.kanji,
             installedAt = System.currentTimeMillis(),
         )
-        save(installed().filter { it.title != added.title } + added)
+        val others = installed().filter { it.title != added.title }
+        save(if (first) listOf(added) + others else others + added)
     }
 
     private fun fetchText(url: String): String {
@@ -278,24 +394,38 @@ class DictionaryRepository(private val context: Context) {
     }
 
     private fun download(asset: JmdictSource.Asset, to: File) {
-        val connection = open(asset.url)
+        _state.value = DictState.Downloading(0, asset.size)
+        val done = downloadTo(asset.url, to) { _state.value = DictState.Downloading(it, asset.size) }
+        if (done < JmdictSource.MIN_ZIP_BYTES) error("The download was only $done bytes.")
+    }
+
+    /**
+     * Saves [url] to [to], telling [progress] the bytes so far; returns how many there are.
+     * With [resume], what [to] already holds is kept and only the rest is asked for.
+     */
+    private fun downloadTo(url: String, to: File, resume: Boolean = false, progress: (Long) -> Unit): Long {
+        val have = if (resume && to.isFile) to.length() else 0L
+        val connection = open(url)
+        if (have > 0) connection.setRequestProperty("Range", "bytes=$have-")
         try {
-            if (connection.responseCode != 200) error("The download answered ${connection.responseCode}.")
-            var done = 0L
-            _state.value = DictState.Downloading(0, asset.size)
+            val code = connection.responseCode
+            if (code != 200 && code != 206) error("The download answered $code.")
+            // 206: the rest follows on from what is there. 200: the server sent it all again.
+            val append = code == 206
+            var done = if (append) have else 0L
             connection.inputStream.use { input ->
-                to.outputStream().use { output ->
+                java.io.FileOutputStream(to, append).use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         val n = input.read(buffer)
                         if (n < 0) break
                         output.write(buffer, 0, n)
                         done += n
-                        _state.value = DictState.Downloading(done, asset.size)
+                        progress(done)
                     }
                 }
             }
-            if (done < JmdictSource.MIN_ZIP_BYTES) error("The download was only $done bytes.")
+            return done
         } finally {
             connection.disconnect()
         }
@@ -311,6 +441,12 @@ class DictionaryRepository(private val context: Context) {
 
     companion object {
         private const val KEY_INSTALLED = "installed"
+        private const val KEY_RUBI_DONE = "rubiDictionaryDone"
+        private const val KEY_RUBI_FAILED = "rubiDictionaryFailed."
+        private const val MAX_RUBI_FAILURES = 3
+
+        /** Bee's Ultimate Dictionary unpacked, about 156 MB. */
+        private const val RUBI_DICTIONARY_BYTES = 160L * 1024 * 1024
         private const val SCAN_LENGTH = 16
     }
 }
