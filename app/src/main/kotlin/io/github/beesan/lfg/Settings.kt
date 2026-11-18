@@ -2,6 +2,7 @@
 package io.github.beesan.lfg
 
 import android.content.Context
+import io.github.beesan.lfg.core.ReadingGoals
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -21,7 +22,12 @@ data class Prefs(
     val spokenLines: Boolean = true,
     /** An animated picture of the moments before the card was made, instead of a still. */
     val animatedPicture: Boolean = false,
+    /** Daily reading goals on the stats screen; 0 is none. */
+    val goalMinutes: Int = 0,
+    val goalChars: Int = 0,
 ) {
+    val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
+
     companion object {
         const val SHORTCUT_L3_R3 = "l3r3"
         const val SHORTCUT_L1_R1 = "l1r1"
@@ -45,6 +51,8 @@ class Settings(context: Context) {
             sentenceAudio = store.getBoolean("sentenceAudio", d.sentenceAudio),
             spokenLines = store.getBoolean("spokenLines", d.spokenLines),
             animatedPicture = store.getBoolean("animatedPicture", d.animatedPicture),
+            goalMinutes = store.getInt("goalMinutes", d.goalMinutes),
+            goalChars = store.getInt("goalChars", d.goalChars),
         )
     }
 
@@ -58,6 +66,8 @@ class Settings(context: Context) {
             .putBoolean("sentenceAudio", next.sentenceAudio)
             .putBoolean("spokenLines", next.spokenLines)
             .putBoolean("animatedPicture", next.animatedPicture)
+            .putInt("goalMinutes", next.goalMinutes)
+            .putInt("goalChars", next.goalChars)
             .apply()
         _prefs.value = next
     }

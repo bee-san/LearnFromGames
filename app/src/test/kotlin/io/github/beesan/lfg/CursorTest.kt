@@ -4,6 +4,7 @@ import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.CharBox
 import io.github.beesan.lfg.core.CursorPos
 import io.github.beesan.lfg.core.KeyRepeat
+import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.ReadingStats.Stamp
 import io.github.beesan.lfg.core.Segmenter
@@ -277,6 +278,38 @@ class CursorTest {
         assertEquals(1500, year.bars.last().chars)
         assertEquals(listOf("Dec 2025", "Jan 2026", "Feb"), year.bars.take(3).map { it.axis })
         assertNull(year.before)
+    }
+
+    @Test
+    fun goalsCountTheDaysThatMetThemAndTheRunThatMetThemAll() {
+        val today = LocalDate.of(2026, 11, 17)
+        fun day(back: Long, minutes: Int, chars: Int) = ReadingStats.DayTotals(today.minusDays(back), 10, chars, chars, minutes * 60.0)
+        // Yesterday and the day before met both; three days back met only the time; today has met neither yet.
+        val days = listOf(day(0, 20, 900), day(1, 60, 5000), day(2, 75, 6000), day(3, 61, 100), day(40, 90, 9000))
+        val both = ReadingGoals(minutes = 60, chars = 5000)
+
+        val month = both.progress(days, today.minusDays(29), today)
+        assertEquals(today, month.today.day)
+        assertEquals(3, month.timeDays)
+        assertEquals(2, month.charDays)
+        assertEquals(ReadingStats.Streaks(2, 2), month.streaks)       // today not met yet: the run still ends yesterday
+        assertEquals(1, both.progress(days, today.minusDays(1), today).charDays)
+
+        val timeOnly = ReadingGoals(minutes = 60)
+        assertEquals(ReadingStats.Streaks(3, 3), timeOnly.progress(days, today, today).streaks)
+        assertFalse(timeOnly.charsMet(days[1]))                       // a goal that is off is never met
+        assertFalse(ReadingGoals().met(days[1]))
+        assertEquals(0, ReadingGoals(chars = 1).progress(emptyList(), today, today).today.chars)
+    }
+
+    @Test
+    fun goalStepsMoveAlongTheListAndStopAtItsEnds() {
+        val steps = ReadingGoals.MINUTE_STEPS
+        assertEquals(15, ReadingGoals.step(steps, 0, up = true))
+        assertEquals(0, ReadingGoals.step(steps, 0, up = false))
+        assertEquals(480, ReadingGoals.step(steps, 480, up = true))
+        assertEquals(90, ReadingGoals.step(steps, 70, up = true))        // a value between steps goes to the next one either way
+        assertEquals(60, ReadingGoals.step(steps, 70, up = false))
     }
 
     @Test

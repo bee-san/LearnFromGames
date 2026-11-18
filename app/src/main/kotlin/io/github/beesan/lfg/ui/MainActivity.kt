@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +59,7 @@ class MainActivity : ComponentActivity() {
             val sources by model.sources.collectAsStateWithLifecycle()
             val recording by SoundCapture.running.collectAsStateWithLifecycle()
             var page by rememberSaveable { mutableStateOf(Page.HOME) }
+            val saved = rememberSaveableStateHolder()
 
             val ankiPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
                 if (granted) model.connectAnki() else model.refresh()
@@ -81,9 +83,12 @@ class MainActivity : ComponentActivity() {
                 if (showPractice && practice.entry == null) model.lookupPractice(PRACTICE_SENTENCE.indexOf("不思議"))
             }
             fun back() {
+                // Stats keeps its period and chart across the goals page, and opens on its defaults again after Home.
+                if (page == Page.STATS) saved.removeState(Page.STATS)
                 page = when (page) {
                     Page.LINE, Page.STATS, Page.SETTINGS -> Page.HOME
                     Page.SOURCES -> Page.DICTIONARIES
+                    Page.GOALS -> Page.STATS
                     Page.HOME -> Page.HOME
                     else -> Page.SETTINGS
                 }
@@ -141,7 +146,10 @@ class MainActivity : ComponentActivity() {
                             onNextEntry = model.lineLookup::nextEntry,
                             onBack = ::back,
                         )
-                        page == Page.STATS -> StatsScreen(stats, ::back)
+                        page == Page.STATS -> saved.SaveableStateProvider(Page.STATS) {
+                            StatsScreen(stats, prefs.goals, { page = Page.GOALS }, ::back)
+                        }
+                        page == Page.GOALS -> GoalsScreen(prefs, model::updatePrefs, ::back)
                         page == Page.SETTINGS -> SettingsScreen(onOpen = { page = it }, onBack = ::back)
                         page == Page.DICTIONARIES -> DictionariesScreen(
                             state = dictionary,

@@ -37,7 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -45,11 +47,13 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.anki.AnkiStatus
+import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.data.Game
@@ -60,6 +64,7 @@ import java.text.SimpleDateFormat
 import java.time.ZoneId
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
@@ -305,21 +310,62 @@ private fun duration(seconds: Double): String {
     return if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
 }
 
-/** Reading time, characters, speed and streak over a period, and a bar a day or a month. */
+/** A goal's time: "45 min", "2 h", "1 h 30 min". */
+private fun goalTime(minutes: Int) = when {
+    minutes < 60 -> "$minutes min"
+    minutes % 60 == 0 -> "${minutes / 60} h"
+    else -> "${minutes / 60} h ${minutes % 60} min"
+}
+
+/** The daily goals the stats screen measures against. */
 @Composable
-fun StatsScreen(stats: StatsState, onBack: () -> Unit) {
+fun GoalsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Reading goals", onBack) {
+    Card("Hours per day", "Reading time, as Stats counts it.") {
+        Stepper(if (prefs.goalMinutes == 0) "Off" else goalTime(prefs.goalMinutes), prefs.goalMinutes, ReadingGoals.MINUTE_STEPS) { v ->
+            onChange { it.copy(goalMinutes = v) }
+        }
+    }
+    Card("Characters per day", "Characters read, as Stats counts them: no punctuation or spaces.") {
+        Stepper(if (prefs.goalChars == 0) "Off" else "%,d".format(prefs.goalChars), prefs.goalChars, ReadingGoals.CHAR_STEPS) { v ->
+            onChange { it.copy(goalChars = v) }
+        }
+    }
+    Text(
+        "A day runs from 4:00 to 4:00, so reading after midnight counts towards the day before. Stats shows today against each goal, " +
+            "the days that met it, and a line on the chart of each day.",
+        color = Lfg.Dim, fontSize = 14.sp, lineHeight = 20.sp,
+    )
+}
+
+/** − and + through [steps], the current value between them. Both stay enabled, so the pad never loses its place at an end. */
+@Composable
+private fun Stepper(label: String, value: Int, steps: List<Int>, onPick: (Int) -> Unit) {
+    LfgButton("−", { onPick(ReadingGoals.step(steps, value, up = false)) })
+    Text(
+        label, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 1,
+        modifier = Modifier.widthIn(min = 112.dp),
+    )
+    LfgButton("+", { onPick(ReadingGoals.step(steps, value, up = true)) })
+}
+
+/** Reading time, characters, speed and streak over a period, the daily goals, and a bar a day or a month. */
+@Composable
+fun StatsScreen(stats: StatsState, goals: ReadingGoals, onGoals: () -> Unit, onBack: () -> Unit) {
     var period by rememberSaveable { mutableStateOf(StatsPeriod.DAYS_30) }
     var showTime by rememberSaveable { mutableStateOf(false) }
     var picked by remember(period) { mutableIntStateOf(-1) }
     Page("Stats", onBack, actions = {
         Choice(StatsPeriod.entries.map { it.name to it.label }, period.name) { period = StatsPeriod.valueOf(it) }
     }) {
+        val today = remember { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, ZoneId.systemDefault()) }
         if (stats.days.isEmpty()) {
             Text("Nothing has been read yet.", color = Lfg.Dim, fontSize = 15.sp)
+            HorizontalDivider(color = Lfg.Border)
+            Goals(goals, null, 0, onGoals)
             return@Page
         }
-        val today = remember { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, ZoneId.systemDefault()) }
         val view = remember(stats, period) { period.view(stats.days, today) }
+        val progress = remember(stats, goals, view) { goals.progress(stats.days, view.start, today) }
         val t = view.totals
         val before = view.before
         Text(view.range, color = Lfg.Dim, fontSize = 14.sp)
@@ -341,8 +387,15 @@ fun StatsScreen(stats: StatsState, onBack: () -> Unit) {
             Tile("Streak", listOf("${stats.streaks.current}" to if (stats.streaks.current == 1) "day" else "days"), "Longest ${stats.streaks.longest}")
         }
         HorizontalDivider(color = Lfg.Border)
+        Goals(goals, progress, view.dayCount, onGoals)
+        HorizontalDivider(color = Lfg.Border)
 
         val value = { b: StatsPeriod.Bar -> if (showTime) b.seconds / 3600 else b.chars.toDouble() }
+        val goal = when {
+            !period.byDay -> null
+            showTime -> if (goals.minutes > 0) goals.minutes / 60.0 else null
+            else -> if (goals.chars > 0) goals.chars.toDouble() else null
+        }
         val amount = { b: StatsPeriod.Bar -> if (showTime) duration(b.seconds) else "%,d characters".format(b.chars) }
         val top = view.bars.maxBy(value)
         val readout = when {
@@ -355,15 +408,71 @@ fun StatsScreen(stats: StatsState, onBack: () -> Unit) {
             Text(readout, color = Lfg.Dim, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = 16.dp))
             Choice(listOf("chars" to "Characters", "time" to "Time"), if (showTime) "time" else "chars") { showTime = it == "time" }
         }
-        BarChart(view.bars.map(value), view.bars.map { it.axis }, showTime, picked, view.bars.map { "${it.name} · ${amount(it)}" }) {
+        BarChart(view.bars.map(value), view.bars.map { it.axis }, showTime, goal, picked, view.bars.map { "${it.name} · ${amount(it)}" }) {
             picked = if (picked == it) -1 else it
         }
     }
 }
 
-/** A figure with its units smaller beside it, under its name. */
+/**
+ * The daily goals: what today still needs, then a tile for each goal set with
+ * today against it and the period's days that met it, and the run of days
+ * that met them all. [progress] is null when nothing has been read.
+ */
 @Composable
-private fun RowScope.Tile(label: String, parts: List<Pair<String, String>>, sub: String) {
+private fun Goals(goals: ReadingGoals, progress: ReadingGoals.Progress?, dayCount: Int, onGoals: () -> Unit) {
+    val chars = { n: Int -> "%,d characters".format(n) }
+    val readout = when {
+        !goals.any -> "None set"
+        progress == null -> listOfNotNull(
+            goalTime(goals.minutes).takeIf { goals.minutes > 0 },
+            chars(goals.chars).takeIf { goals.chars > 0 },
+        ).joinToString(" and ") + " a day"
+        else -> {
+            val t = progress.today
+            val left = listOfNotNull(
+                goalTime(ceil((goals.minutes * 60 - t.seconds) / 60).toInt()).takeIf { goals.minutes > 0 && !goals.timeMet(t) },
+                chars(goals.chars - t.chars).takeIf { goals.chars > 0 && !goals.charsMet(t) },
+            )
+            when {
+                left.isNotEmpty() -> left.joinToString(" and ") + " to go today"
+                goals.minutes > 0 && goals.chars > 0 -> "Both met today"
+                else -> "Met today"
+            }
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
+        Text("Daily goals", color = Lfg.Text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        Text(readout, color = Lfg.Dim, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = 16.dp))
+        LfgButton(if (goals.any) "Change goals" else "Set goals", onGoals)
+    }
+    if (!goals.any || progress == null) return
+    val t = progress.today
+    val met = { n: Int -> "Met on $n of $dayCount ${if (dayCount == 1) "day" else "days"}" }
+    Row(Modifier.fillMaxWidth()) {
+        if (goals.minutes > 0) {
+            val parts = durationParts(t.seconds)
+            Tile(
+                "Hours per day", parts.dropLast(1) + parts.last().let { (n, unit) -> n to "$unit of ${goalTime(goals.minutes)}" },
+                met(progress.timeDays), (t.seconds / (goals.minutes * 60)).toFloat(), goals.timeMet(t),
+            )
+        }
+        if (goals.chars > 0) {
+            Tile(
+                "Characters per day", listOf("%,d".format(t.chars) to "of " + "%,d".format(goals.chars)),
+                met(progress.charDays), t.chars.toFloat() / goals.chars, goals.charsMet(t),
+            )
+        }
+        val s = progress.streaks
+        Tile("Goal streak", listOf("${s.current}" to if (s.current == 1) "day" else "days"), "Longest ${s.longest}")
+        // Empty columns keep the tiles under the four above.
+        repeat(if (goals.minutes > 0 && goals.chars > 0) 1 else 2) { Spacer(Modifier.weight(1f)) }
+    }
+}
+
+/** A figure with its units smaller beside it, under its name; with [progress], a bar of it, full in green once [done]. */
+@Composable
+private fun RowScope.Tile(label: String, parts: List<Pair<String, String>>, sub: String, progress: Float? = null, done: Boolean = false) {
     Column(Modifier.weight(1f).padding(top = 14.dp, bottom = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, color = Lfg.Dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Text(
@@ -379,38 +488,65 @@ private fun RowScope.Tile(label: String, parts: List<Pair<String, String>>, sub:
             },
             color = Lfg.Text, fontSize = 32.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
         )
+        if (progress != null) {
+            Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(Lfg.Soft)) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(if (done) Lfg.Ok else Lfg.Accent))
+            }
+        }
         if (sub.isNotEmpty()) Text(sub, color = Lfg.Dim, fontSize = 13.sp)
     }
 }
 
 /**
  * Bars on round grid lines, with their labels underneath. A bar is picked
- * with a tap or the pad, which puts its day in the line above.
+ * with a tap or the pad, which puts its day in the line above. A [goal], in
+ * the bars' units, is a dashed line across them.
  */
 @Composable
-private fun BarChart(values: List<Double>, axis: List<String>, hours: Boolean, picked: Int, names: List<String>, onPick: (Int) -> Unit) {
-    val (step, lines) = gridFor(values.maxOrNull() ?: 0.0, hours)
+private fun BarChart(values: List<Double>, axis: List<String>, hours: Boolean, goal: Double?, picked: Int, names: List<String>, onPick: (Int) -> Unit) {
+    val (step, lines) = gridFor(maxOf(values.maxOrNull() ?: 0.0, goal ?: 0.0), hours)
     val height = 200.dp
     val label = { v: Double ->
         when {
             hours && v < 1 -> "${(v * 60).roundToInt()} min"
-            hours -> "${v.roundToInt()} h"
+            hours -> if (v % 1.0 == 0.0) "${v.toInt()} h" else "%.1f h".format(v)
             v >= 1000 -> (v / 1000).let { if (it % 1.0 == 0.0) "${it.toInt()}k" else "%.1fk".format(it) }
             else -> v.roundToInt().toString()
         }
     }
     val top = step * lines
+    val goalY = goal?.let { height * (1 - (it / top).toFloat()) }
     Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         Box(Modifier.width(48.dp).height(height)) {
             for (k in 1..lines) {
+                val y = height * (1 - k.toFloat() / lines)
+                // The goal's label takes the place of a grid label it would overlap.
+                if (goalY != null && abs((y - goalY).value) < 14) continue
                 Text(
                     label(step * k), color = Lfg.Dim, fontSize = 11.sp, maxLines = 1,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp).offset(y = height * (1 - k.toFloat() / lines) - 7.dp),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp).offset(y = y - 7.dp),
+                )
+            }
+            if (goalY != null) {
+                Text(
+                    "Goal", color = Lfg.Ok, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp).offset(y = goalY - 7.dp),
                 )
             }
         }
         Column(Modifier.weight(1f)) {
-            Box(Modifier.fillMaxWidth().height(height)) {
+            Box(
+                Modifier.fillMaxWidth().height(height).drawWithContent {
+                    drawContent()
+                    if (goal != null) {
+                        val y = size.height * (1 - (goal / top).toFloat())
+                        drawLine(
+                            Lfg.Ok, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.5.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())),
+                        )
+                    }
+                },
+            ) {
                 Canvas(Modifier.matchParentSize()) {
                     for (k in 1..lines) {
                         val y = size.height * (1 - k.toFloat() / lines)
@@ -465,4 +601,4 @@ private fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { HOME, LINE, STATS, SETTINGS, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }
+enum class Page { HOME, LINE, STATS, GOALS, SETTINGS, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }

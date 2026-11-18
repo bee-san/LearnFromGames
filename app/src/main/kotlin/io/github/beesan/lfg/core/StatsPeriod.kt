@@ -34,6 +34,8 @@ enum class StatsPeriod(val label: String) {
     }
 
     data class View(
+        /** The first day the period counts. */
+        val start: LocalDate,
         val range: String,
         val bars: List<Bar>,
         val totals: Totals,
@@ -106,6 +108,7 @@ enum class StatsPeriod(val label: String) {
             ALL -> "Since " + first.dayOfMonth + " " + first.month.getDisplayName(TextStyle.FULL, locale) + " " + first.year
         }
         return View(
+            start = start,
             range = range,
             bars = bars.mapIndexed { i, b -> b.copy(chars = sums[i][0].toInt(), seconds = sums[i][1]) },
             totals = Totals(chars, timed, lines, seconds),
