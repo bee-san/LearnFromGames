@@ -252,13 +252,19 @@ check_library() {
     x86) machine=Intel\ 80386 ;;
     *) die "unknown ABI $abi" ;;
   esac
-  "$LLVM_BIN/llvm-readelf" -h "$so" | grep -q "Machine:.*$machine" || die "$so is not $machine"
-  if "$LLVM_BIN/llvm-readelf" -lW "$so" | awk '$1 == "LOAD" && $NF != "0x4000" { bad = 1 } END { exit !bad }'; then
+  # Each tool's output is read whole before it is searched: under pipefail, `tool | grep -q` fails whenever grep
+  # stops at its match before the tool has finished writing.
+  local header segments symbols
+  header="$("$LLVM_BIN/llvm-readelf" -h "$so")"
+  grep -q "Machine:.*$machine" <<<"$header" || die "$so is not $machine"
+  segments="$("$LLVM_BIN/llvm-readelf" -lW "$so")"
+  if awk '$1 == "LOAD" && $NF != "0x4000" { bad = 1 } END { exit !bad }' <<<"$segments"; then
     die "$so has a LOAD segment that is not 16 KB aligned"
   fi
+  symbols="$("$LLVM_BIN/llvm-nm" -D --defined-only "$so")"
   for sym in SetFileContentFunctions InitOCRUsingCallback SetOCRLightMode GetMaxImageDimension PerformOCR \
     FreeLibraryAllocatedCharArray UninitializeOCR; do
-    "$LLVM_BIN/llvm-nm" -D --defined-only "$so" | grep -q " T $sym\$" || die "$so does not export $sym"
+    grep -q " T $sym\$" <<<"$symbols" || die "$so does not export $sym"
   done
   needed="$("$LLVM_BIN/llvm-readelf" -d "$so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')"
   for lib in $needed; do
