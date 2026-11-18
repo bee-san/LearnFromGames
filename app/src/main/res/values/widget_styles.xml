@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widgets' type, in the app's palette (ui/Theme.kt). -->
+<resources>
+    <color name="widget_text">#E8E5EB</color>
+    <color name="widget_dim">#AAA8B2</color>
+    <color name="widget_accent">#B1A5EE</color>
+    <color name="widget_ok">#8BB79B</color>
+
+    <style name="Widget.Lfg.Title" parent="">
+        <item name="android:textColor">@color/widget_text</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+
+    <style name="Widget.Lfg.Label" parent="Widget.Lfg.Title">
+        <item name="android:textColor">@color/widget_dim</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="Widget.Lfg.Streak" parent="Widget.Lfg.Title">
+        <item name="android:textColor">@color/widget_dim</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+    </style>
+
+    <!-- A figure fits its line: it shrinks for a long goal rather than wrap. -->
+    <style name="Widget.Lfg.Figure" parent="Widget.Lfg.Title">
+        <item name="android:textSize">22sp</item>
+        <item name="android:autoSizeTextType">uniform</item>
+        <item name="android:autoSizeMinTextSize">11sp</item>
+        <item name="android:autoSizeMaxTextSize">22sp</item>
+        <item name="android:autoSizeStepGranularity">1sp</item>
+        <item name="android:gravity">start|center_vertical</item>
+        <item name="android:ellipsize">none</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+    </style>
+
+    <style name="Widget.Lfg.Detail" parent="Widget.Lfg.Title">
+        <item name="android:textColor">@color/widget_dim</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:fontFamily">sans-serif</item>
+    </style>
+
+    <style name="Widget.Lfg.Day" parent="Widget.Lfg.Detail">
+        <item name="android:textSize">11sp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+
+    <!-- A day's bar: a determinate progress bar with no height limit, filled from the bottom. -->
+    <style name="Widget.Lfg.Bar" parent="">
+        <item name="android:indeterminate">false</item>
+        <item name="android:indeterminateOnly">false</item>
+        <item name="android:progressDrawable">@drawable/widget_bar</item>
+        <item name="android:max">1000</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:maxWidth">1000dp</item>
+        <item name="android:minHeight">0dp</item>
+        <item name="android:maxHeight">1000dp</item>
+        <item name="android:mirrorForRtl">false</item>
+    </style>
+</resources>

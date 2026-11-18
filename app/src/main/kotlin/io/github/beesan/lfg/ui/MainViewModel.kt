@@ -73,6 +73,8 @@ data class DictionariesState(val busy: Boolean = false, val error: String? = nul
 data class StatsState(
     val days: List<ReadingStats.DayTotals> = emptyList(),
     val streaks: ReadingStats.Streaks = ReadingStats.Streaks(0, 0),
+    /** The lines have been counted: until then an empty [days] means not yet, not nothing read. */
+    val loaded: Boolean = false,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -108,6 +110,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             StatsState(
                 days = days,
                 streaks = ReadingStats.streaks(days.map { it.day }, ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, zone)),
+                loaded = true,
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsState())

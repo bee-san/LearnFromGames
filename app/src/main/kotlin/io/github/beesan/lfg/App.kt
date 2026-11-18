@@ -12,16 +12,21 @@ import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionaryRepository
 import io.github.beesan.lfg.dict.DictionaryWorker
 import io.github.beesan.lfg.ocr.ModelStore
+import io.github.beesan.lfg.widget.StatsWidgets
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import java.io.File
 
 /** The app's few long-lived parts, shared by the screens and the accessibility service. */
 class App : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val database by lazy { LfgDatabase.open(this) }
-    val lines by lazy { LineStore(database) }
+    val lines by lazy { LineStore(database) { StatsWidgets.requestUpdate(this) } }
     val dictionaries by lazy { DictionaryRepository(this) }
     val anki by lazy { AnkiBridge(this) }
     val settings by lazy { Settings(this) }
@@ -33,5 +38,7 @@ class App : Application() {
         super.onCreate()
         // The dictionary is already downloading when the set-up screen first shows.
         if (dictionaries.state.value is DictState.Missing || models.meikiFiles() == null || models.screenAiDir() == null) DictionaryWorker.start(this)
+        // The widgets measure against the goals, so they redraw as soon as one changes.
+        scope.launch { settings.prefs.map { it.goals }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
     }
 }

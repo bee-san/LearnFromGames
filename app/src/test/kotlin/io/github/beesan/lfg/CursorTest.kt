@@ -12,6 +12,7 @@ import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.core.TextCursor
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.ocr.Vocr
+import io.github.beesan.lfg.widget.WidgetData
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -300,6 +301,32 @@ class CursorTest {
         assertFalse(timeOnly.charsMet(days[1]))                       // a goal that is off is never met
         assertFalse(ReadingGoals().met(days[1]))
         assertEquals(0, ReadingGoals(chars = 1).progress(emptyList(), today, today).today.chars)
+    }
+
+    @Test
+    fun theWeekWidgetChartsAgainstTheGoalAndTodayIsLast() {
+        val today = LocalDate.of(2026, 11, 18) // a Wednesday
+        fun day(back: Long, minutes: Int, chars: Int) = ReadingStats.DayTotals(today.minusDays(back), 10, chars, chars, minutes * 60.0)
+        val days = listOf(day(0, 30, 2000), day(1, 90, 6000), day(3, 1, 50))
+
+        val timed = WidgetData.of(days, ReadingGoals(minutes = 60, chars = 5000), today)
+        assertFalse(timed.weekInChars)
+        val chart = timed.chart(Locale.UK)
+        assertEquals(listOf("T", "F", "S", "S", "M", "T", "W"), chart.bars.map { it.letter })
+        assertEquals(listOf(false, false, false, false, false, false, true), chart.bars.map { it.today })
+        assertEquals(900, chart.bars[5].level)                     // the tallest day reaches nine tenths
+        assertEquals(600, chart.goal)                              // 1 h of 1.5 h
+        assertEquals(listOf(5), chart.bars.indices.filter { chart.bars[it].met })
+        assertEquals(WidgetData.MIN_LEVEL, chart.bars[3].level)    // a minute still shows
+        assertEquals(0, chart.bars[2].level)
+        assertEquals(listOf(0.5f to WidgetData.Ring.TIME, 0.4f to WidgetData.Ring.CHARS), timed.rings)
+        assertEquals(2, timed.streak)
+
+        val chars = WidgetData.of(days, ReadingGoals(chars = 8000), today)
+        assertTrue(chars.weekInChars)
+        assertEquals(900, chars.chart(Locale.UK).goal)             // the goal is above every day
+        assertNull(WidgetData.of(days, ReadingGoals(), today).chart(Locale.UK).goal)
+        assertEquals(listOf("1" to "h", "5" to "min"), WidgetData.timeParts(3900.0))
     }
 
     @Test

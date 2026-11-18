@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A day's bar: a pill-shaped track the height of the chart, and a pill grown
+  up from the bottom to the day's share of it. A scale (not a clip) keeps the
+  top rounded at every height. Its colour is set from code.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/background">
+        <shape android:shape="rectangle">
+            <corners android:radius="99dp" />
+            <solid android:color="#312F44" />
+        </shape>
+    </item>
+    <item android:id="@android:id/progress">
+        <scale
+            android:scaleGravity="bottom"
+            android:scaleHeight="100%">
+            <shape android:shape="rectangle">
+                <corners android:radius="99dp" />
+                <solid android:color="#FFFFFF" />
+            </shape>
+        </scale>
+    </item>
+</layer-list>

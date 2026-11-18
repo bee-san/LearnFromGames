@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -36,12 +37,17 @@ import io.github.beesan.lfg.capture.LfgAccessibilityService
 import io.github.beesan.lfg.capture.SoundCapture
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.ocr.ScreenAi
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
     private val model: MainViewModel by viewModels()
 
+    /** A page asked for from outside: a widget opens Stats. */
+    private val requested = MutableStateFlow<Page?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) take(intent)
         setContent {
             val setup by model.setup.collectAsStateWithLifecycle()
             val dictionary by model.dictionary.collectAsStateWithLifecycle()
@@ -74,6 +80,11 @@ class MainActivity : ComponentActivity() {
             val microphone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
                 // Android routes game audio capture through its recording permission.
                 if (granted) recordConsent.launch(SoundCapture.consentIntent(this))
+            }
+            val asked by requested.collectAsState()
+            LaunchedEffect(asked) {
+                asked?.let { page = it }
+                requested.value = null
             }
             val ready = setup.complete(dictionary, reader)
             val showPractice = page == Page.PRACTICE || (page == Page.HOME && ready && !practiceDone)
@@ -179,6 +190,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        take(intent)
+    }
+
+    private fun take(intent: Intent?) {
+        if (intent?.action == ACTION_STATS) requested.value = Page.STATS
+    }
+
     override fun onResume() {
         super.onResume()
         model.refresh()
@@ -208,5 +228,9 @@ class MainActivity : ComponentActivity() {
         true
     } catch (_: ActivityNotFoundException) {
         false
+    }
+
+    companion object {
+        const val ACTION_STATS = "io.github.beesan.lfg.action.STATS"
     }
 }

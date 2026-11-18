@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Today, wide: the goal rings on the left, today's figures beside them. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:clipToOutline="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="16dp">
+
+        <ImageView
+            android:id="@+id/today_rings"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="16dp"
+            android:layout_weight="4"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="5"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="4dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/today_title"
+                    style="@style/Widget.Lfg.Title"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/widget_today_title" />
+
+                <TextView
+                    android:id="@+id/today_streak"
+                    style="@style/Widget.Lfg.Streak"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/today_time"
+                style="@style/Widget.Lfg.Figure"
+                android:layout_width="match_parent"
+                android:layout_height="32dp"
+                android:autoSizeMaxTextSize="28sp" />
+
+            <TextView
+                android:id="@+id/today_chars"
+                style="@style/Widget.Lfg.Figure"
+                android:layout_width="match_parent"
+                android:layout_height="32dp"
+                android:autoSizeMaxTextSize="28sp" />
+
+            <TextView
+                android:id="@+id/today_detail"
+                style="@style/Widget.Lfg.Detail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

@@ -358,6 +358,7 @@ fun StatsScreen(stats: StatsState, goals: ReadingGoals, onGoals: () -> Unit, onB
         Choice(StatsPeriod.entries.map { it.name to it.label }, period.name) { period = StatsPeriod.valueOf(it) }
     }) {
         val today = remember { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, ZoneId.systemDefault()) }
+        if (!stats.loaded) return@Page
         if (stats.days.isEmpty()) {
             Text("Nothing has been read yet.", color = Lfg.Dim, fontSize = 15.sp)
             HorizontalDivider(color = Lfg.Border)

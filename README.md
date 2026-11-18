@@ -57,7 +57,7 @@ Everything runs on the device. The only network use is fetching the readers' mod
 | Controller | L3 + R3 lookup mode: word, line and character steps, held repeat, entry change, add, close. |
 | Dictionaries and lines | Add, order and remove Yomitan dictionaries. Full entry rendering. Cards from a stored line after the session. |
 | Sound, then motion | Sentence audio added to a card when the next line appears, trimmed to the voice by Silero VAD. Android's voice for a card without one. Animated WebP of the line appearing. |
-| Stats | Reading time, characters, speed and streak over 7 days, 30 days, 12 months or all time, against the period before, and a bar for each day or month. Daily goals for hours and characters: today against each, the days that met them, a goal streak, and a goal line on the chart. On [Rubi](https://github.com/bee-san/Rubi_for_vita)'s reading-time rule. |
+| Stats | Reading time, characters, speed and streak over 7 days, 30 days, 12 months or all time, against the period before, and a bar for each day or month. Daily goals for hours and characters: today against each, the days that met them, a goal streak, and a goal line on the chart. Two home screen widgets: today against the goals as rings, and the last seven days as bars ([picture](docs/widgets.png)). On [Rubi](https://github.com/bee-san/Rubi_for_vita)'s reading-time rule. |
 
 ### Against real apps
 
@@ -290,6 +290,7 @@ accessibility services while it runs.
   - `capture` — the accessibility service, the reading pipeline, sound capture
   - `overlay` — tap strips, mark, popup, panel, controller input
   - `ui` — set-up, lines, settings, stats
+  - `widget` — the home screen widgets
 - `fakegame` — the stand-in game
 - `third_party/hoshidicts`, `third_party/libwebp` — submodules; `third_party/vocr` — VOCR's runtime, copied
 - `tools` — `build_screenai.sh`, `make_test_screens.py`, `make_ocr_corpus.py`, `score_ocr.py`, `bench.sh`, `virtual_pad.py`
