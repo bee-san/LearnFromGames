@@ -40,7 +40,7 @@ class App : Application() {
         super.onCreate()
         // The dictionary is already downloading when the set-up screen first shows.
         if (dictionaries.state.value is DictState.Missing || models.meikiFiles() == null || models.screenAiDir() == null) DictionaryWorker.start(this)
-        // The widgets measure against the goals, so they redraw as soon as one changes.
-        scope.launch { settings.prefs.map { it.goals to it.goalCards }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
+        // The widgets measure against the goals and draw in the chosen colours, so they redraw as soon as one changes.
+        scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
     }
 }

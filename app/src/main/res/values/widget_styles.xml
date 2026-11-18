@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The widgets' type, in the app's palette (ui/Theme.kt). -->
+<!-- The widgets' colours for the widget picker's previews: the default palette, Pink in dark (core/Palette.kt).
+     A placed widget takes the palette Settings picked, from code. -->
 <resources>
-    <color name="widget_text">#E8E5EB</color>
-    <color name="widget_dim">#AAA8B2</color>
-    <color name="widget_accent">#B1A5EE</color>
-    <color name="widget_ok">#8BB79B</color>
-    <color name="widget_cards">#6CB8F5</color>
+    <color name="widget_card">#0F0D0E</color>
+    <color name="widget_text">#F5EFF2</color>
+    <color name="widget_dim">#A39AA0</color>
+    <color name="widget_accent">#FF85B8</color>
+    <color name="widget_ok">#5FD38D</color>
+    <color name="widget_cards">#7AB8FF</color>
 
     <style name="Widget.Lfg.Title" parent="">
         <item name="android:textColor">@color/widget_text</item>

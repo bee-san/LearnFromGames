@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -53,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.anki.AnkiStatus
+import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.StatsPeriod
@@ -114,6 +117,7 @@ private fun OnOff(on: Boolean, onChange: (Boolean) -> Unit) = Choice(listOf("on"
 
 @Composable
 fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings", onBack) {
+    Card("Appearance", "Colours, and light or dark", { onOpen(Page.APPEARANCE) })
     Card("Dictionaries", "Add, order and remove dictionaries", { onOpen(Page.DICTIONARIES) })
     Card("Anki", "The note type and deck cards go to", { onOpen(Page.ANKI) })
     Card("Controls", "The lookup shortcut", { onOpen(Page.CONTROLS) })
@@ -212,6 +216,23 @@ fun AnkiScreen(setup: SetupState, onFindAgain: () -> Unit, onConnect: () -> Unit
 }
 
 fun shortcutLabel(prefs: Prefs) = if (prefs.shortcut == Prefs.SHORTCUT_L1_R1) "L1 + R1" else "L3 + R3"
+
+/** The colour scheme, and whether it is light, dark or follows the system. Used by the app, the overlays and the widgets. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AppearanceScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Appearance", onBack) {
+    Text("Theme", color = Lfg.Dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Choice(
+            listOf(Palette.THEME_SYSTEM to "Match system", Palette.THEME_LIGHT to "Light", Palette.THEME_DARK to "Dark"),
+            prefs.theme,
+        ) { v -> onChange { it.copy(theme = v) } }
+    }
+    Text("Colours", color = Lfg.Dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Choice(Palette.SCHEMES, prefs.colours) { v -> onChange { it.copy(colours = v) } }
+    }
+}
 
 @Composable
 fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Controls", onBack) {
@@ -626,4 +647,4 @@ private fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { HOME, LINE, STATS, GOALS, SETTINGS, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }
+enum class Page { HOME, LINE, STATS, GOALS, SETTINGS, APPEARANCE, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }

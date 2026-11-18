@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.ui
 
+import android.graphics.drawable.ColorDrawable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
+import androidx.core.view.WindowCompat
+import io.github.beesan.lfg.core.Palette
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Intent
@@ -65,6 +70,16 @@ class MainActivity : ComponentActivity() {
             val sources by model.sources.collectAsStateWithLifecycle()
             val wordAudio by model.wordAudio.collectAsStateWithLifecycle()
             val recording by SoundCapture.running.collectAsStateWithLifecycle()
+            // The colours Settings picked, light or dark as the theme says, "Match system" following the system.
+            val palette = Palette.of(prefs.colours, prefs.theme, isSystemInDarkTheme())
+            if (Lfg.palette != palette) Lfg.palette = palette
+            SideEffect {
+                window.setBackgroundDrawable(ColorDrawable(palette.bg))
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !palette.dark
+                    isAppearanceLightNavigationBars = !palette.dark
+                }
+            }
             var page by rememberSaveable { mutableStateOf(Page.HOME) }
             val saved = rememberSaveableStateHolder()
 
@@ -180,6 +195,7 @@ class MainActivity : ComponentActivity() {
                         )
                         page == Page.SOURCES -> SourcesScreen(sources, ::back)
                         page == Page.ANKI -> AnkiScreen(setup, model::connectAnki, { ankiPermission.launch(AnkiBridge.PERMISSION) }, ::back)
+                        page == Page.APPEARANCE -> AppearanceScreen(prefs, model::updatePrefs, ::back)
                         page == Page.CONTROLS -> ControlsScreen(prefs, model::updatePrefs, ::back)
                         page == Page.RECOGNITION -> RecognitionScreen(
                             prefs, reader, screenAi, ScreenAi.available(), model::updatePrefs, { model.downloadScreenAi() }, ::back,

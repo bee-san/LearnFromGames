@@ -3,9 +3,11 @@ package io.github.beesan.lfg
 import io.github.beesan.lfg.capture.PixelProbe
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.CharBox
+import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.Sentence
 import io.github.beesan.lfg.core.SettleDetector
 import io.github.beesan.lfg.core.TextLine
+import io.github.beesan.lfg.dict.EntryHtml
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -14,6 +16,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoreTest {
+    @Test
+    fun theThemeFollowsTheSystemUnlessOneIsPicked() {
+        assertTrue(Palette.of(Palette.PINK, Palette.THEME_SYSTEM, systemDark = true).dark)
+        assertFalse(Palette.of(Palette.PINK, Palette.THEME_SYSTEM, systemDark = false).dark)
+        assertFalse(Palette.of(Palette.PINK, Palette.THEME_LIGHT, systemDark = true).dark)
+        assertTrue(Palette.of(Palette.PINK, Palette.THEME_DARK, systemDark = false).dark)
+        // Dark is true black.
+        assertEquals(0xFF000000.toInt(), Palette.of(Palette.MONO, Palette.THEME_DARK, systemDark = false).bg)
+        // The entry page reads the palette as CSS variables.
+        val page = EntryHtml.page(null, emptyList(), "No entry", palette = Palette.of(Palette.PINK, Palette.THEME_LIGHT, systemDark = true))
+        assertTrue(page.contains(":root{color-scheme:light;--bg:#f8f2f5;"))
+        assertFalse(EntryHtml.BASE_CSS.contains("#22232c"))
+    }
+
     /** Four 20 px characters with 4 px gaps, starting at x=100. */
     private fun horizontal(text: String = "森の奥で") = TextLine(
         text = text,

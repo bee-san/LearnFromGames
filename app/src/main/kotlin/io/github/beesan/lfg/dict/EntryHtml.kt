@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.dict
 
+import io.github.beesan.lfg.core.Palette
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -41,9 +42,9 @@ object EntryHtml {
     data class Style(val dictionary: String, val css: String)
 
     /** The whole page for a WebView: the app's look, then each dictionary's own, then the entry. */
-    fun page(entry: Entry?, styles: List<Style>, message: String? = null, audio: Boolean = false): String = buildString {
+    fun page(entry: Entry?, styles: List<Style>, message: String? = null, audio: Boolean = false, palette: Palette = DEFAULT_PALETTE): String = buildString {
         append("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>")
-        append(BASE_CSS)
+        append(colours(palette)).append(BASE_CSS)
         for (style in styles) append(scope(style.css, style.dictionary))
         append("</style></head><body>")
         if (entry == null) {
@@ -63,9 +64,9 @@ object EntryHtml {
      * `lfgState`, so pressing a button does not reload the page and lose the
      * scroll.
      */
-    fun list(entries: List<Entry>, styles: List<Style>, audio: (Entry) -> Boolean): String = buildString {
+    fun list(entries: List<Entry>, styles: List<Style>, palette: Palette, audio: (Entry) -> Boolean): String = buildString {
         append("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>")
-        append(BASE_CSS)
+        append(colours(palette)).append(BASE_CSS)
         for (style in styles) append(scope(style.css, style.dictionary))
         append("</style><script>").append(STATE_SCRIPT).append("</script></head><body>")
         entries.forEachIndexed { i, entry ->
@@ -352,14 +353,26 @@ object EntryHtml {
         "var e=document.getElementById('e'+i);if(e){if(i==c)e.setAttribute('data-current','');else e.removeAttribute('data-current');}}" +
         "if(go){var t=document.getElementById('e'+c);if(t)t.scrollIntoView();}}"
 
-    /** The app's own look for an entry: Hachidori's default theme. */
+    private val DEFAULT_PALETTE = Palette.of(Palette.PINK, Palette.THEME_DARK, systemDark = true)
+
+    /** The palette as the CSS variables [BASE_CSS] reads. */
+    fun colours(p: Palette): String {
+        fun hex(c: Int) = "#%06x".format(c and 0xFFFFFF)
+        return ":root{color-scheme:" + (if (p.dark) "dark" else "light") +
+            ";--bg:" + hex(p.bg) + ";--surface:" + hex(p.surface) + ";--border:" + hex(p.border) + ";--border-strong:" + hex(p.borderStrong) +
+            ";--text:" + hex(p.text) + ";--dim:" + hex(p.dim) + ";--accent:" + hex(p.accent) + ";--soft:" + hex(p.soft) +
+            ";--ok:" + hex(p.ok) + ";--ok-soft:" + hex(p.okSoft) + ";--chip:" + hex(p.chip) +
+            ";--freq-name:" + hex(p.freqName) + ";--freq-name-text:" + hex(p.freqNameText) + "}"
+    }
+
+    /** The app's own look for an entry, after Hachidori's; its colours are [colours]' variables. */
     const val BASE_CSS = """
-html{background:#22232c;color:#e8e5eb;font:16px/1.5 system-ui,sans-serif;-webkit-text-size-adjust:100%}
+html{background:var(--bg);color:var(--text);font:16px/1.5 system-ui,sans-serif;-webkit-text-size-adjust:100%}
 body{margin:0;padding:12px 16px 16px;overflow-wrap:anywhere}
 :lang(ja){font-family:"Noto Sans CJK JP","Noto Sans JP",sans-serif}
 .lfg-head{display:flex;align-items:flex-end;column-gap:.75em}
 .lfg-term{font-size:1.75em;font-weight:650;line-height:1.2}
-.lfg-term rt{font-size:.45em;font-weight:400;color:#aaa8b2}
+.lfg-term rt{font-size:.45em;font-weight:400;color:var(--dim)}
 .lfg-graph{flex:none;margin-bottom:.3em;color:#59b2ff}
 .lfg-graph[data-pitch="atamadaka"]{color:#ff8686}
 .lfg-graph[data-pitch="nakadaka"]{color:#ff9b54}
@@ -367,45 +380,45 @@ body{margin:0;padding:12px 16px 16px;overflow-wrap:anywhere}
 .lfg-graph[data-pitch="kifuku"]{color:#bc99f6}
 .lfg-graph polyline{fill:none;stroke:currentColor;stroke-width:2}
 .lfg-graph circle{fill:currentColor}
-.lfg-graph circle.lfg-particle{fill:#22232c;stroke:currentColor;stroke-width:2}
+.lfg-graph circle.lfg-particle{fill:var(--bg);stroke:currentColor;stroke-width:2}
 .lfg-actions{display:flex;gap:4px;margin-left:auto;align-self:center}
 .lfg-button{display:inline-flex;width:44px;height:44px;border-radius:22px;align-items:center;justify-content:center;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-.lfg-audio{background:#2f303b;color:#e8e5eb}
+.lfg-audio{background:var(--chip);color:var(--text)}
 .lfg-audio svg{width:20px;height:20px;fill:currentColor}
-.lfg-card{border:1.5px solid #b1a5ee;background:#353247;color:#b1a5ee}
+.lfg-card{border:1.5px solid var(--accent);background:var(--soft);color:var(--accent)}
 .lfg-card svg{display:none;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 .lfg-card[data-state="add"] .lfg-i-add,.lfg-card[data-state="adding"] .lfg-i-adding,.lfg-card[data-state="in-anki"] .lfg-i-in-anki,.lfg-card[data-state="waiting"] .lfg-i-waiting{display:block}
 .lfg-card[data-state="adding"]{border-style:dashed}
-.lfg-card[data-state="in-anki"]{border-color:#8bb79b;background:#2b3530;color:#8bb79b}
-.lfg-card[data-state="waiting"]{border-color:#454653;background:#2b2b36;color:#aaa8b2}
-.lfg-entry+.lfg-entry{border-top:2px solid #747586;margin-top:14px;padding-top:12px}
-.lfg-entry[data-current] .lfg-term{color:#b1a5ee}
+.lfg-card[data-state="in-anki"]{border-color:var(--ok);background:var(--ok-soft);color:var(--ok)}
+.lfg-card[data-state="waiting"]{border-color:var(--border);background:var(--surface);color:var(--dim)}
+.lfg-entry+.lfg-entry{border-top:2px solid var(--border-strong);margin-top:14px;padding-top:12px}
+.lfg-entry[data-current] .lfg-term{color:var(--accent)}
 .lfg-meta{display:flex;flex-wrap:wrap;gap:4px;margin:.35em 0 .15em}
 .lfg-pitch-tag,.lfg-freq{display:inline-flex;font-size:.72em;line-height:1.5;border-radius:4px;overflow:hidden;white-space:nowrap}
-.lfg-pitch-tag{padding:0 .45em;color:#22232c;background:#59b2ff}
+.lfg-pitch-tag{padding:0 .45em;color:#111111;background:#59b2ff}
 .lfg-pitch-tag b{margin-left:.3em}
 .lfg-pitch-tag[data-pitch="atamadaka"]{background:#ff8686}
 .lfg-pitch-tag[data-pitch="nakadaka"]{background:#ff9b54}
 .lfg-pitch-tag[data-pitch="odaka"]{background:#67e47d}
 .lfg-pitch-tag[data-pitch="kifuku"]{background:#bc99f6}
-.lfg-freq-name{padding:0 .45em;background:#347d35;color:#fff}
-.lfg-freq-value{padding:0 .45em;background:#2f303b;color:#e8e5eb}
-.lfg-path{color:#aaa8b2;font-size:.8em}
+.lfg-freq-name{padding:0 .45em;background:var(--freq-name);color:var(--freq-name-text)}
+.lfg-freq-value{padding:0 .45em;background:var(--chip);color:var(--text)}
+.lfg-path{color:var(--dim);font-size:.8em}
 .lfg-senses{margin:.4em 0 0;padding-left:1.4em}
 .lfg-senses>li{margin:.15em 0}
 .lfg-tags{margin-right:.4em}
-.lfg-tag{display:inline-block;font-size:.7em;color:#aaa8b2;border:1px solid #454653;border-radius:3px;padding:0 .3em;margin-right:.25em;vertical-align:middle}
-.lfg-dict{border-top:1px solid #454653;margin-top:.5em;padding-top:.5em}
-.lfg-source{display:inline-block;font-size:.72em;font-weight:600;line-height:1.5;color:#b1a5ee;background:#353247;border-radius:4px;padding:0 .45em}
-.lfg-message{color:#aaa8b2}
+.lfg-tag{display:inline-block;font-size:.7em;color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:0 .3em;margin-right:.25em;vertical-align:middle}
+.lfg-dict{border-top:1px solid var(--border);margin-top:.5em;padding-top:.5em}
+.lfg-source{display:inline-block;font-size:.72em;font-weight:600;line-height:1.5;color:var(--accent);background:var(--soft);border-radius:4px;padding:0 .45em}
+.lfg-message{color:var(--dim)}
 .gloss-text,.gloss-list>li{white-space:pre-line}
 .gloss-list,.gloss-sc-ul,.gloss-sc-ol{margin:0;padding-left:1.3em}
 ul[data-sc-content="glossary"]{display:inline;padding:0}
 ul[data-sc-content="glossary"]>li{display:inline}
 ul[data-sc-content="glossary"]>li:not(:last-child)::after{content:"; "}
 .gloss-sc-table{border-collapse:collapse;margin:.3em 0}
-.gloss-sc-td,.gloss-sc-th{border:1px solid #454653;padding:.15em .45em}
-.gloss-sc-a{color:#b1a5ee;text-decoration:underline}
+.gloss-sc-td,.gloss-sc-th{border:1px solid var(--border);padding:.15em .45em}
+.gloss-sc-a{color:var(--accent);text-decoration:underline}
 .gloss-image{max-width:100%;height:auto}
 """
 }

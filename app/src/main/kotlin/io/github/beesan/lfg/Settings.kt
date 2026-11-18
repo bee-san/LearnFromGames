@@ -2,6 +2,7 @@
 package io.github.beesan.lfg
 
 import android.content.Context
+import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingGoals
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,10 +24,14 @@ data class Prefs(
     /** An animated picture of the moments before the card was made, instead of a still. */
     val animatedPicture: Boolean = false,
     /** Daily reading goals on the stats screen; 0 is none. */
-    val goalMinutes: Int = 0,
-    val goalChars: Int = 0,
+    val goalMinutes: Int = 60,
+    val goalChars: Int = 5_000,
     /** Cards a day, a ring on the Today widget; 0 is none. Not part of the reading goals' streak. */
-    val goalCards: Int = 0,
+    val goalCards: Int = 10,
+    /** One of [Palette.SCHEMES]. */
+    val colours: String = Palette.PINK,
+    /** [Palette.THEME_SYSTEM], [Palette.THEME_LIGHT] or [Palette.THEME_DARK]. */
+    val theme: String = Palette.THEME_SYSTEM,
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
@@ -56,6 +61,8 @@ class Settings(context: Context) {
             goalMinutes = store.getInt("goalMinutes", d.goalMinutes),
             goalChars = store.getInt("goalChars", d.goalChars),
             goalCards = store.getInt("goalCards", d.goalCards),
+            colours = store.getString("colours", d.colours) ?: d.colours,
+            theme = store.getString("theme", d.theme) ?: d.theme,
         )
     }
 
@@ -72,6 +79,8 @@ class Settings(context: Context) {
             .putInt("goalMinutes", next.goalMinutes)
             .putInt("goalChars", next.goalChars)
             .putInt("goalCards", next.goalCards)
+            .putString("colours", next.colours)
+            .putString("theme", next.theme)
             .apply()
         _prefs.value = next
     }

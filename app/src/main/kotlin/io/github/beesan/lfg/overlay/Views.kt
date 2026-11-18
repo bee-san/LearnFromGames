@@ -14,21 +14,24 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.TextView
+import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.lookup.LookupState
 
-/** The app's palette as plain colour ints, for the Views drawn over the game. */
+/**
+ * The app's colours as plain colour ints, for the Views drawn over the game.
+ * [OverlayHost] sets [palette] from Settings and makes its views again when
+ * it changes.
+ */
 internal object Ink {
-    const val BG = 0xFF22232C.toInt()
-    const val SURFACE = 0xFF2B2B36.toInt()
-    const val BORDER = 0xFF454653.toInt()
-    const val BORDER_STRONG = 0xFF747586.toInt()
-    const val TEXT = 0xFFE8E5EB.toInt()
-    const val DIM = 0xFFAAA8B2.toInt()
-    const val ACCENT = 0xFFB1A5EE.toInt()
-    const val FILL = 0xFFA89CE4.toInt()
-    const val SOFT = 0xFF353247.toInt()
-    const val ON_FILL = 0xFF211D30.toInt()
-    const val WASH = 0x3DB1A5EE
+    var palette: Palette = Palette.of(Palette.PINK, Palette.THEME_DARK, systemDark = true)
+
+    val BG get() = palette.bg
+    val BORDER get() = palette.border
+    val BORDER_STRONG get() = palette.borderStrong
+    val TEXT get() = palette.text
+    val DIM get() = palette.dim
+    val ACCENT get() = palette.accent
+    val WASH get() = palette.wash
 }
 
 internal fun Context.dp(value: Float): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics).toInt()

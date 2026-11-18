@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.beesan.lfg.App
+import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
 import java.io.ByteArrayInputStream
@@ -41,7 +42,6 @@ class EntryWebView(
     private var listedCurrent = 0
 
     init {
-        setBackgroundColor(0xFF22232C.toInt())
         settings.javaScriptEnabled = onLink != null
         settings.blockNetworkLoads = true
         settings.allowFileAccess = false
@@ -76,9 +76,10 @@ class EntryWebView(
         }
     }
 
-    fun show(entry: Entry?, styles: List<EntryHtml.Style>, message: String? = null) {
+    fun show(entry: Entry?, styles: List<EntryHtml.Style>, message: String?, palette: Palette) {
         this.entry = entry
-        val html = EntryHtml.page(entry, styles, message, audio = entry != null && audio?.has(entry) == true)
+        setBackgroundColor(palette.bg)
+        val html = EntryHtml.page(entry, styles, message, audio = entry != null && audio?.has(entry) == true, palette = palette)
         load(html)
     }
 
@@ -89,15 +90,16 @@ class EntryWebView(
      * put when a button changes; when L1 or R1 moves the controller to
      * another entry, the list scrolls to it.
      */
-    fun showList(entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, message: String?) {
+    fun showList(entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, message: String?, palette: Palette) {
+        setBackgroundColor(palette.bg)
         val scroll = entries === listed && current != listedCurrent
         listed = entries
         listedCurrent = current
         if (entries.isEmpty()) {
-            load(EntryHtml.page(null, styles, message))
+            load(EntryHtml.page(null, styles, message, palette = palette))
             return
         }
-        load(EntryHtml.list(entries, styles) { audio?.has(it) == true })
+        load(EntryHtml.list(entries, styles, palette) { audio?.has(it) == true })
         val script = "lfgState([" + states.joinToString(",") { "'$it'" } + "],$current,$scroll)"
         if (loaded) evaluateJavascript(script, null) else pending = script
     }
@@ -131,7 +133,7 @@ fun EntryWeb(
 ) {
     AndroidView(
         factory = { EntryWebView(it, media) },
-        update = { it.show(entry, styles, message) },
+        update = { it.show(entry, styles, message, Lfg.palette) },
         modifier = modifier,
     )
 }

@@ -24,6 +24,7 @@ import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.ui.EntryWebView
+import io.github.beesan.lfg.ui.palette
 import io.github.beesan.lfg.lookup.CardButton
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
@@ -200,6 +201,17 @@ class OverlayHost(
 
     private fun render() {
         if (gameDisplay == Display.INVALID_DISPLAY) return
+        // A new scheme, or light and dark swapped: the views take their colours when made, so they are made again.
+        val palette = service.palette(prefs())
+        if (palette != Ink.palette) {
+            Ink.palette = palette
+            (marks + listOfNotNull(popup, panel)).forEach { it.remove() }
+            marks.clear()
+            popup = null
+            popupView = null
+            panel = null
+            panelView = null
+        }
         val host = manager(gameDisplay) ?: return
         val lines = if (gameInFront) state.lines else emptyList()
 
@@ -410,7 +422,7 @@ class OverlayHost(
     }
 
     private fun showEntries(view: EntryWebView, state: LookupState) =
-        view.showList(state.entries, styles(), state.buttons.map { cardState(it) }, state.entryIndex, state.message)
+        view.showList(state.entries, styles(), state.buttons.map { cardState(it) }, state.entryIndex, state.message, Ink.palette)
 
     private fun cardState(button: CardButton) = when (button) {
         CardButton.ADD -> "add"
