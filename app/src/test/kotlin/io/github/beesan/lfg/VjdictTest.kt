@@ -4,7 +4,6 @@ package io.github.beesan.lfg
 import io.github.beesan.lfg.dict.DictJson
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.dict.GlossaryText
-import io.github.beesan.lfg.dict.RubiDictionarySource
 import io.github.beesan.lfg.dict.Vjdict
 import io.github.beesan.lfg.dict.VjdictException
 import io.github.beesan.lfg.dict.VjdictImport
@@ -324,9 +323,10 @@ class VjdictTest {
         val release = temp.newFile("Rubi-0.11.0.zip").apply {
             ZipOutputStream(outputStream()).use { z ->
                 for ((n, b) in listOf(
-                    "data/VitaJPOverlay/dictionaries/vndb.vjdict" to names,
-                    "data/VitaJPOverlay/ocr/ATTRIBUTION.md" to "the reader's models".toByteArray(),
-                    "data/VitaJPOverlay/dictionaries/plaintext.vjdict" to words,
+                    "ux0/data/VitaJPOverlay/dictionaries/vndb-names.vjdict" to names,
+                    "docs/vndb-attribution.txt" to "VNDB".toByteArray(),
+                    "ux0/data/VitaJPOverlay/ocr/MODEL-ATTRIBUTION.md" to "the reader's models".toByteArray(),
+                    "ux0/data/VitaJPOverlay/dictionaries/plaintext.vjdict" to words,
                     "docs/plaintext-attribution.txt" to "Bee's Ultimate Dictionary\nJMdict: EDRDG".toByteArray(),
                 )) { z.putNextEntry(ZipEntry(n)); z.write(b); z.closeEntry() }
             }
@@ -335,6 +335,7 @@ class VjdictTest {
         assertEquals("plaintext.vjdict", found.name)
         assertTrue(found.file.readBytes().contentEquals(words))
         assertEquals("Bee's Ultimate Dictionary\nJMdict: EDRDG", found.attribution)
+
         // Rubi wraps its attribution at a fixed width: it reads as paragraphs and list items.
         assertEquals(
             "Bee's Ultimate Dictionary, built once and frozen (release ultimate-v1).\n\nSources:\n\n- Yokubi (CC BY 4.0, summarized)\n- IMABI",
@@ -343,29 +344,6 @@ class VjdictTest {
                     "- Yokubi (CC BY\n  4.0, summarized)\n- IMABI\n",
             ),
         )
-
-        val releases = """[
-          {"tag_name":"v0.12.0-rc1","prerelease":true,"assets":[{"name":"Rubi-0.12.0.zip","size":70000000,"browser_download_url":"https://x/rc.zip"},
-            {"name":"SHA256SUMS","size":340,"browser_download_url":"https://x/rc.sums"}]},
-          {"tag_name":"v0.11.0","prerelease":false,"assets":[
-            {"name":"Rubi-0.11.0-debug.zip","size":67319968,"browser_download_url":"https://x/debug.zip"},
-            {"name":"Rubi-0.11.0.zip","size":67297232,"browser_download_url":"https://x/Rubi-0.11.0.zip"},
-            {"name":"SHA256SUMS","size":340,"browser_download_url":"https://x/SHA256SUMS"}]},
-          {"tag_name":"v0.10.0","assets":[{"name":"Rubi-0.10.0.zip","size":67000000,"browser_download_url":"https://x/old.zip"}]},
-          {"tag_name":"v0.9.0","assets":[{"name":"Rubi-0.9.0.zip","size":4000,"browser_download_url":"https://x/tiny.zip"},
-            {"name":"SHA256SUMS","size":340,"browser_download_url":"https://x/s"}]}
-        ]"""
-        // The release candidate, the zip with no checksums and the one too small to hold the dictionary are passed over.
-        assertEquals(
-            listOf(RubiDictionarySource.Asset("v0.11.0", "Rubi-0.11.0.zip", "https://x/Rubi-0.11.0.zip", 67297232, "https://x/SHA256SUMS")),
-            RubiDictionarySource.candidates(releases),
-        )
-        val sum = "a".repeat(64)
-        val sums = "${"b".repeat(64)}  Rubi-0.11.0-debug.zip\n${sum.uppercase()}  Rubi-0.11.0.zip\n"
-        assertEquals(sum, RubiDictionarySource.checksum(sums, "Rubi-0.11.0.zip"))
-        assertEquals(sum, RubiDictionarySource.checksum("$sum *Rubi-0.11.0.zip", "Rubi-0.11.0.zip"))
-        assertNull(RubiDictionarySource.checksum(sums, "Rubi-0.12.0.zip"))
-        assertEquals(VjdictImport.sha256(temp.newFile().apply { writeText("abc") }), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
     }
 
     @Test

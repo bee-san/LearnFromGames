@@ -29,7 +29,7 @@ object VjdictImport {
      * ATTRIBUTION.md. Null for anything else, which is then imported as a
      * Yomitan zip, as before.
      */
-    fun find(picked: File, pickedName: String, cacheDir: File, preferred: String = RubiDictionarySource.ENTRY): Found? {
+    fun find(picked: File, pickedName: String, cacheDir: File, preferred: String = WORDS): Found? {
         val head = ByteArray(8)
         val n = picked.inputStream().use { it.readNBytes(head, 0, 8) }
         if (n == 8 && Vjdict.magicVersion(head) != 0) return Found(picked, pickedName, null, temporary = false)
@@ -189,8 +189,7 @@ object VjdictImport {
         out.takeIf { it.isNotEmpty() }?.toString()
     }.joinToString("\n\n")
 
-    /** The file's SHA-256 in lower-case hex. */
-    fun sha256(file: File): String {
+    private fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(1 shl 16)
@@ -380,6 +379,9 @@ object VjdictImport {
     private const val BORROWED_AFTER = 1 shl 24
     private val HOSHIDICTS_RULES = Vjdict.RULE_NAMES.take(6)
     private val ATTRIBUTION_FILES = listOf("ATTRIBUTION.md")
+
+    /** Rubi's word dictionary, Bee's Ultimate Dictionary, in its release zip. */
+    private const val WORDS = "plaintext.vjdict"
     private const val DEFAULT_ATTRIBUTION =
         "This dictionary came from a Rubi .vjdict file. Its sources' attribution travels with that file."
 }

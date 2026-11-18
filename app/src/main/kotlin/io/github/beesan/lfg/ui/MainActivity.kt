@@ -62,7 +62,6 @@ class MainActivity : ComponentActivity() {
             val lookup by model.lineLookup.state.collectAsStateWithLifecycle()
             val styles by model.styles.collectAsStateWithLifecycle()
             val dictionaries by model.dictionaries.collectAsStateWithLifecycle()
-            val fetching by model.dictionaryFetch.collectAsStateWithLifecycle()
             val sources by model.sources.collectAsStateWithLifecycle()
             val recording by SoundCapture.running.collectAsStateWithLifecycle()
             var page by rememberSaveable { mutableStateOf(Page.HOME) }
@@ -166,7 +165,6 @@ class MainActivity : ComponentActivity() {
                         page == Page.DICTIONARIES -> DictionariesScreen(
                             state = dictionary,
                             busy = dictionaries,
-                            fetching = fetching,
                             onAdd = { pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
                             onMove = { title, up -> model.moveDictionary(title, up) },
                             onRemove = { model.removeDictionary(it) },

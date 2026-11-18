@@ -126,9 +126,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _dictionaries = MutableStateFlow(DictionariesState())
     val dictionaries: StateFlow<DictionariesState> = _dictionaries
 
-    /** Bee's Ultimate Dictionary downloading by itself, in words; null when it is not. */
-    val dictionaryFetch: StateFlow<String?> = app.dictionaries.fetching
-
     private val _sources = MutableStateFlow<List<DictionarySource>>(emptyList())
     val sources: StateFlow<List<DictionarySource>> = _sources
 
