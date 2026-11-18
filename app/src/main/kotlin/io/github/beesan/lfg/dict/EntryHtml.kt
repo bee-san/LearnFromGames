@@ -245,6 +245,7 @@ body{margin:0;padding:12px 16px 16px;overflow-wrap:anywhere}
 .lfg-tag{display:inline-block;font-size:.7em;color:#aaa8b2;border:1px solid #454653;border-radius:3px;padding:0 .3em;margin-right:.25em;vertical-align:middle}
 .lfg-source{color:#aaa8b2;font-size:.75em;margin:.35em 0 .9em}
 .lfg-message{color:#aaa8b2}
+.gloss-text,.gloss-list>li{white-space:pre-line}
 .gloss-list,.gloss-sc-ul,.gloss-sc-ol{margin:0;padding-left:1.3em}
 ul[data-sc-content="glossary"]{display:inline;padding:0}
 ul[data-sc-content="glossary"]>li{display:inline}

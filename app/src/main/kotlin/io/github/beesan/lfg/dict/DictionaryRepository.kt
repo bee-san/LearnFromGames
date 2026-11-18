@@ -4,6 +4,7 @@ package io.github.beesan.lfg.dict
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -144,6 +145,38 @@ class DictionaryRepository(private val context: Context) {
             null
         } catch (e: Exception) {
             e.message ?: "The dictionary could not be imported."
+        }
+    }
+
+    /**
+     * Imports what the user picked: a Yomitan zip, or Rubi's dictionary (a .vjdict
+     * file, or a zip holding one), which is first turned into a Yomitan zip in the
+     * cache. [name] is the picked file's own, the title of a dictionary that names
+     * none; [status] hears how the conversion is going. Returns null on success,
+     * or what went wrong in words.
+     */
+    suspend fun addPicked(file: File, name: String, status: (String) -> Unit = {}): String? {
+        val found = try {
+            withContext(Dispatchers.IO) { VjdictImport.find(file, name, context.cacheDir) }
+        } catch (e: Exception) {
+            return e.message ?: "The file could not be read."
+        } ?: return addFromZip(file)
+        val zip = File(context.cacheDir, "vjdict-${System.currentTimeMillis()}.zip")
+        return try {
+            withContext(Dispatchers.IO) {
+                VjdictImport.toYomitan(found.file, found.name, found.attribution, zip) { status("Converting… $it%") }
+                // The copy is not needed for the import; its room is.
+                if (found.temporary) found.file.delete()
+            }
+            status("Importing…")
+            addFromZip(zip)
+        } catch (e: Exception) {
+            e.message ?: "The dictionary could not be converted."
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) {
+                zip.delete()
+                if (found.temporary) found.file.delete()
+            }
         }
     }
 

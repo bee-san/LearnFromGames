@@ -134,6 +134,7 @@ fun DictionariesScreen(
 ) = Page("Dictionaries", onBack, actions = { LfgButton(if (busy.busy) "Adding…" else "Add dictionary…", onAdd, primary = true, enabled = !busy.busy) }) {
     val date = remember { SimpleDateFormat("d MMMM yyyy", Locale.getDefault()) }
     busy.error?.let { Text(it, color = Lfg.Error, fontSize = 14.sp) }
+    busy.progress?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
     val list = (state as? DictState.Ready)?.dictionaries ?: emptyList()
     if (list.isEmpty()) Text("No dictionary is installed.", color = Lfg.Dim, fontSize = 15.sp)
     list.forEachIndexed { i, d ->

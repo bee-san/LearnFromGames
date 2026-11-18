@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Context
 import android.content.pm.PackageInstaller
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.beesan.lfg.App
@@ -68,7 +69,8 @@ data class PracticeState(
 
 const val PRACTICE_SENTENCE = "昨日の夜、森の奥で不思議な光を見たんだ。"
 
-data class DictionariesState(val busy: Boolean = false, val error: String? = null)
+/** [progress] says how adding is going when there is more to say than "Adding…" (a Rubi dictionary's conversion). */
+data class DictionariesState(val busy: Boolean = false, val error: String? = null, val progress: String? = null)
 
 data class StatsState(
     val days: List<ReadingStats.DayTotals> = emptyList(),
@@ -259,7 +261,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── dictionaries ─────────────────────────────────────────────────────────
 
-    /** "Add dictionary…": the picked Yomitan zip is copied in and imported. */
+    /** "Add dictionary…": the picked Yomitan zip, or Rubi .vjdict, is copied in and imported. */
     fun addDictionary(uri: Uri) {
         if (_dictionaries.value.busy) return
         _dictionaries.value = DictionariesState(busy = true)
@@ -269,7 +271,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     app.contentResolver.openInputStream(uri)?.use { input -> copy.outputStream().use { input.copyTo(it) } }
                         ?: return@withContext "The file could not be opened."
-                    app.dictionaries.addFromZip(copy)
+                    app.dictionaries.addPicked(copy, displayName(uri)) { _dictionaries.value = DictionariesState(busy = true, progress = it) }
                 } catch (e: Exception) {
                     e.message ?: "The file could not be read."
                 } finally {
@@ -279,6 +281,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _dictionaries.value = DictionariesState(error = error)
         }
     }
+
+    /** The picked file's own name (`plaintext.vjdict`), or empty. */
+    private fun displayName(uri: Uri): String = try {
+        app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+    } catch (_: Exception) {
+        null
+    } ?: ""
 
     fun moveDictionary(title: String, up: Boolean) = viewModelScope.launch { app.dictionaries.move(title, up) }
     fun removeDictionary(title: String) = viewModelScope.launch { app.dictionaries.remove(title) }

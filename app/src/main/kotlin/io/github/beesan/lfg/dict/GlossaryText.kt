@@ -37,8 +37,9 @@ object GlossaryText {
             }
         }
         val out = mutableListOf<String>()
-        // JMdict-style plain glossaries list synonyms of one sense: join them.
-        plain.map(::tidy).filter { it.isNotEmpty() }.takeIf { it.isNotEmpty() }?.let { out += it.joinToString("; ") }
+        // JMdict-style plain glossaries list synonyms of one sense: join them. A
+        // plain string's own line breaks stay (Rubi's kanji lines follow the definition).
+        plain.map(::tidyLines).filter { it.isNotEmpty() }.takeIf { it.isNotEmpty() }?.let { out += it.joinToString("; ") }
         out += structured
         return out
     }
@@ -115,6 +116,8 @@ object GlossaryText {
     }
 
     private fun tidy(text: String) = text.replace(WHITESPACE, " ").trim()
+
+    private fun tidyLines(text: String) = text.lines().map(::tidy).filter { it.isNotEmpty() }.joinToString("\n")
 
     private fun JsonObject.type() = string("type")
     private fun JsonObject.string(key: String) = (this[key] as? JsonPrimitive)?.jsonPrimitive?.content ?: ""
