@@ -5,6 +5,7 @@
     <color name="widget_dim">#AAA8B2</color>
     <color name="widget_accent">#B1A5EE</color>
     <color name="widget_ok">#8BB79B</color>
+    <color name="widget_cards">#6CB8F5</color>
 
     <style name="Widget.Lfg.Title" parent="">
         <item name="android:textColor">@color/widget_text</item>

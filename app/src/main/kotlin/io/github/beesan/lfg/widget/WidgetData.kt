@@ -16,6 +16,11 @@ data class WidgetData(
     /** The reading streak, as the Stats screen's. */
     val streak: Int,
     val week: StatsPeriod.View,
+    /** Cards made today, and on each day of [week]. */
+    val cards: Int = 0,
+    val weekCards: List<Int> = emptyList(),
+    /** Cards a day; 0 for no goal. */
+    val cardGoal: Int = 0,
 ) {
     /** The week is charted in characters only when that is the one goal set; otherwise in time. */
     val weekInChars: Boolean get() = goals.chars > 0 && goals.minutes == 0
@@ -44,26 +49,47 @@ data class WidgetData(
         return Chart(bars, if (goal > 0) level(goal) else null)
     }
 
-    /** Today's share of each goal set, time first: what the rings draw. */
-    val rings: List<Pair<Float, Ring>>
-        get() = listOfNotNull(
-            if (goals.minutes > 0) (today.seconds / (goals.minutes * 60)).toFloat() to Ring.TIME else null,
-            if (goals.chars > 0) today.chars.toFloat() / goals.chars to Ring.CHARS else null,
-        )
+    /** Today's share of each goal set, from the outside in: time, characters, cards. What the rings draw. */
+    val rings: List<Pair<Float, Ring>> get() = rings(today.seconds, today.chars, cards)
 
-    enum class Ring { TIME, CHARS }
+    /** Each day of the week's rings, as [rings] for today: the large widget's row of days. */
+    val weekRings: List<List<Pair<Float, Ring>>>
+        get() = week.bars.mapIndexed { i, b -> rings(b.seconds, b.chars, weekCards.getOrElse(i) { 0 }) }
+
+    private fun rings(seconds: Double, chars: Int, cards: Int) = listOfNotNull(
+        if (goals.minutes > 0) (seconds / (goals.minutes * 60)).toFloat() to Ring.TIME else null,
+        if (goals.chars > 0) chars.toFloat() / goals.chars to Ring.CHARS else null,
+        if (cardGoal > 0) cards.toFloat() / cardGoal to Ring.CARDS else null,
+    )
+
+    val cardsMet: Boolean get() = cardGoal > 0 && cards >= cardGoal
+
+    enum class Ring { TIME, CHARS, CARDS }
 
     companion object {
         const val LEVELS = 1000
         const val MIN_LEVEL = 40
 
-        /** `days` as [ReadingStats.byDay] gives them. */
-        fun of(days: List<ReadingStats.DayTotals>, goals: ReadingGoals, today: LocalDate) = WidgetData(
-            today = days.firstOrNull { it.day == today } ?: ReadingStats.DayTotals(today, 0, 0, 0, 0.0),
-            goals = goals,
-            streak = ReadingStats.streaks(days.map { it.day }, today).current,
-            week = StatsPeriod.DAYS_7.view(days, today),
-        )
+        /** `days` as [ReadingStats.byDay] gives them; `cardDays` the day each card was made on, by the same 04:00 rule. */
+        fun of(
+            days: List<ReadingStats.DayTotals>,
+            goals: ReadingGoals,
+            today: LocalDate,
+            cardDays: List<LocalDate> = emptyList(),
+            cardGoal: Int = 0,
+        ): WidgetData {
+            val week = StatsPeriod.DAYS_7.view(days, today)
+            val perDay = cardDays.groupingBy { it }.eachCount()
+            return WidgetData(
+                today = days.firstOrNull { it.day == today } ?: ReadingStats.DayTotals(today, 0, 0, 0, 0.0),
+                goals = goals,
+                streak = ReadingStats.streaks(days.map { it.day }, today).current,
+                week = week,
+                cards = perDay[today] ?: 0,
+                weekCards = week.bars.map { perDay[it.first] ?: 0 },
+                cardGoal = cardGoal,
+            )
+        }
 
         /** "42 min", "1 h 5 min": the figure and unit pairs, so the units can be drawn smaller. */
         fun timeParts(seconds: Double): List<Pair<String, String>> {

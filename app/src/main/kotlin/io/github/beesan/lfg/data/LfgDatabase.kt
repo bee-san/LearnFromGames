@@ -88,6 +88,10 @@ interface CardDao {
     @Query("UPDATE cards SET audio_name = :name WHERE id = :id")
     suspend fun setAudio(id: Long, name: String)
 
+    /** When each card was made, added or still waiting; a failed one was never made. */
+    @Query("SELECT created_at FROM cards WHERE state != 'failed'")
+    suspend fun madeTimes(): List<Long>
+
     @Query("SELECT * FROM cards WHERE state = 'pending' ORDER BY created_at")
     suspend fun pending(): List<Card>
 

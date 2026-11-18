@@ -25,6 +25,8 @@ data class Prefs(
     /** Daily reading goals on the stats screen; 0 is none. */
     val goalMinutes: Int = 0,
     val goalChars: Int = 0,
+    /** Cards a day, a ring on the Today widget; 0 is none. Not part of the reading goals' streak. */
+    val goalCards: Int = 0,
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
@@ -53,6 +55,7 @@ class Settings(context: Context) {
             animatedPicture = store.getBoolean("animatedPicture", d.animatedPicture),
             goalMinutes = store.getInt("goalMinutes", d.goalMinutes),
             goalChars = store.getInt("goalChars", d.goalChars),
+            goalCards = store.getInt("goalCards", d.goalCards),
         )
     }
 
@@ -68,6 +71,7 @@ class Settings(context: Context) {
             .putBoolean("animatedPicture", next.animatedPicture)
             .putInt("goalMinutes", next.goalMinutes)
             .putInt("goalChars", next.goalChars)
+            .putInt("goalCards", next.goalCards)
             .apply()
         _prefs.value = next
     }

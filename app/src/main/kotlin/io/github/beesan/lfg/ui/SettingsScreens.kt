@@ -349,6 +349,11 @@ fun GoalsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -
             onChange { it.copy(goalChars = v) }
         }
     }
+    Card("Cards per day", "Cards made, added or waiting for AnkiDroid. A third ring on the Today widget.") {
+        Stepper(if (prefs.goalCards == 0) "Off" else "${prefs.goalCards}", prefs.goalCards, ReadingGoals.CARD_STEPS) { v ->
+            onChange { it.copy(goalCards = v) }
+        }
+    }
     Text(
         "A day runs from 4:00 to 4:00, so reading after midnight counts towards the day before. Stats shows today against each goal, " +
             "the days that met it, and a line on the chart of each day.",

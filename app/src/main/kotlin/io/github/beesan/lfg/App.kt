@@ -33,7 +33,7 @@ class App : Application() {
     val anki by lazy { AnkiBridge(this) }
     val settings by lazy { Settings(this) }
     val media by lazy { MediaAttacher(this, scope, anki, database, { settings.prefs.value }, Speech(this)) }
-    val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media"), wordAudio) }
+    val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media"), wordAudio) { StatsWidgets.requestUpdate(this) } }
     val models by lazy { ModelStore(this) }
 
     override fun onCreate() {
@@ -41,6 +41,6 @@ class App : Application() {
         // The dictionary is already downloading when the set-up screen first shows.
         if (dictionaries.state.value is DictState.Missing || models.meikiFiles() == null || models.screenAiDir() == null) DictionaryWorker.start(this)
         // The widgets measure against the goals, so they redraw as soon as one changes.
-        scope.launch { settings.prefs.map { it.goals }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
+        scope.launch { settings.prefs.map { it.goals to it.goalCards }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
     }
 }
