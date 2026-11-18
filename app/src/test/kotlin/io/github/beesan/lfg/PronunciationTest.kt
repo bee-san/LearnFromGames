@@ -49,16 +49,23 @@ class PronunciationTest {
     }
 
     @Test
-    fun theReadingIsDrawnWithItsPitch() {
+    fun theAccentIsDrawnAsAGraph() {
         val accent = Pronunciation.accents(entry("卵", "たまご", 2)).single()
         assertEquals(listOf(false, true, false, false), accent.high)
-        assertEquals(
-            """<span class="lfg-reading lfg-pitched" lang="ja" data-pitch="nakadaka"><span class="lfg-mora">た</span>""" +
-                """<span class="lfg-mora lfg-high lfg-drop">ま</span><span class="lfg-mora">ご</span></span>""",
-            EntryHtml.pitched(accent),
-        )
-        // 尾高 drops after the last mora, onto the particle.
-        assertTrue(EntryHtml.pitched(Pronunciation.accents(entry("橋", "はし", 2)).single()).endsWith("""<span class="lfg-mora lfg-high lfg-drop">し</span></span>"""))
+        val graph = EntryHtml.graph(accent)
+        assertTrue(graph.contains("""data-pitch="nakadaka" role="img" aria-label="中高 2""""))
+        assertTrue(graph.contains("""<polyline points="6,19 20,5 34,19 48,19"/>"""))
+        // The last dot is the particle after the word.
+        assertTrue(graph.endsWith("""<circle cx="48" cy="19" r="3.5" class="lfg-particle"/></svg>"""))
+    }
+
+    @Test
+    fun theReadingSitsOverTheKanjiAsFurigana() {
+        assertEquals("<ruby>新<rt>あたら</rt></ruby>しい", EntryHtml.furigana("新しい", "あたらしい"))
+        assertEquals("お<ruby>茶<rt>ちゃ</rt></ruby>", EntryHtml.furigana("お茶", "おちゃ"))
+        assertEquals("<ruby>今日<rt>きょう</rt></ruby>", EntryHtml.furigana("今日", "きょう"))
+        assertEquals("ひらがな", EntryHtml.furigana("ひらがな", "ひらがな"))
+        assertEquals("カタカナ", EntryHtml.furigana("カタカナ", "かたかな"))
     }
 
     @Test
@@ -71,6 +78,10 @@ class PronunciationTest {
         assertTrue(html.contains("""<span class="lfg-freq-name">JPDB</span><span class="lfg-freq-value">1234㋕</span>"""))
         assertTrue(html.contains("""href="${EntryHtml.AUDIO_URL}""""))
         assertFalse(EntryHtml.body(e).contains("lfg-audio"))
+        // In the popup's list each entry has its own buttons.
+        val listed = EntryHtml.body(e, audio = true, index = 3)
+        assertTrue(listed.contains("""href="${EntryHtml.AUDIO_URL}/3""""))
+        assertTrue(listed.contains("""id="c3" href="${EntryHtml.CARD_URL}/3" data-state="add""""))
         assertEquals("中高 2 · JPDB 1234㋕", Pronunciation.summary(e))
         // Nothing extra for an entry with neither.
         assertFalse(EntryHtml.body(Entry(expression = "見る", reading = "みる")).contains("lfg-meta"))

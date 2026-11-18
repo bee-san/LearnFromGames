@@ -156,6 +156,20 @@ class AnkiBridge(private val context: Context) {
     fun isDuplicate(target: AnkiTarget, expression: String): Boolean =
         api.findDuplicateNotes(target.modelId, expression)?.isNotEmpty() == true
 
+    /** The note already holding this word, or null. */
+    fun noteId(target: AnkiTarget, expression: String): Long? =
+        api.findDuplicateNotes(target.modelId, expression)?.firstOrNull()?.id
+
+    /**
+     * Opens AnkiDroid's card browser on one note, through its
+     * `anki://x-callback-url/browser?search=` link (AnkiDroid's IntentHandler,
+     * in 2.25 and later; with an older AnkiDroid it throws ActivityNotFoundException).
+     */
+    fun openNote(noteId: Long) {
+        val link = Uri.parse("anki://x-callback-url/browser").buildUpon().appendQueryParameter("search", "nid:$noteId").build()
+        context.startActivity(Intent(Intent.ACTION_VIEW, link).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     /** Stores a picture in AnkiDroid's media folder and returns the `<img>` tag for the field, or null. */
     fun addPicture(file: File, preferredName: String): String? = addMedia(file, preferredName, "image")
 

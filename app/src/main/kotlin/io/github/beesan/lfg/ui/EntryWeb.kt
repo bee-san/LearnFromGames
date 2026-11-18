@@ -17,20 +17,30 @@ import io.github.beesan.lfg.dict.EntryHtml
 import java.io.ByteArrayInputStream
 
 /**
- * A WebView that shows one dictionary entry in full: pictures, tables and
- * each dictionary's own styling. It runs no script and loads nothing from the
- * network; pictures come from the dictionary's own files. The audio button
- * is a link the view catches and answers by playing the word.
+ * A WebView that shows dictionary entries in full: pictures, tables and
+ * each dictionary's own styling. It loads nothing from the network; pictures
+ * come from the dictionary's own files. The audio button is a link the view
+ * catches and answers by playing the word.
+ *
+ * With [onLink] it is the popup over a game: it shows every entry of a lookup
+ * ([showList]) and hands each button's link to [onLink]. Only then does it run
+ * script, the page's own `lfgState`, which sets the buttons without a reload.
  */
-@SuppressLint("ViewConstructor")
-class EntryWebView(context: Context, private val media: (dictionary: String, path: String) -> ByteArray?) : WebView(context) {
+@SuppressLint("ViewConstructor", "SetJavaScriptEnabled")
+class EntryWebView(
+    context: Context,
+    private val media: (dictionary: String, path: String) -> ByteArray?,
+    private val onLink: ((Uri) -> Unit)? = null,
+) : WebView(context) {
     private var shown: String? = null
     private var entry: Entry? = null
     private val audio = (context.applicationContext as? App)?.wordAudio
+    private var loaded = false
+    private var pending: String? = null
 
     init {
         setBackgroundColor(0xFF22232C.toInt())
-        settings.javaScriptEnabled = false
+        settings.javaScriptEnabled = onLink != null
         settings.blockNetworkLoads = true
         settings.allowFileAccess = false
         settings.allowContentAccess = false
@@ -49,8 +59,17 @@ class EntryWebView(context: Context, private val media: (dictionary: String, pat
 
             // Links in a dictionary point at other entries; nothing is ever navigated to.
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                if (request.url.toString() == EntryHtml.AUDIO_URL) entry?.let { audio?.play(it) }
+                when {
+                    onLink != null -> onLink.invoke(request.url)
+                    request.url.toString() == EntryHtml.AUDIO_URL -> entry?.let { audio?.play(it) }
+                }
                 return true
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                loaded = true
+                pending?.let { evaluateJavascript(it, null) }
+                pending = null
             }
         }
     }
@@ -58,8 +77,30 @@ class EntryWebView(context: Context, private val media: (dictionary: String, pat
     fun show(entry: Entry?, styles: List<EntryHtml.Style>, message: String? = null) {
         this.entry = entry
         val html = EntryHtml.page(entry, styles, message, audio = entry != null && audio?.has(entry) == true)
+        load(html)
+    }
+
+    /**
+     * Every entry of a lookup with each one's card button in [states]
+     * (`add`, `adding`, `in-anki`, `waiting`) and [current] marked as the
+     * controller's; [scroll] brings that one into view. Only a new lookup
+     * reloads the page, so the scroll stays put when a button changes.
+     */
+    fun showList(entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, scroll: Boolean, message: String?) {
+        if (entries.isEmpty()) {
+            load(EntryHtml.page(null, styles, message))
+            return
+        }
+        load(EntryHtml.list(entries, styles) { audio?.has(it) == true })
+        val script = "lfgState([" + states.joinToString(",") { "'$it'" } + "],$current,$scroll)"
+        if (loaded) evaluateJavascript(script, null) else pending = script
+    }
+
+    private fun load(html: String) {
         if (html == shown) return
         shown = html
+        loaded = false
+        pending = null
         loadDataWithBaseURL("${EntryHtml.MEDIA_SCHEME}://entry/", html, "text/html", "utf-8", null)
     }
 

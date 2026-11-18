@@ -16,11 +16,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
-import io.github.beesan.lfg.App
-import io.github.beesan.lfg.dict.Entry
-import io.github.beesan.lfg.dict.Pronunciation
 import io.github.beesan.lfg.lookup.CardButton
 import io.github.beesan.lfg.lookup.LookupState
 
@@ -79,68 +75,6 @@ internal class CardButtonView(context: Context, onPress: () -> Unit) : TextView(
         isEnabled = enabled
         setTextColor(if (enabled) Ink.ON_FILL else Ink.DIM)
         background = rounded(if (enabled) Ink.FILL else Ink.SOFT, if (enabled) Ink.FILL else Ink.SOFT, context.dp(5f).toFloat())
-    }
-}
-
-/** One dictionary entry as text: the headword, its reading, how it was inflected, and the senses. */
-internal class EntryView(context: Context) : LinearLayout(context) {
-    private val term = context.label(28f, Ink.TEXT, bold = true)
-    private val reading = context.label(15f, Ink.DIM)
-    private val path = context.label(12.5f, Ink.DIM)
-    private val meta = context.label(12.5f, Ink.DIM)
-    private val audio = (context.applicationContext as? App)?.wordAudio
-    private var shown: Entry? = null
-    private val senses = context.label(15f, Ink.TEXT)
-    private val scroll = ScrollView(context)
-
-    init {
-        orientation = VERTICAL
-        val head = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.BOTTOM
-            addView(term)
-            addView(reading, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f); bottomMargin = context.dp(3f) })
-        }
-        addView(head)
-        // A tap on the word says it, when there is word audio for it.
-        head.setOnClickListener { shown?.let { audio?.play(it) } }
-        addView(meta, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(2f) })
-        addView(path, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(2f) })
-        senses.setLineSpacing(context.dp(3f).toFloat(), 1f)
-        scroll.isVerticalScrollBarEnabled = false
-        scroll.isFocusable = false
-        scroll.addView(senses)
-        addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = context.dp(6f) })
-    }
-
-    fun show(entry: Entry?, message: String?) {
-        if (entry == null) {
-            term.text = ""
-            reading.text = ""
-            path.text = ""
-            meta.visibility = View.GONE
-            shown = null
-            senses.text = message ?: ""
-            return
-        }
-        term.text = entry.expression
-        shown = entry
-        reading.text = (if (entry.reading != entry.expression) entry.reading else "") + if (audio?.has(entry) == true) "  🔊" else ""
-        meta.text = Pronunciation.summary(entry)
-        meta.visibility = if (meta.text.isEmpty()) View.GONE else View.VISIBLE
-        path.text = entry.path
-        path.visibility = if (entry.path.isEmpty()) View.GONE else View.VISIBLE
-        senses.text = entry.senses().mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n")
-        scroll.scrollTo(0, 0)
-    }
-
-    /** The right stick scrolls the entry. */
-    fun scrollBy(dy: Int) = scroll.smoothScrollBy(0, dy)
-
-    /** For a wrapped height: the popup grows with the entry up to a cap rather than filling its window. */
-    fun wrapSenses(maxHeight: Int) {
-        scroll.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6f) }
-        senses.maxHeight = maxHeight
     }
 }
 

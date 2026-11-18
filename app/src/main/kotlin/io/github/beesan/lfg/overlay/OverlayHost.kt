@@ -21,8 +21,10 @@ import android.widget.ScrollView
 import android.widget.TextView
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.ui.EntryWebView
+import io.github.beesan.lfg.lookup.CardButton
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.lookup.LookupState
@@ -75,7 +77,7 @@ class OverlayHost(
         controller,
         swapConfirm = { prefs().swapConfirm },
         onClose = { controller.exitControllerMode() },
-        onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(dy) },
+        onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(0, dy) },
         chordActive = chordActive,
     )
 
@@ -276,13 +278,11 @@ class OverlayHost(
         val view = popupView ?: PopupView(context).also { popupView = it }
         val win = popup ?: Win(view, host.second, POPUP_FLAGS).also { popup = it }
         view.show(state)
-        val width = minOf(context.dp(360f), screen.width * 45 / 100)
-        val maxHeight = screen.height * 55 / 100
-        view.measure(
-            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST),
-        )
-        val height = view.measuredHeight
+        // Portrait: near the full width, as Hachidori's popup is. Landscape: Yomitan's
+        // popup beside the word, which is what GameSentenceMiner's overlay shows.
+        val width = if (screen.height > screen.width) screen.width - 2 * context.dp(12f) else minOf(context.dp(360f), screen.width * 45 / 100)
+        // A fixed height, as Yomitan's popup has: the entries scroll inside it. "No entry" needs one line.
+        val height = if (state.entries.isEmpty()) context.dp(56f) else screen.height * 55 / 100
         val gap = context.dp(10f)
         // Clear of the line: above it when there is room, else below, else wherever fits.
         // Clear of the row the word is on; in a tall block the other rows may be covered.
@@ -368,29 +368,30 @@ class OverlayHost(
         return context.keyHints(if (swap) "B" else "A", if (swap) "A" else "B")
     }
 
+    /**
+     * The popup beside the word: every entry of the lookup in one scrolling
+     * list, each with its own card and audio buttons, drawn with the same HTML
+     * as the app's entry page.
+     */
     @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
     private inner class PopupView(context: Context) : LinearLayout(context) {
-        val entry = EntryView(context)
-        private val button = CardButtonView(context) { controller.addCard() }
-        private val pager = context.label(12.5f, Ink.DIM)
+        val entry = EntryWebView(context, media) { link -> onLink(link) }
         private val message = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
-        private val actions = LinearLayout(context)
+        private var shownEntries: List<Entry>? = null
+        private var shownIndex = 0
 
         init {
             orientation = VERTICAL
-            background = rounded(Ink.SURFACE, Ink.BORDER_STRONG, context.dp(12f).toFloat())
-            val pad = context.dp(14f)
-            setPadding(pad, context.dp(12f), pad, context.dp(12f))
-            entry.wrapSenses(context.dp(190f))
-            addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-            actions.orientation = HORIZONTAL
-            actions.gravity = Gravity.CENTER_VERTICAL
-            actions.addView(button, wrap())
-            actions.addView(View(context), LayoutParams(0, 1, 1f))
-            actions.addView(pager, wrap())
-            addView(actions, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
-            addView(message, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6f) })
+            background = rounded(Ink.BG, Ink.BORDER_STRONG, context.dp(10f).toFloat())
+            val pad = context.dp(1f)
+            setPadding(pad, pad, pad, context.dp(4f))
+            clipToOutline = true
+            addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            val text = context.dp(14f)
+            message.setPadding(text, context.dp(4f), text, 0)
+            addView(message)
+            hints.setPadding(text, context.dp(4f), text, context.dp(2f))
             addView(hints)
             // A tap outside closes it.
             setOnTouchListener { _, event ->
@@ -399,15 +400,31 @@ class OverlayHost(
             }
         }
 
+        private fun onLink(link: android.net.Uri) {
+            val index = link.lastPathSegment?.toIntOrNull() ?: return
+            when ("${link.scheme}://${link.host}") {
+                EntryHtml.CARD_URL -> controller.addCard(index)
+                EntryHtml.AUDIO_URL.substringBeforeLast('/') -> controller.playAudio(index)
+            }
+        }
+
         fun show(state: LookupState) {
-            entry.show(state.entry, state.message)
-            button.show(state.button)
-            button.visibility = if (state.entry == null || state.controllerMode) View.GONE else View.VISIBLE
-            pager.text = pager(state)
-            message.text = state.message.takeIf { state.entry != null } ?: ""
+            // L1 and R1 move the controller's entry; the list follows it.
+            val scroll = state.entries === shownEntries && state.entryIndex != shownIndex
+            shownEntries = state.entries
+            shownIndex = state.entryIndex
+            entry.showList(state.entries, styles(), state.buttons.map { cardState(it) }, state.entryIndex, scroll, state.message)
+            message.text = state.message.takeIf { state.entries.isNotEmpty() } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.GONE
         }
+    }
+
+    private fun cardState(button: CardButton) = when (button) {
+        CardButton.ADD -> "add"
+        CardButton.ADDING -> "adding"
+        CardButton.IN_ANKI -> "in-anki"
+        CardButton.WAITING -> "waiting"
     }
 
     /** The bottom screen: the line to tap, the entry, and Add card where a thumb already rests. */
