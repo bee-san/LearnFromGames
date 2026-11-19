@@ -11,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import io.github.beesan.lfg.App
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.anki.AnkiStatus
+import io.github.beesan.lfg.ask.OpenRouter
+import io.github.beesan.lfg.ask.Translator
 import io.github.beesan.lfg.anki.AnkiTarget
 import io.github.beesan.lfg.anki.CardContent
 import io.github.beesan.lfg.anki.CardResult
@@ -262,12 +264,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openLine(line: GameLine) {
         opened = line
+        _translation.value = TranslationState(line.translation)
         lineLookup.setLines(listOf(LookupLine(line.lineText, line.id, picture(line), line.gameName)))
     }
 
     /** The screen's picture is cleared after two weeks; the line's own picture stays and stands in for it. */
     private fun picture(line: GameLine): String? =
         line.screenshotPath?.takeIf { File(it).isFile } ?: line.cropPath?.takeIf { File(it).isFile }
+
+    // ── translation ──────────────────────────────────────────────────────────
+
+    /** The open line's translation: kept, being asked for, or what went wrong. */
+    data class TranslationState(val text: String? = null, val busy: Boolean = false, val error: String? = null)
+
+    private val _translation = MutableStateFlow(TranslationState())
+    val translation: StateFlow<TranslationState> = _translation
+
+    fun translateLine() {
+        val line = opened ?: return
+        if (_translation.value.busy) return
+        _translation.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch {
+            _translation.value = try {
+                TranslationState(app.translator.translate(line))
+            } catch (e: OpenRouter.Failure) {
+                TranslationState(_translation.value.text, error = e.message)
+            }
+        }
+    }
+
+    /** What "Test the key" found: a translation of a sample line, or what went wrong. */
+    private val _keyTest = MutableStateFlow<Pair<Boolean, String>?>(null)
+    val keyTest: StateFlow<Pair<Boolean, String>?> = _keyTest
+
+    fun testKey() {
+        _keyTest.value = true to "Asking OpenRouter…"
+        viewModelScope.launch {
+            val p = app.settings.prefs.value
+            _keyTest.value = try {
+                val answer = OpenRouter.ask(p.openRouterKey, p.model, Translator.system(p.translateInto), Translator.prompt("", emptyList(), TEST_LINE))
+                true to "Works: 「$TEST_LINE」 → “$answer”"
+            } catch (e: OpenRouter.Failure) {
+                false to (e.message ?: "")
+            }
+        }
+    }
 
     // ── notes ────────────────────────────────────────────────────────────────
 
@@ -384,6 +425,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        private const val TEST_LINE = "新しい剣を手に入れた！"
         const val PRACTICE_GAME = "LFG practice"
 
         fun dayLabel(day: LocalDate, today: LocalDate): String = when (day) {

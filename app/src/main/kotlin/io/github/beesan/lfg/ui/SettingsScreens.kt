@@ -49,6 +49,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -118,6 +120,7 @@ private fun OnOff(on: Boolean, onChange: (Boolean) -> Unit) = Choice(listOf("on"
 @Composable
 fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings", onBack) {
     Card("Appearance", "Colours, and light or dark", { onOpen(Page.APPEARANCE) })
+    Card("Translation", "Translate lines with your OpenRouter key", { onOpen(Page.TRANSLATION) })
     Card("Dictionaries", "Add, order and remove dictionaries", { onOpen(Page.DICTIONARIES) })
     Card("Anki", "The note type and deck cards go to", { onOpen(Page.ANKI) })
     Card("Controls", "The lookup shortcut", { onOpen(Page.CONTROLS) })
@@ -231,6 +234,64 @@ fun AppearanceScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack:
     Text("Colours", color = Lfg.Dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Choice(Palette.SCHEMES, prefs.colours) { v -> onChange { it.copy(colours = v) } }
+    }
+}
+
+/** Translating lines, and writing recaps, with an OpenRouter key: when, which model, into what, with how much before. */
+@Composable
+fun TranslationScreen(
+    prefs: Prefs,
+    onChange: ((Prefs) -> Prefs) -> Unit,
+    keyTest: Pair<Boolean, String>?,
+    onTestKey: () -> Unit,
+    onBack: () -> Unit,
+) = Page("Translation", onBack) {
+    val detail = when (prefs.translate) {
+        Prefs.TRANSLATE_ASK -> "A Translate button on each line"
+        Prefs.TRANSLATE_EVERY -> "Each new line, as it is read"
+        else -> "No line is sent anywhere"
+    }
+    Card("Translate", detail) {
+        Choice(
+            listOf(Prefs.TRANSLATE_OFF to "Off", Prefs.TRANSLATE_ASK to "When asked", Prefs.TRANSLATE_EVERY to "Every line"),
+            prefs.translate,
+        ) { v -> onChange { it.copy(translate = v) } }
+    }
+    SettingText("OpenRouter key", "Kept on this device, and never in a backup. Lines, and recaps' lines, go to OpenRouter.", prefs.openRouterKey, secret = true) { v ->
+        onChange { it.copy(openRouterKey = v.trim()) }
+    }
+    SettingText("Model", "Also writes recaps", prefs.model) { v -> onChange { it.copy(model = v.trim()) } }
+    SettingText("Into", "The language translations and recaps are in", prefs.translateInto) { v -> onChange { it.copy(translateInto = v) } }
+    Card("Lines before", "Sent with the line, so the translation knows who is speaking") {
+        Stepper(if (prefs.translateContext == 0) "None" else "${prefs.translateContext}", prefs.translateContext, Prefs.CONTEXT_STEPS) { v ->
+            onChange { it.copy(translateContext = v) }
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        LfgButton("Test the key", onTestKey, primary = true, enabled = prefs.openRouterKey.isNotBlank())
+        keyTest?.let { (ok, text) -> Text(text, color = if (ok) Lfg.Ok else Lfg.Warn, fontSize = 14.sp, modifier = Modifier.weight(1f)) }
+    }
+}
+
+/** A setting typed in: its name and a line of detail over the field. */
+@Composable
+private fun SettingText(name: String, detail: String, value: String, secret: Boolean = false, onChange: (String) -> Unit) {
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(name, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Text(detail, color = Lfg.Dim, fontSize = 14.sp)
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            singleLine = true,
+            visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+            textStyle = TextStyle(color = Lfg.Text, fontSize = 16.sp),
+            cursorBrush = SolidColor(Lfg.Accent),
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Lfg.Sunken).padding(horizontal = 12.dp, vertical = 12.dp),
+        )
     }
 }
 
@@ -647,4 +708,4 @@ private fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { HOME, LINE, NOTES, NOTE_NEW, STATS, GOALS, SETTINGS, APPEARANCE, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }
+enum class Page { HOME, LINE, NOTES, NOTE_NEW, STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }

@@ -32,6 +32,29 @@ data class Prefs(
     val colours: String = Palette.PINK,
     /** [Palette.THEME_SYSTEM], [Palette.THEME_LIGHT] or [Palette.THEME_DARK]. */
     val theme: String = Palette.THEME_SYSTEM,
+    /** [TRANSLATE_OFF], [TRANSLATE_ASK] or [TRANSLATE_EVERY]. */
+    val translate: String = TRANSLATE_OFF,
+    /** The OpenRouter key translations and recaps use. Kept apart from the rest, so a backup never carries it. */
+    val openRouterKey: String = "",
+    /** The OpenRouter model that translates and writes recaps. */
+    val model: String = "openai/gpt-oss-120b",
+    /** The language translations and recaps are written in. */
+    val translateInto: String = "English",
+    /** How many lines before a line are sent with it, so its translation knows who is speaking. */
+    val translateContext: Int = 10,
+    /** The folder automatic backups and the lines file go to: a document tree's link, or empty for none. */
+    val backupFolder: String = "",
+    /** [BACKUP_OFF], [BACKUP_DAILY] or [BACKUP_WEEKLY]. */
+    val backupEvery: String = BACKUP_OFF,
+    /** How many automatic backups are kept; 0 keeps all. */
+    val backupKeep: Int = 7,
+    /** Whether backups carry the pictures of lines and notes. */
+    val backupPictures: Boolean = true,
+    /** Each automatic backup also writes lfg-lines.csv, every line in the CSV GameSentenceMiner's ExStatic import reads. */
+    val gsmFile: Boolean = false,
+    /** When the last automatic backup was made, in milliseconds since 1970, and its size in bytes; 0 for none yet. */
+    val backupLast: Long = 0,
+    val backupLastSize: Long = 0,
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
@@ -41,11 +64,21 @@ data class Prefs(
         const val ENGINE_AUTO = "auto"
         const val ENGINE_SCREENAI = "screenai"
         const val ENGINE_MEIKI = "meiki"
+        const val TRANSLATE_OFF = "off"
+        const val TRANSLATE_ASK = "ask"
+        const val TRANSLATE_EVERY = "every"
+        const val BACKUP_OFF = "off"
+        const val BACKUP_DAILY = "daily"
+        const val BACKUP_WEEKLY = "weekly"
+        val CONTEXT_STEPS = listOf(0, 3, 5, 10, 15, 20)
     }
 }
 
 class Settings(context: Context) {
     private val store = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    /** The OpenRouter key, in a file of its own so a backup of the settings never holds it. */
+    private val secrets = context.getSharedPreferences("secrets", Context.MODE_PRIVATE)
     private val _prefs = MutableStateFlow(read())
     val prefs: StateFlow<Prefs> = _prefs
 
@@ -63,6 +96,18 @@ class Settings(context: Context) {
             goalCards = store.getInt("goalCards", d.goalCards),
             colours = store.getString("colours", d.colours) ?: d.colours,
             theme = store.getString("theme", d.theme) ?: d.theme,
+            translate = store.getString("translate", d.translate) ?: d.translate,
+            openRouterKey = secrets.getString("openRouterKey", d.openRouterKey) ?: d.openRouterKey,
+            model = store.getString("model", d.model) ?: d.model,
+            translateInto = store.getString("translateInto", d.translateInto) ?: d.translateInto,
+            translateContext = store.getInt("translateContext", d.translateContext),
+            backupFolder = store.getString("backupFolder", d.backupFolder) ?: d.backupFolder,
+            backupEvery = store.getString("backupEvery", d.backupEvery) ?: d.backupEvery,
+            backupKeep = store.getInt("backupKeep", d.backupKeep),
+            backupPictures = store.getBoolean("backupPictures", d.backupPictures),
+            gsmFile = store.getBoolean("gsmFile", d.gsmFile),
+            backupLast = store.getLong("backupLast", d.backupLast),
+            backupLastSize = store.getLong("backupLastSize", d.backupLastSize),
         )
     }
 
@@ -81,7 +126,19 @@ class Settings(context: Context) {
             .putInt("goalCards", next.goalCards)
             .putString("colours", next.colours)
             .putString("theme", next.theme)
+            .putString("translate", next.translate)
+            .putString("model", next.model)
+            .putString("translateInto", next.translateInto)
+            .putInt("translateContext", next.translateContext)
+            .putString("backupFolder", next.backupFolder)
+            .putString("backupEvery", next.backupEvery)
+            .putInt("backupKeep", next.backupKeep)
+            .putBoolean("backupPictures", next.backupPictures)
+            .putBoolean("gsmFile", next.gsmFile)
+            .putLong("backupLast", next.backupLast)
+            .putLong("backupLastSize", next.backupLastSize)
             .apply()
+        secrets.edit().putString("openRouterKey", next.openRouterKey).apply()
         _prefs.value = next
     }
 }

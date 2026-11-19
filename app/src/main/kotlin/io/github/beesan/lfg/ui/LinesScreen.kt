@@ -28,6 +28,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.dict.EntryHtml
@@ -99,6 +100,7 @@ fun LinesScreen(
                         Text(time.format(Date(line.createdAt)), color = Lfg.Dim, fontSize = 13.sp, modifier = Modifier.width(52.dp).padding(top = 4.dp))
                         Column {
                             Text(line.lineText, color = Lfg.Text, fontSize = 17.sp, lineHeight = 26.sp)
+                            line.translation?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp, lineHeight = 20.sp) }
                             if (line.noteIds.isNotEmpty()) Text("Card", color = Lfg.Dim, fontSize = 12.sp)
                         }
                     }
@@ -152,6 +154,11 @@ fun LineLookupScreen(
     media: (String, String) -> ByteArray?,
     onTap: (Int) -> Unit,
     onLink: (EntryLink, Int) -> Unit,
+    translation: MainViewModel.TranslationState,
+    /** What Settings › Translation says: nothing shows while it is off. */
+    translate: String,
+    translateContext: Int,
+    onTranslate: () -> Unit,
     onBack: () -> Unit,
 ) {
     val line = state.lines.firstOrNull()
@@ -163,6 +170,22 @@ fun LineLookupScreen(
             Column(Modifier.weight(1f)) {
                 TappableSentence(line.text, state.spanStart, if (state.selected) state.spanEnd else 0, onTap)
                 if (!state.selected) Text("Tap a word.", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 10.dp))
+                if (translate != Prefs.TRANSLATE_OFF) {
+                    HorizontalDivider(color = Lfg.Border, modifier = Modifier.padding(top = 18.dp))
+                    Text("Translation", color = Lfg.Dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp))
+                    when {
+                        translation.text != null -> Text(translation.text, color = Lfg.Text, fontSize = 17.sp, lineHeight = 25.sp)
+                        translation.busy -> Text("Translating…", color = Lfg.Dim, fontSize = 15.sp)
+                    }
+                    translation.error?.let { Text(it, color = Lfg.Warn, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
+                        Text(
+                            if (translateContext == 0) "Without the lines before" else "With the $translateContext lines before",
+                            color = Lfg.Dim, fontSize = 13.sp, modifier = Modifier.weight(1f),
+                        )
+                        LfgButton(if (translation.text == null) "Translate" else "Translate again", onTranslate, enabled = !translation.busy)
+                    }
+                }
             }
             Column(Modifier.weight(1.2f).fillMaxHeight()) {
                 if (state.selected) {

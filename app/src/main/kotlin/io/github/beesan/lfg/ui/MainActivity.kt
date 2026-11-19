@@ -67,6 +67,8 @@ class MainActivity : ComponentActivity() {
             val lookup by model.lineLookup.state.collectAsStateWithLifecycle()
             val notes by model.notes.collectAsStateWithLifecycle()
             val draft by model.draft.collectAsStateWithLifecycle()
+            val translation by model.translation.collectAsStateWithLifecycle()
+            val keyTest by model.keyTest.collectAsStateWithLifecycle()
             val styles by model.styles.collectAsStateWithLifecycle()
             val dictionaries by model.dictionaries.collectAsStateWithLifecycle()
             val sources by model.sources.collectAsStateWithLifecycle()
@@ -206,6 +208,10 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             },
+                            translation = translation,
+                            translate = prefs.translate,
+                            translateContext = prefs.translateContext,
+                            onTranslate = model::translateLine,
                             onBack = ::back,
                         )
                         page == Page.STATS -> saved.SaveableStateProvider(Page.STATS) {
@@ -228,6 +234,7 @@ class MainActivity : ComponentActivity() {
                         page == Page.SOURCES -> SourcesScreen(sources, ::back)
                         page == Page.ANKI -> AnkiScreen(setup, model::connectAnki, { ankiPermission.launch(AnkiBridge.PERMISSION) }, ::back)
                         page == Page.APPEARANCE -> AppearanceScreen(prefs, model::updatePrefs, ::back)
+                        page == Page.TRANSLATION -> TranslationScreen(prefs, model::updatePrefs, keyTest, model::testKey, ::back)
                         page == Page.CONTROLS -> ControlsScreen(prefs, model::updatePrefs, ::back)
                         page == Page.RECOGNITION -> RecognitionScreen(
                             prefs, reader, screenAi, ScreenAi.available(), model::updatePrefs, { model.downloadScreenAi() }, ::back,

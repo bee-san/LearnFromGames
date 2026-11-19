@@ -22,13 +22,31 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import io.github.beesan.lfg.data.Notes
+import io.github.beesan.lfg.ask.OpenRouter
+import io.github.beesan.lfg.ask.Translator
 import java.io.File
 
 /** The app's few long-lived parts, shared by the screens and the accessibility service. */
 class App : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val database by lazy { LfgDatabase.open(this) }
-    val lines by lazy { LineStore(database) { StatsWidgets.requestUpdate(this) } }
+    val lines by lazy {
+        LineStore(database) { line ->
+            StatsWidgets.requestUpdate(this)
+            // "Every line": each new line is translated as it is read, behind the reading.
+            val prefs = settings.prefs.value
+            if (prefs.translate == Prefs.TRANSLATE_EVERY && prefs.openRouterKey.isNotBlank()) {
+                scope.launch {
+                    try {
+                        translator.translate(line)
+                    } catch (_: OpenRouter.Failure) {
+                        // The line stays untranslated; "Translate" on it says what went wrong.
+                    }
+                }
+            }
+        }
+    }
+    val translator by lazy { Translator(database) { settings.prefs.value } }
     val dictionaries by lazy { DictionaryRepository(this) }
     val wordAudio by lazy { WordAudio(this) }
     val anki by lazy { AnkiBridge(this) }
