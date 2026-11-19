@@ -46,6 +46,8 @@ class LineStore(private val db: LfgDatabase, private val onSaved: () -> Unit = {
         return line
     }
 
+    suspend fun setCrop(lineId: String, path: String) = db.lines().setCrop(lineId, path)
+
     /** The last few lines saved for a game, newest first. */
     suspend fun recent(game: Game, limit: Int = 6): List<GameLine> = db.lines().lastOf(game.id, limit)
 

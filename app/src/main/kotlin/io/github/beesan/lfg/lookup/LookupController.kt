@@ -73,6 +73,8 @@ class LookupController(
     private val anki: AnkiBridge,
     private val store: LineStore,
     private val audio: WordAudio? = null,
+    /** Adds to a lookup's entries before they show: the user's notes on each word. */
+    private val decorate: suspend (List<Entry>) -> List<Entry> = { it },
 ) {
     private val _state = MutableStateFlow(LookupState())
     val state: StateFlow<LookupState> = _state
@@ -103,7 +105,7 @@ class LookupController(
         if (index !in target.text.indices) return
         selecting?.cancel()
         selecting = scope.launch {
-            val entries = io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index)) }
+            val entries = decorate(io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index)) })
             val first = entries.firstOrNull()
             val length = first?.matched?.length ?: Character.charCount(target.text.codePointAt(index))
             val end = (index + length).coerceAtMost(target.text.length)
@@ -151,6 +153,9 @@ class LookupController(
     fun playAudio(index: Int = _state.value.entryIndex) {
         _state.value.entries.getOrNull(index)?.let { audio?.play(it) }
     }
+
+    /** Makes the entry at [index] the one A adds and a note is on. */
+    fun selectEntry(index: Int) = _state.update { if (index in it.entries.indices) it.copy(entryIndex = index) else it }
 
     fun nextEntry() = stepEntry(+1)
     fun previousEntry() = stepEntry(-1)

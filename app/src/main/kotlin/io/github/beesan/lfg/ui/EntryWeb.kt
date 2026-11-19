@@ -15,7 +15,20 @@ import io.github.beesan.lfg.App
 import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
+import io.github.beesan.lfg.lookup.CardButton
+import io.github.beesan.lfg.lookup.LookupState
 import java.io.ByteArrayInputStream
+
+/** What a button in the list of entries asks for, with the entry's place in the list. */
+enum class EntryLink { CARD, AUDIO, NOTE }
+
+/** A card button's state as the entry page's script names it. */
+fun CardButton.htmlState() = when (this) {
+    CardButton.ADD -> "add"
+    CardButton.ADDING -> "adding"
+    CardButton.IN_ANKI -> "in-anki"
+    CardButton.WAITING -> "waiting"
+}
 
 /**
  * A WebView that shows dictionary entries in full: pictures, tables and
@@ -23,15 +36,16 @@ import java.io.ByteArrayInputStream
  * come from the dictionary's own files. The audio button is a link the view
  * catches and answers by playing the word.
  *
- * With [onLink] it is the popup over a game: it shows every entry of a lookup
- * ([showList]) and hands each button's link to [onLink]. Only then does it run
- * script, the page's own `lfgState`, which sets the buttons without a reload.
+ * With [onLink] it shows every entry of a lookup ([showList]): over a game,
+ * on the second screen, or for a stored line. Each button's link goes to
+ * [onLink]. Only then does it run script, the page's own `lfgState`, which
+ * sets the buttons without a reload.
  */
 @SuppressLint("ViewConstructor", "SetJavaScriptEnabled")
 class EntryWebView(
     context: Context,
     private val media: (dictionary: String, path: String) -> ByteArray?,
-    private val onLink: ((Uri) -> Unit)? = null,
+    private val onLink: ((EntryLink, Int) -> Unit)? = null,
 ) : WebView(context) {
     private var shown: String? = null
     private var entry: Entry? = null
@@ -61,9 +75,17 @@ class EntryWebView(
 
             // Links in a dictionary point at other entries; nothing is ever navigated to.
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                when {
-                    onLink != null -> onLink.invoke(request.url)
-                    request.url.toString() == EntryHtml.AUDIO_URL -> entry?.let { audio?.play(it) }
+                val url = request.url
+                val handler = onLink
+                if (handler == null) {
+                    if (url.toString() == EntryHtml.AUDIO_URL) entry?.let { audio?.play(it) }
+                    return true
+                }
+                val index = url.lastPathSegment?.toIntOrNull() ?: return true
+                when ("${url.scheme}://${url.host}") {
+                    EntryHtml.CARD_URL -> handler(EntryLink.CARD, index)
+                    EntryHtml.NOTE_URL -> handler(EntryLink.NOTE, index)
+                    EntryHtml.AUDIO_URL.substringBeforeLast('/') -> handler(EntryLink.AUDIO, index)
                 }
                 return true
             }
@@ -121,6 +143,22 @@ class EntryWebView(
         "svg" -> "image/svg+xml"
         else -> "application/octet-stream"
     }
+}
+
+/** Every entry of a lookup, each with its own buttons: [EntryWebView.showList] in Compose. */
+@Composable
+fun EntryList(
+    state: LookupState,
+    styles: List<EntryHtml.Style>,
+    media: (String, String) -> ByteArray?,
+    onLink: (EntryLink, Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AndroidView(
+        factory = { EntryWebView(it, media, onLink) },
+        update = { it.showList(state.entries, styles, state.buttons.map { b -> b.htmlState() }, state.entryIndex, state.message, Lfg.palette) },
+        modifier = modifier,
+    )
 }
 
 @Composable

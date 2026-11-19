@@ -13,6 +13,13 @@ import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.ViewGroup
+import android.content.res.ColorStateList
+import android.text.InputType
+import android.view.Gravity
+import android.view.inputmethod.InputMethodManager
+import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.lookup.LookupState
@@ -32,6 +39,10 @@ internal object Ink {
     val DIM get() = palette.dim
     val ACCENT get() = palette.accent
     val WASH get() = palette.wash
+    val SURFACE get() = palette.surface
+    val SUNKEN get() = palette.sunken
+    val FILL get() = palette.fill
+    val ON_FILL get() = palette.onFill
 }
 
 internal fun Context.dp(value: Float): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics).toInt()
@@ -123,3 +134,63 @@ internal fun Context.keyHints(confirm: String, close: String): TextView = label(
 internal fun wrap() = ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
 internal val TRANSPARENT = Color.TRANSPARENT
+
+/**
+ * A note on a word, written without leaving the game: whether to keep the
+ * picture of the game as it is now, and the text. Its window takes focus
+ * while it shows, so the keyboard can come up; [OverlayHost] gives it back.
+ */
+@SuppressLint("ViewConstructor")
+internal class NoteEditor(context: Context, onSave: (text: String, keepPicture: Boolean) -> Unit, onBack: () -> Unit) : LinearLayout(context) {
+    private val title = context.label(17f, Ink.TEXT, bold = true)
+    private val keep = CheckBox(context)
+    private val field = EditText(context)
+
+    init {
+        orientation = VERTICAL
+        val pad = context.dp(14f)
+        setPadding(pad, context.dp(12f), pad, context.dp(12f))
+        addView(title)
+        keep.text = "Keep this picture"
+        keep.setTextColor(Ink.TEXT)
+        keep.buttonTintList = ColorStateList.valueOf(Ink.ACCENT)
+        keep.minHeight = context.dp(44f)
+        addView(keep, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6f) })
+        field.hint = "Note"
+        field.setTextColor(Ink.TEXT)
+        field.setHintTextColor(Ink.DIM)
+        field.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        field.gravity = Gravity.TOP or Gravity.START
+        field.minLines = 4
+        field.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        field.background = rounded(Ink.SUNKEN, Ink.ACCENT, context.dp(6f).toFloat())
+        field.setPadding(context.dp(12f), context.dp(10f), context.dp(12f), context.dp(10f))
+        addView(field, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = context.dp(6f) })
+        val buttons = LinearLayout(context).apply { orientation = HORIZONTAL }
+        buttons.addView(button(context, "Save note", primary = true) { onSave(field.text.toString(), keep.isChecked) }, wrap())
+        buttons.addView(button(context, "Back", primary = false) { onBack() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
+        addView(buttons, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
+    }
+
+    /** Ready for a note on [word]: an empty field with the keyboard up. */
+    fun open(word: String) {
+        title.text = "Note on $word"
+        keep.isChecked = true
+        field.setText("")
+        field.requestFocus()
+        field.post { context.getSystemService(InputMethodManager::class.java)?.showSoftInput(field, 0) }
+    }
+
+    private fun button(context: Context, text: String, primary: Boolean, onPress: () -> Unit) = TextView(context).apply {
+        this.text = text
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        minHeight = context.dp(44f)
+        setPadding(context.dp(18f), 0, context.dp(18f), 0)
+        setTextColor(if (primary) Ink.ON_FILL else Ink.TEXT)
+        background = rounded(if (primary) Ink.FILL else Ink.SURFACE, if (primary) Ink.FILL else Ink.BORDER_STRONG, context.dp(5f).toFloat())
+        isFocusable = false
+        setOnClickListener { onPress() }
+    }
+}

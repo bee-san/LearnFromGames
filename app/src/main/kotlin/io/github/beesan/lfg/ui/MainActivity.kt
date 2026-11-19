@@ -65,6 +65,8 @@ class MainActivity : ComponentActivity() {
             val games by model.games.collectAsStateWithLifecycle()
             val stats by model.stats.collectAsStateWithLifecycle()
             val lookup by model.lineLookup.state.collectAsStateWithLifecycle()
+            val notes by model.notes.collectAsStateWithLifecycle()
+            val draft by model.draft.collectAsStateWithLifecycle()
             val styles by model.styles.collectAsStateWithLifecycle()
             val dictionaries by model.dictionaries.collectAsStateWithLifecycle()
             val sources by model.sources.collectAsStateWithLifecycle()
@@ -116,7 +118,8 @@ class MainActivity : ComponentActivity() {
                 // Stats keeps its period and chart across the goals page, and opens on its defaults again after Home.
                 if (page == Page.STATS) saved.removeState(Page.STATS)
                 page = when (page) {
-                    Page.LINE, Page.STATS, Page.SETTINGS -> Page.HOME
+                    Page.LINE, Page.NOTES, Page.STATS, Page.SETTINGS -> Page.HOME
+                    Page.NOTE_NEW -> Page.NOTES
                     Page.SOURCES -> Page.DICTIONARIES
                     Page.GOALS -> Page.STATS
                     Page.HOME -> Page.HOME
@@ -165,15 +168,44 @@ class MainActivity : ComponentActivity() {
                             },
                             onStats = { page = Page.STATS },
                             onSettings = { page = Page.SETTINGS },
+                            onNotes = { page = Page.NOTES },
+                        )
+                        page == Page.NOTES -> NotesScreen(
+                            notes = notes,
+                            onNew = {
+                                model.newNote()
+                                page = Page.NOTE_NEW
+                            },
+                            onBack = ::back,
+                        )
+                        page == Page.NOTE_NEW -> NoteNewScreen(
+                            draft = draft,
+                            lookup = lookup,
+                            onTap = { model.lineLookup.select(0, it) },
+                            onLineBefore = model::noteOnLineBefore,
+                            onRemovePicture = model::removeNotePicture,
+                            onClearWord = model.lineLookup::clear,
+                            onSave = { title, text, inLookups ->
+                                model.saveNote(title, text, inLookups)
+                                page = Page.NOTES
+                            },
+                            onCancel = ::back,
                         )
                         page == Page.LINE -> LineLookupScreen(
                             state = lookup,
                             styles = styles,
                             media = model::mediaBlocking,
                             onTap = { model.lineLookup.select(0, it) },
-                            onAddCard = model.lineLookup::addCard,
-                            onPreviousEntry = model.lineLookup::previousEntry,
-                            onNextEntry = model.lineLookup::nextEntry,
+                            onLink = { link, index ->
+                                when (link) {
+                                    EntryLink.CARD -> model.lineLookup.addCard(index)
+                                    EntryLink.AUDIO -> model.lineLookup.playAudio(index)
+                                    EntryLink.NOTE -> {
+                                        model.noteFromLine(index)
+                                        page = Page.NOTE_NEW
+                                    }
+                                }
+                            },
                             onBack = ::back,
                         )
                         page == Page.STATS -> saved.SaveableStateProvider(Page.STATS) {

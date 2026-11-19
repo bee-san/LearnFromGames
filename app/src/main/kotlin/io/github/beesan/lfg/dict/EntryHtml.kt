@@ -25,6 +25,9 @@ object EntryHtml {
     /** The link of an entry's card button in the popup's list, with `/<index>` after it: adds the card, or opens it in AnkiDroid. */
     const val CARD_URL = "$MEDIA_SCHEME://card"
 
+    /** The link of an entry's note button in a list, with `/<index>` after it: starts a note on the word. */
+    const val NOTE_URL = "$MEDIA_SCHEME://note"
+
     private val TAGS = setOf(
         "br", "ruby", "rt", "rp", "table", "thead", "tbody", "tfoot", "tr", "td", "th",
         "span", "div", "ol", "ul", "li", "details", "summary", "a", "img",
@@ -94,6 +97,8 @@ object EntryHtml {
             append("\" aria-label=\"Listen\" title=\"Listen\">").append(SPEAKER).append("</a>")
         }
         if (index != null) {
+            append("<a class=\"lfg-button lfg-note\" href=\"").append(NOTE_URL).append('/').append(index)
+            append("\" aria-label=\"Note\" title=\"Note\">").append(PENCIL).append("</a>")
             append("<a class=\"lfg-button lfg-card\" id=\"c").append(index).append("\" href=\"").append(CARD_URL).append('/').append(index)
             append("\" data-state=\"add\" aria-label=\"Add card\" title=\"Add card\">").append(CARD_ICONS).append("</a>")
         }
@@ -333,6 +338,8 @@ object EntryHtml {
 
     private val UNITLESS = setOf("fontWeight")
 
+    private const val PENCIL = """<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>"""
+
     private const val SPEAKER = """<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>"""
 
     // Stroke icons for the card button's four states; the page's CSS shows the one for its `data-state`.
@@ -385,6 +392,8 @@ body{margin:0;padding:12px 16px 16px;overflow-wrap:anywhere}
 .lfg-button{display:inline-flex;width:44px;height:44px;border-radius:22px;align-items:center;justify-content:center;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 .lfg-audio{background:var(--chip);color:var(--text)}
 .lfg-audio svg{width:20px;height:20px;fill:currentColor}
+.lfg-note{background:var(--chip);color:var(--text)}
+.lfg-note svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .lfg-card{border:1.5px solid var(--accent);background:var(--soft);color:var(--accent)}
 .lfg-card svg{display:none;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 .lfg-card[data-state="add"] .lfg-i-add,.lfg-card[data-state="adding"] .lfg-i-adding,.lfg-card[data-state="in-anki"] .lfg-i-in-anki,.lfg-card[data-state="waiting"] .lfg-i-waiting{display:block}

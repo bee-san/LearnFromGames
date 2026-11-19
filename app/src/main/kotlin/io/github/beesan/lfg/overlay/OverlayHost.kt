@@ -23,9 +23,10 @@ import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
+import io.github.beesan.lfg.ui.EntryLink
 import io.github.beesan.lfg.ui.EntryWebView
+import io.github.beesan.lfg.ui.htmlState
 import io.github.beesan.lfg.ui.palette
-import io.github.beesan.lfg.lookup.CardButton
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.lookup.LookupState
@@ -55,6 +56,8 @@ class OverlayHost(
     private val onHistoryLine: (LookupLine) -> Unit,
     private val styles: () -> List<EntryHtml.Style>,
     private val media: (dictionary: String, path: String) -> ByteArray?,
+    /** A note written on a word over the game: the line, the entry, the text, and whether to keep the picture. */
+    private val onSaveNote: (LookupLine, Entry, String, Boolean) -> Unit,
 ) {
     private val displays = service.getSystemService(DisplayManager::class.java)
     private val managers = HashMap<Int, Pair<Context, WindowManager>>()
@@ -73,6 +76,9 @@ class OverlayHost(
     private var stripsOn = true
     private var gameInFront = false
     private var history: List<LookupLine> = emptyList()
+
+    /** The line and entry a note is being written on, while the note editor shows. */
+    private var noting: Pair<LookupLine, Entry>? = null
 
     val input = ControllerInput(
         controller,
@@ -93,7 +99,8 @@ class OverlayHost(
         (context to context.getSystemService(WindowManager::class.java)).also { managers[displayId] = it }
     }
 
-    private inner class Win(val view: View, private val wm: WindowManager, private val flags: Int) {
+    private inner class Win(val view: View, private val wm: WindowManager, private val baseFlags: Int) {
+        private var flags = baseFlags
         private val lp = LayoutParams(1, 1, LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, flags, PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.TOP or Gravity.START
             layoutInDisplayCutoutMode = LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
@@ -129,6 +136,17 @@ class OverlayHost(
             lp.height = 1
             lp.flags = flags or LayoutParams.FLAG_NOT_TOUCHABLE or LayoutParams.FLAG_NOT_FOCUSABLE
             view.visibility = View.INVISIBLE
+            apply()
+        }
+
+        /** Focusable while a note is written in it, so the keyboard can come up; never otherwise. */
+        fun setFocusable(on: Boolean) {
+            val next = if (on) baseFlags and LayoutParams.FLAG_NOT_FOCUSABLE.inv() else baseFlags
+            if (next == flags) return
+            flags = next
+            lp.softInputMode = if (on) LayoutParams.SOFT_INPUT_STATE_VISIBLE or LayoutParams.SOFT_INPUT_ADJUST_PAN else LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
+            if (!shown) return
+            lp.flags = flags
             apply()
         }
 
@@ -169,6 +187,8 @@ class OverlayHost(
 
     fun onState(next: LookupState) {
         val wasController = state.controllerMode
+        // Another word, or none: a note half written on the last one is let go.
+        noting?.let { (line, _) -> if (!next.selected || next.selectedLine?.lineId != line.lineId) endNote() }
         state = next
         if (wasController && !next.controllerMode) input.release()
         render()
@@ -205,6 +225,7 @@ class OverlayHost(
         val palette = service.palette(prefs())
         if (palette != Ink.palette) {
             Ink.palette = palette
+            noting = null
             (marks + listOfNotNull(popup, panel)).forEach { it.remove() }
             marks.clear()
             popup = null
@@ -253,7 +274,7 @@ class OverlayHost(
         }
 
         // Lookup mode: a window that can take focus, and so the controller.
-        if (state.controllerMode && gameInFront) {
+        if (state.controllerMode && gameInFront && noting == null) {
             val win = focus ?: Win(FocusView(host.first), host.second, FOCUS_FLAGS).also { focus = it }
             win.place(0, 0, 1, 1)
             win.view.requestFocus()
@@ -381,9 +402,10 @@ class OverlayHost(
      */
     @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
     private inner class PopupView(context: Context) : LinearLayout(context) {
-        val entry = EntryWebView(context, media) { onEntryLink(it) }
+        val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }
         private val message = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
+        private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
 
         init {
             orientation = VERTICAL
@@ -392,6 +414,8 @@ class OverlayHost(
             setPadding(pad, pad, pad, context.dp(4f))
             clipToOutline = true
             addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            note.visibility = View.GONE
+            addView(note, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
             val text = context.dp(14f)
             message.setPadding(text, context.dp(4f), text, 0)
             addView(message)
@@ -399,12 +423,27 @@ class OverlayHost(
             addView(hints)
             // A tap outside closes it.
             setOnTouchListener { _, event ->
-                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE && !state.controllerMode) controller.clear()
+                // Not while a note is written: the keyboard is outside the popup.
+                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE && !state.controllerMode && noting == null) controller.clear()
                 true
             }
         }
 
+        fun showNote(word: String) {
+            entry.visibility = View.GONE
+            message.visibility = View.GONE
+            hints.visibility = View.GONE
+            note.visibility = View.VISIBLE
+            note.open(word)
+        }
+
+        fun hideNote() {
+            note.visibility = View.GONE
+            entry.visibility = View.VISIBLE
+        }
+
         fun show(state: LookupState) {
+            if (note.visibility == View.VISIBLE) return
             showEntries(entry, state)
             message.text = state.message.takeIf { state.entries.isNotEmpty() } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
@@ -412,24 +451,48 @@ class OverlayHost(
         }
     }
 
-    /** A button in the entry list: an entry's card or audio button, by its place in the list. */
-    private fun onEntryLink(link: android.net.Uri) {
-        val index = link.lastPathSegment?.toIntOrNull() ?: return
-        when ("${link.scheme}://${link.host}") {
-            EntryHtml.CARD_URL -> controller.addCard(index)
-            EntryHtml.AUDIO_URL.substringBeforeLast('/') -> controller.playAudio(index)
+    /** A button in the entry list, by the entry's place in the list. */
+    private fun onEntryLink(link: EntryLink, index: Int) {
+        when (link) {
+            EntryLink.CARD -> controller.addCard(index)
+            EntryLink.AUDIO -> controller.playAudio(index)
+            EntryLink.NOTE -> startNote(index)
         }
     }
 
-    private fun showEntries(view: EntryWebView, state: LookupState) =
-        view.showList(state.entries, styles(), state.buttons.map { cardState(it) }, state.entryIndex, state.message, Ink.palette)
-
-    private fun cardState(button: CardButton) = when (button) {
-        CardButton.ADD -> "add"
-        CardButton.ADDING -> "adding"
-        CardButton.IN_ANKI -> "in-anki"
-        CardButton.WAITING -> "waiting"
+    /** The note button of an entry: the popup, or the panel, becomes a note on its word. */
+    private fun startNote(index: Int) {
+        val entry = state.entries.getOrNull(index) ?: return
+        val line = state.selectedLine ?: return
+        noting = line to entry
+        if (panel?.shown == true) {
+            panelView?.showNote(entry.expression)
+            panel?.setFocusable(true)
+        } else {
+            popupView?.showNote(entry.expression)
+            popup?.setFocusable(true)
+        }
+        render()
     }
+
+    private fun saveNote(text: String, keepPicture: Boolean) {
+        val (line, entry) = noting ?: return
+        if (text.isNotBlank()) onSaveNote(line, entry, text.trim(), keepPicture)
+        endNote()
+        render()
+    }
+
+    private fun endNote() {
+        if (noting == null) return
+        noting = null
+        popupView?.hideNote()
+        panelView?.hideNote()
+        popup?.setFocusable(false)
+        panel?.setFocusable(false)
+    }
+
+    private fun showEntries(view: EntryWebView, state: LookupState) =
+        view.showList(state.entries, styles(), state.buttons.map { it.htmlState() }, state.entryIndex, state.message, Ink.palette)
 
     /** The bottom screen: the line to tap, then every entry of the lookup in one scrolling list, as in the popup. */
     @SuppressLint("ViewConstructor")
@@ -437,7 +500,8 @@ class OverlayHost(
         private val lines = LinesView(context) { line, index -> controller.select(line, index) }
 
         /** The entry in full: pictures, tables and each dictionary's own styling. */
-        val entry = EntryWebView(context, media) { onEntryLink(it) }
+        val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }
+        private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
         private val historyList = LinearLayout(context)
         private val historyScroll = ScrollView(context)
         private val message = context.label(12.5f, Ink.DIM)
@@ -468,6 +532,8 @@ class OverlayHost(
             addView(divider(context))
 
             addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            note.visibility = View.GONE
+            addView(note, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
             historyList.orientation = VERTICAL
             historyScroll.isFocusable = false
             historyScroll.addView(historyList)
@@ -501,13 +567,25 @@ class OverlayHost(
             lines.visibility = if (state.lines.isEmpty()) View.GONE else View.VISIBLE
             empty.visibility = if (state.lines.isEmpty()) View.VISIBLE else View.GONE
             val showEntry = state.selected && (state.entry != null || state.message != null)
-            entry.visibility = if (showEntry) View.VISIBLE else View.GONE
-            historyScroll.visibility = if (showEntry) View.GONE else View.VISIBLE
+            val writing = note.visibility == View.VISIBLE
+            entry.visibility = if (showEntry && !writing) View.VISIBLE else View.GONE
+            historyScroll.visibility = if (showEntry || writing) View.GONE else View.VISIBLE
             if (showEntry) showEntries(entry, state)
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.GONE
             message.text = state.message.takeIf { state.entry != null } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
             stripsToggle.text = if (stripsOn) "Tap on game: on" else "Tap on game: off"
+        }
+
+        fun showNote(word: String) {
+            entry.visibility = View.GONE
+            historyScroll.visibility = View.GONE
+            note.visibility = View.VISIBLE
+            note.open(word)
+        }
+
+        fun hideNote() {
+            note.visibility = View.GONE
         }
 
         /** While nothing is selected, the lines read before: tap one to look a word up in it. */

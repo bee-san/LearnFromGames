@@ -647,4 +647,4 @@ private fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { HOME, LINE, STATS, GOALS, SETTINGS, APPEARANCE, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }
+enum class Page { HOME, LINE, NOTES, NOTE_NEW, STATS, GOALS, SETTINGS, APPEARANCE, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }

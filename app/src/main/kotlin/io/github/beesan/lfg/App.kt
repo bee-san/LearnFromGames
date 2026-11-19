@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import io.github.beesan.lfg.data.Notes
 import java.io.File
 
 /** The app's few long-lived parts, shared by the screens and the accessibility service. */
@@ -35,6 +36,7 @@ class App : Application() {
     val media by lazy { MediaAttacher(this, scope, anki, database, { settings.prefs.value }, Speech(this)) }
     val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media"), wordAudio) { StatsWidgets.requestUpdate(this) } }
     val models by lazy { ModelStore(this) }
+    val notes by lazy { Notes(database, File(filesDir, "notes")) }
 
     override fun onCreate() {
         super.onCreate()

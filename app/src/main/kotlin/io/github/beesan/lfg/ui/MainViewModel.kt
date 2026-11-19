@@ -19,6 +19,7 @@ import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LineStore
+import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
 import io.github.beesan.lfg.dict.DictionaryWorker
@@ -118,7 +119,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsState())
 
     /** Lookup in a stored line, for a card made after the session. */
-    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio)
+    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio) { app.notes.withNotes(it) }
 
     private val _styles = MutableStateFlow<List<EntryHtml.Style>>(emptyList())
     val styles: StateFlow<List<EntryHtml.Style>> = _styles
@@ -256,8 +257,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── lines ────────────────────────────────────────────────────────────────
 
+    /** The stored line open in [lineLookup]. */
+    private var opened: GameLine? = null
+
     fun openLine(line: GameLine) {
-        lineLookup.setLines(listOf(LookupLine(line.lineText, line.id, line.screenshotPath?.takeIf { File(it).isFile }, line.gameName)))
+        opened = line
+        lineLookup.setLines(listOf(LookupLine(line.lineText, line.id, picture(line), line.gameName)))
+    }
+
+    /** The screen's picture is cleared after two weeks; the line's own picture stays and stands in for it. */
+    private fun picture(line: GameLine): String? =
+        line.screenshotPath?.takeIf { File(it).isFile } ?: line.cropPath?.takeIf { File(it).isFile }
+
+    // ── notes ────────────────────────────────────────────────────────────────
+
+    val notes: StateFlow<List<Note>> = app.notes.all.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** A note being written in the app: the line it is on, its place in [lines], and the picture it keeps. */
+    data class NoteDraft(val line: GameLine? = null, val lineIndex: Int = 0, val picture: String? = null)
+
+    private val _draft = MutableStateFlow(NoteDraft())
+    val draft: StateFlow<NoteDraft> = _draft
+
+    /** "New note…": on the newest line read, with its picture; tap a word in it to note that word. */
+    fun newNote() = noteOn(0)
+
+    /** "Use the line before". */
+    fun noteOnLineBefore() = noteOn(_draft.value.lineIndex + 1)
+
+    private fun noteOn(index: Int) {
+        val line = lines.value.getOrNull(index)
+        if (line == null) {
+            if (index == 0) _draft.value = NoteDraft()
+            return
+        }
+        _draft.value = NoteDraft(line, index, picture(line))
+        openLine(line)
+    }
+
+    /** The note button of an entry on the open line: a note on that word. */
+    fun noteFromLine(entryIndex: Int) {
+        val line = opened ?: return
+        lineLookup.selectEntry(entryIndex)
+        _draft.value = NoteDraft(line, lines.value.indexOfFirst { it.id == line.id }.coerceAtLeast(0), picture(line))
+    }
+
+    fun removeNotePicture() = _draft.update { it.copy(picture = null) }
+
+    /** The note's word is the entry the line's lookup is on; empty when none is. */
+    fun saveNote(title: String, text: String, inLookups: Boolean) {
+        val draft = _draft.value
+        val line = draft.line
+        val entry = lineLookup.state.value.entry
+        val note = Note(
+            gameId = line?.gameId.orEmpty(), gameName = line?.gameName.orEmpty(), lineId = line?.id, lineText = line?.lineText.orEmpty(),
+            term = entry?.expression.orEmpty(), reading = entry?.reading.orEmpty(), gloss = entry?.senses()?.firstOrNull().orEmpty(),
+            title = title.trim(), text = text.trim(), inLookups = inLookups, createdAt = System.currentTimeMillis(),
+        )
+        viewModelScope.launch { app.notes.save(note, draft.picture) }
     }
 
     // ── dictionaries ─────────────────────────────────────────────────────────
