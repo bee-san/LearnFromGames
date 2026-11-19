@@ -6,6 +6,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
+import android.text.TextUtils
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -76,6 +77,7 @@ class OverlayHost(
     private var stripsOn = true
     private var gameInFront = false
     private var history: List<LookupLine> = emptyList()
+    private var session: String? = null
 
     /** The line and entry a note is being written on, while the note editor shows. */
     private var noting: Pair<LookupLine, Entry>? = null
@@ -199,6 +201,12 @@ class OverlayHost(
         panelView?.showHistory(lines)
     }
 
+    /** The session still going, as one line for the top of the panel; null when there is none. */
+    fun onSession(text: String?) {
+        session = text
+        panelView?.showSession(text)
+    }
+
     private fun moveTo(displayId: Int) {
         (strips + marks + listOfNotNull(popup, focus)).forEach { it.remove() }
         strips.clear()
@@ -295,7 +303,7 @@ class OverlayHost(
         }
         val host = manager(displayId) ?: return
         val size = bounds(displayId) ?: return
-        val view = panelView?.takeIf { panel != null } ?: PanelView(host.first).also { panelView = it; it.showHistory(history) }
+        val view = panelView?.takeIf { panel != null } ?: PanelView(host.first).also { panelView = it; it.showHistory(history); it.showSession(session) }
         val win = panel ?: Win(view, host.second, PANEL_FLAGS).also { panel = it }
         view.show(state, stripsOn)
         win.place(0, 0, size.width, size.height)
@@ -508,6 +516,7 @@ class OverlayHost(
         private val stripsToggle = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
         private val empty = context.label(15f, Ink.DIM)
+        private val sessionLine = context.label(13f, Ink.DIM)
 
         init {
             orientation = VERTICAL
@@ -525,6 +534,12 @@ class OverlayHost(
                 addView(lines)
                 setPadding(pad, context.dp(12f), pad, context.dp(10f))
             }
+            sessionLine.setBackgroundColor(Ink.SURFACE)
+            sessionLine.setPadding(pad, context.dp(8f), pad, context.dp(8f))
+            sessionLine.maxLines = 1
+            sessionLine.ellipsize = TextUtils.TruncateAt.END
+            sessionLine.visibility = View.GONE
+            addView(sessionLine, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
             addView(top, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
             empty.text = "Waiting for text in the game…"
             empty.setPadding(pad, 0, pad, context.dp(10f))
@@ -586,6 +601,11 @@ class OverlayHost(
 
         fun hideNote() {
             note.visibility = View.GONE
+        }
+
+        fun showSession(text: String?) {
+            sessionLine.text = text.orEmpty()
+            sessionLine.visibility = if (text == null) View.GONE else View.VISIBLE
         }
 
         /** While nothing is selected, the lines read before: tap one to look a word up in it. */

@@ -26,8 +26,8 @@ import java.util.Locale
 /** A game started by a front-end, or seen running: its name, the app it runs in, and when. */
 data class Launch(val title: String, val packageName: String?, val atMs: Long, val source: String)
 
-/** The game an app has open: [key] tells it apart from the app's other games, [title] is shown. */
-data class Named(val key: String, val title: String, val source: String)
+/** The game an app has open: [key] tells it apart from the app's other games, [title] is shown. [steamAppId]: Steam's id for it, for its cover. */
+data class Named(val key: String, val title: String, val source: String, val steamAppId: String = "")
 
 object GameTitle {
     private val TAGS = Regex("""\s*[(\[][^)\]]*[)\]]""")
@@ -251,7 +251,8 @@ object Steam {
         val player = Json.parseToJsonElement(json).jsonObject["response"]!!.jsonObject["players"]!!.jsonArray.firstOrNull()?.jsonObject
             ?: throw IllegalArgumentException("Steam knows no such account")
         val name = (player["gameextrainfo"] as? JsonPrimitive)?.content?.trim().orEmpty()
-        return if (name.isEmpty()) null else GameTitle.named(name, SOURCE)
+        val appId = (player["gameid"] as? JsonPrimitive)?.content?.trim().orEmpty().takeIf { it.all(Char::isDigit) }.orEmpty()
+        return if (name.isEmpty()) null else GameTitle.named(name, SOURCE).copy(steamAppId = appId)
     }
 
     fun vanityId(json: String): String? {

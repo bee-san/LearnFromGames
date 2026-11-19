@@ -6,6 +6,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.core.view.WindowCompat
 import io.github.beesan.lfg.core.Palette
+import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.backup.Backup
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
@@ -98,6 +99,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
             var page by rememberSaveable { mutableStateOf(Page.HOME) }
+            // The game whose own stats page is open, and the period it opened on.
+            var statsGame by rememberSaveable { mutableStateOf("") }
+            var statsGamePeriod by rememberSaveable { mutableStateOf(StatsPeriod.DAYS_30) }
             val saved = rememberSaveableStateHolder()
 
             val ankiPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -136,7 +140,7 @@ class MainActivity : ComponentActivity() {
                     Page.LINE, Page.NOTES, Page.RECAP, Page.STATS, Page.SETTINGS -> Page.HOME
                     Page.NOTE_NEW -> Page.NOTES
                     Page.SOURCES -> Page.DICTIONARIES
-                    Page.GOALS -> Page.STATS
+                    Page.GOALS, Page.GAME_STATS -> Page.STATS
                     Page.HOME -> Page.HOME
                     else -> Page.SETTINGS
                 }
@@ -241,8 +245,17 @@ class MainActivity : ComponentActivity() {
                             onBack = ::back,
                         )
                         page == Page.STATS -> saved.SaveableStateProvider(Page.STATS) {
-                            StatsScreen(stats, prefs.goals, { page = Page.GOALS }, ::back)
+                            StatsScreen(
+                                stats, games, prefs.goals, { page = Page.GOALS },
+                                onGame = { id, period ->
+                                    statsGame = id
+                                    statsGamePeriod = period
+                                    page = Page.GAME_STATS
+                                },
+                                onBack = ::back,
+                            )
                         }
+                        page == Page.GAME_STATS -> GameStatsScreen(stats, games.firstOrNull { it.id == statsGame }, statsGame, statsGamePeriod, ::back)
                         page == Page.GOALS -> GoalsScreen(prefs, model::updatePrefs, ::back)
                         page == Page.SETTINGS -> SettingsScreen(onOpen = { page = it }, onBack = ::back)
                         page == Page.DICTIONARIES -> DictionariesScreen(

@@ -83,7 +83,7 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 @Composable
-private fun Page(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
+internal fun Page(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxSize()) {
         PageHeader(title) {
             actions()
@@ -118,7 +118,7 @@ fun Card(name: String, detail: String = "", onClick: (() -> Unit)? = null, trail
 
 /** A choice between a few named options: the current one is filled. */
 @Composable
-private fun Choice(options: List<Pair<String, String>>, current: String, onPick: (String) -> Unit) {
+internal fun Choice(options: List<Pair<String, String>>, current: String, onPick: (String) -> Unit) {
     options.forEach { (value, label) -> LfgButton(label, { onPick(value) }, primary = value == current) }
 }
 
@@ -532,7 +532,7 @@ fun MediaScreen(prefs: Prefs, recording: Boolean, onChange: ((Prefs) -> Prefs) -
     }
 }
 
-private fun duration(seconds: Double): String {
+internal fun duration(seconds: Double): String {
     val minutes = (seconds / 60).toLong()
     return if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
 }
@@ -580,9 +580,20 @@ private fun Stepper(label: String, value: Int, steps: List<Int>, onPick: (Int) -
     LfgButton("+", { onPick(ReadingGoals.step(steps, value, up = true)) })
 }
 
-/** Reading time, characters, speed and streak over a period, the daily goals, and a bar a day or a month. */
+/**
+ * Reading time, characters, speed and streak over a period, today's sessions,
+ * each game, the daily goals, and a bar a day or a month. A game opens its own
+ * page, over the same period.
+ */
 @Composable
-fun StatsScreen(stats: StatsState, goals: ReadingGoals, onGoals: () -> Unit, onBack: () -> Unit) {
+fun StatsScreen(
+    stats: StatsState,
+    games: List<Game>,
+    goals: ReadingGoals,
+    onGoals: () -> Unit,
+    onGame: (String, StatsPeriod) -> Unit,
+    onBack: () -> Unit,
+) {
     var period by rememberSaveable { mutableStateOf(StatsPeriod.DAYS_30) }
     var showTime by rememberSaveable { mutableStateOf(false) }
     var picked by remember(period) { mutableIntStateOf(-1) }
@@ -591,6 +602,7 @@ fun StatsScreen(stats: StatsState, goals: ReadingGoals, onGoals: () -> Unit, onB
     }) {
         val today = remember { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, ZoneId.systemDefault()) }
         if (!stats.loaded) return@Page
+        val byId = remember(games) { games.associateBy { it.id } }
         if (stats.days.isEmpty()) {
             Text("Nothing has been read yet.", color = Lfg.Dim, fontSize = 15.sp)
             HorizontalDivider(color = Lfg.Border)
@@ -602,6 +614,7 @@ fun StatsScreen(stats: StatsState, goals: ReadingGoals, onGoals: () -> Unit, onB
         val t = view.totals
         val before = view.before
         Text(view.range, color = Lfg.Dim, fontSize = 14.sp)
+        SessionBanner(stats, byId, today, rememberNow())
         HorizontalDivider(color = Lfg.Border)
         Row(Modifier.fillMaxWidth()) {
             Tile(
@@ -620,6 +633,8 @@ fun StatsScreen(stats: StatsState, goals: ReadingGoals, onGoals: () -> Unit, onB
             Tile("Streak", listOf("${stats.streaks.current}" to if (stats.streaks.current == 1) "day" else "days"), "Longest ${stats.streaks.longest}")
         }
         HorizontalDivider(color = Lfg.Border)
+        GamesList(stats, byId, period, today) { onGame(it, period) }
+        HorizontalDivider(color = Lfg.Border, modifier = Modifier.padding(top = 8.dp))
         Goals(goals, progress, view.dayCount, onGoals)
         HorizontalDivider(color = Lfg.Border)
 
@@ -705,7 +720,7 @@ private fun Goals(goals: ReadingGoals, progress: ReadingGoals.Progress?, dayCoun
 
 /** A figure with its units smaller beside it, under its name; with [progress], a bar of it, full in green once [done]. */
 @Composable
-private fun RowScope.Tile(label: String, parts: List<Pair<String, String>>, sub: String, progress: Float? = null, done: Boolean = false) {
+internal fun RowScope.Tile(label: String, parts: List<Pair<String, String>>, sub: String, progress: Float? = null, done: Boolean = false) {
     Column(Modifier.weight(1f).padding(top = 14.dp, bottom = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, color = Lfg.Dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Text(
@@ -736,7 +751,7 @@ private fun RowScope.Tile(label: String, parts: List<Pair<String, String>>, sub:
  * the bars' units, is a dashed line across them.
  */
 @Composable
-private fun BarChart(values: List<Double>, axis: List<String>, hours: Boolean, goal: Double?, picked: Int, names: List<String>, onPick: (Int) -> Unit) {
+internal fun BarChart(values: List<Double>, axis: List<String>, hours: Boolean, goal: Double?, picked: Int, names: List<String>, onPick: (Int) -> Unit) {
     val (step, lines) = gridFor(maxOf(values.maxOrNull() ?: 0.0, goal ?: 0.0), hours)
     val height = 200.dp
     val label = { v: Double ->
@@ -829,9 +844,9 @@ private fun gridFor(max: Double, hours: Boolean): Pair<Double, Int> {
 }
 
 /** "23 h 40 min" as numbers and their units. */
-private fun durationParts(seconds: Double): List<Pair<String, String>> {
+internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     val minutes = (seconds / 60).toLong()
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, MEDIA, PRACTICE }
+enum class Page { HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, MEDIA, PRACTICE }

@@ -10,7 +10,9 @@ import java.time.ZoneId
  * tools/reading_stats.py and core/history_lines.c, in the same integers).
  * Lines go in time order across all games, and each is credited the time to
  * the next one, at most 2.5 times what the game's pace would take for it,
- * 2 s to 5 minutes. A change of game is a break. There are no sessions.
+ * 2 s to 5 minutes. A change of game is a break. Sessions only group the
+ * lines afterwards: they change no line's time, so a game's sessions, and its
+ * days, add up to the totals.
  */
 object ReadingStats {
     /** The pace is in units of 64 µs a character, in 16 bits; 0 means not learned yet. */
@@ -154,24 +156,74 @@ object ReadingStats {
         return credits.mapIndexed { i, (us, _) -> Read(if (us == 0L || i in skipped) null else us, i in skipped) }
     }
 
-    /** Newest day first. The pace is learned across the whole history, not day by day. */
-    fun byDay(stamps: List<Stamp>, zone: ZoneId): List<DayTotals> {
-        val sorted = stamps.sortedBy { it.us }
-        val reads = credit(sorted)
-        class Sum(var lines: Int = 0, var chars: Int = 0, var timed: Int = 0, var us: Long = 0)
-        val days = HashMap<LocalDate, Sum>()
-        sorted.forEachIndexed { i, line ->
-            val sum = days.getOrPut(dayOf(line.timestamp, zone)) { Sum() }
-            val read = reads[i]
-            sum.lines++
-            if (!read.skipped) sum.chars += line.chars
+    /** A session of a game ends when this long passes with no line from it. */
+    const val SESSION_GAP_SECONDS = 30 * 60.0
+
+    /** A run of one game's lines with no gap longer than [SESSION_GAP_SECONDS]; [start] and [end] are its first and last line. */
+    data class Session(
+        val gameId: String,
+        val start: Double,
+        val end: Double,
+        val lines: Int,
+        val chars: Int,
+        val timedChars: Int,
+        val seconds: Double,
+    ) {
+        val charsPerHour: Int get() = perHour(timedChars, seconds)
+    }
+
+    /** Every day, each game's days, and every session, oldest session first: all from one pass of [credit]. */
+    data class Summary(
+        val days: List<DayTotals>,
+        val gameDays: Map<String, List<DayTotals>>,
+        val sessions: List<Session>,
+    )
+
+    private class Sum(var lines: Int = 0, var chars: Int = 0, var timed: Int = 0, var us: Long = 0) {
+        fun add(chars: Int, read: Read) {
+            lines++
+            if (!read.skipped) this.chars += chars
             if (read.us != null) {
-                sum.timed += line.chars
-                sum.us += read.us
+                timed += chars
+                us += read.us
             }
         }
-        return days.map { (day, s) -> DayTotals(day, s.lines, s.chars, s.timed, s.us / 1e6) }.sortedByDescending { it.day }
+
+        fun day(day: LocalDate) = DayTotals(day, lines, chars, timed, us / 1e6)
     }
+
+    /** Newest day first, in [Summary.days] and in each game's list. The pace is learned across the whole history, not day by day. */
+    fun summarise(stamps: List<Stamp>, zone: ZoneId): Summary {
+        val sorted = stamps.sortedBy { it.us }
+        val reads = credit(sorted)
+        val days = HashMap<LocalDate, Sum>()
+        val gameDays = HashMap<String, HashMap<LocalDate, Sum>>()
+        class Open(val start: Double, var end: Double, val sum: Sum = Sum())
+        val open = HashMap<String, Open>()
+        val sessions = ArrayList<Session>()
+        val close = { gameId: String, o: Open -> sessions += Session(gameId, o.start, o.end, o.sum.lines, o.sum.chars, o.sum.timed, o.sum.us / 1e6) }
+        sorted.forEachIndexed { i, line ->
+            val day = dayOf(line.timestamp, zone)
+            val read = reads[i]
+            days.getOrPut(day) { Sum() }.add(line.chars, read)
+            gameDays.getOrPut(line.gameId) { HashMap() }.getOrPut(day) { Sum() }.add(line.chars, read)
+            val last = open[line.gameId]
+            val session = if (last != null && line.timestamp - last.end <= SESSION_GAP_SECONDS) {
+                last
+            } else {
+                last?.let { close(line.gameId, it) }
+                Open(line.timestamp, line.timestamp).also { open[line.gameId] = it }
+            }
+            session.end = line.timestamp
+            session.sum.add(line.chars, read)
+        }
+        open.forEach { (gameId, o) -> close(gameId, o) }
+        val newestFirst = { m: Map<LocalDate, Sum> -> m.map { (day, s) -> s.day(day) }.sortedByDescending { it.day } }
+        return Summary(newestFirst(days), gameDays.mapValues { newestFirst(it.value) }, sessions.sortedBy { it.start })
+    }
+
+    /** Newest day first. The pace is learned across the whole history, not day by day. */
+    fun byDay(stamps: List<Stamp>, zone: ZoneId): List<DayTotals> = summarise(stamps, zone).days
 
     data class Streaks(val current: Int, val longest: Int)
 

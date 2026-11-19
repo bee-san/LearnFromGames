@@ -19,10 +19,14 @@ import android.view.accessibility.AccessibilityWindowInfo
 import io.github.beesan.lfg.App
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.core.GameStats
 import io.github.beesan.lfg.core.Perf
+import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.data.Game
+import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.EntryHtml
+import io.github.beesan.lfg.games.Covers
 import io.github.beesan.lfg.games.Hosts
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
@@ -36,11 +40,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.time.ZoneId
 import kotlin.coroutines.resume
 
 /**
@@ -145,7 +151,36 @@ class LfgAccessibilityService : AccessibilityService() {
                 overlays.onHistory(rows.map { LookupLine(it.lineText, it.id, it.screenshotPath, it.gameName) })
             }
         }
+        // The session still going, on the panel: again with each new line, and each minute so it ends when its gap has passed.
+        scope.launch {
+            combine(app.database.lines().recent(1), minutes()) { rows, _ -> rows.firstOrNull() }.collect { latest ->
+                overlays.onSession(withContext(Dispatchers.IO) { sessionLine(latest) })
+            }
+        }
         scope.launch { captureLoop() }
+    }
+
+    private fun minutes() = flow {
+        while (true) {
+            emit(Unit)
+            delay(60_000)
+        }
+    }
+
+    /**
+     * The newest line's session, while it is still going. Counted from the
+     * last [SESSION_LOOK_BACK_S] of lines alone, so the paces start afresh and
+     * may differ a little from the Stats screen's, which learns them from all.
+     */
+    private suspend fun sessionLine(latest: GameLine?): String? {
+        val now = System.currentTimeMillis() / 1000.0
+        if (latest == null || now - latest.timestamp > ReadingStats.SESSION_GAP_SECONDS) return null
+        val stamps = app.database.lines().stampsSince(now - SESSION_LOOK_BACK_S)
+            .map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }
+        val session = ReadingStats.summarise(stamps, ZoneId.systemDefault()).sessions
+            .lastOrNull { it.gameId == latest.gameId }?.takeIf { GameStats.live(it, now) } ?: return null
+        val cards = GameStats.sessionCards(listOf(session), app.database.cards().madeSince((session.start * 1000).toLong()))[session] ?: 0
+        return GameStats.strip(latest.gameName, session, cards)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) = Unit
@@ -350,9 +385,19 @@ class LfgAccessibilityService : AccessibilityService() {
     private suspend fun namedInside(host: Game): Game {
         val named = app.gameFinder.nameFor(host.packageName) ?: return host
         val key = host.packageName + "\n" + named.key
-        return namedGames[key] ?: withContext(Dispatchers.IO) {
+        return (namedGames[key] ?: withContext(Dispatchers.IO) {
             app.lines.namedGame(host, named.key, named.title, named.source)
-        }.also { namedGames[key] = it }
+        }.also { namedGames[key] = it }).also { game -> coverFor(game, named.steamAppId) }
+    }
+
+    /** Steam games whose header has been asked for since the service started: each once. */
+    private val coversAsked = HashSet<String>()
+
+    private fun coverFor(game: Game, appId: String) {
+        if (appId.isEmpty() || !coversAsked.add(appId)) return
+        scope.launch(Dispatchers.IO) {
+            if (Covers.noteSteam(this@LfgAccessibilityService, game.id, appId)) Covers.fetchSteam(this@LfgAccessibilityService, appId)
+        }
     }
 
     private val declared = HashMap<String, Boolean>()
@@ -451,6 +496,7 @@ class LfgAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "LfgService"
+        private const val SESSION_LOOK_BACK_S = 12 * 3600.0
         private const val PREFS = "service"
         private const val KEY_AWAITING = "awaiting"
 
