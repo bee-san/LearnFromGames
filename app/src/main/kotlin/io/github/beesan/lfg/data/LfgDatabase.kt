@@ -11,6 +11,7 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import io.github.beesan.lfg.core.GameStats
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -34,6 +35,10 @@ interface LineDao {
     /** The text too: stats count its letters, not every code point as `char_count` does. */
     @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' ORDER BY timestamp")
     fun stamps(): Flow<List<LineStamp>>
+
+    /** The same, from [since] on: the lines a session still going can be made of. */
+    @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' AND timestamp >= :since ORDER BY timestamp")
+    suspend fun stampsSince(since: Double): List<LineStamp>
 
     /** Pictures no card was made from, older than [before] (milliseconds). */
     @Query("SELECT DISTINCT screenshot_path FROM game_lines WHERE screenshot_path IS NOT NULL AND note_ids = '' AND created_at < :before")
@@ -117,6 +122,13 @@ interface CardDao {
     /** When each card was made, added or still waiting; a failed one was never made. */
     @Query("SELECT created_at FROM cards WHERE state != 'failed'")
     suspend fun madeTimes(): List<Long>
+
+    /** Each card made, and the game of the line it was made from. */
+    @Query("SELECT cards.created_at AS madeAt, game_lines.game_id AS gameId FROM cards JOIN game_lines ON game_lines.id = cards.line_id WHERE cards.state != 'failed'")
+    fun madeByGame(): Flow<List<GameStats.CardMade>>
+
+    @Query("SELECT cards.created_at AS madeAt, game_lines.game_id AS gameId FROM cards JOIN game_lines ON game_lines.id = cards.line_id WHERE cards.state != 'failed' AND cards.created_at >= :since")
+    suspend fun madeSince(since: Long): List<GameStats.CardMade>
 
     @Query("SELECT * FROM cards WHERE state = 'pending' ORDER BY created_at")
     suspend fun pending(): List<Card>

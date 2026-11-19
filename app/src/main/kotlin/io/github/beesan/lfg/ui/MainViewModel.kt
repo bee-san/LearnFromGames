@@ -23,6 +23,7 @@ import io.github.beesan.lfg.anki.AnkiTarget
 import io.github.beesan.lfg.anki.CardContent
 import io.github.beesan.lfg.anki.CardResult
 import io.github.beesan.lfg.capture.LfgAccessibilityService
+import io.github.beesan.lfg.core.GameStats
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
@@ -40,6 +41,7 @@ import io.github.beesan.lfg.ocr.ModelState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -83,6 +85,9 @@ data class DictionariesState(val busy: Boolean = false, val error: String? = nul
 
 data class StatsState(
     val days: List<ReadingStats.DayTotals> = emptyList(),
+    /** Each game's days, and every session. */
+    val summary: ReadingStats.Summary = ReadingStats.Summary(emptyList(), emptyMap(), emptyList()),
+    val cards: List<GameStats.CardMade> = emptyList(),
     val streaks: ReadingStats.Streaks = ReadingStats.Streaks(0, 0),
     /** The lines have been counted: until then an empty [days] means not yet, not nothing read. */
     val loaded: Boolean = false,
@@ -113,13 +118,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val games: StateFlow<List<Game>> =
         app.database.games().all().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val stats: StateFlow<StatsState> = app.database.lines().stamps().map { stamps ->
+    val stats: StateFlow<StatsState> = combine(app.database.lines().stamps(), app.database.cards().madeByGame()) { stamps, cards ->
         withContext(Dispatchers.Default) {
             val zone = ZoneId.systemDefault()
             val all = stamps.map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }
-            val days = ReadingStats.byDay(all, zone)
+            val summary = ReadingStats.summarise(all, zone)
+            val days = summary.days
             StatsState(
                 days = days,
+                summary = summary,
+                cards = cards,
                 streaks = ReadingStats.streaks(days.map { it.day }, ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, zone)),
                 loaded = true,
             )

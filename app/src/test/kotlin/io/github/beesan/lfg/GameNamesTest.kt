@@ -101,6 +101,7 @@ class GameNamesTest {
     fun steamSaysWhatIsPlayingAndTakesAnyFormOfProfile() {
         val playing = Steam.playing("""{"response":{"players":[{"steamid":"1","gameid":"1030300","gameextrainfo":"Hollow Knight: Silksong"}]}}""")!!
         assertEquals("Hollow Knight: Silksong", playing.title)
+        assertEquals("1030300", playing.steamAppId)
         assertNull(Steam.playing("""{"response":{"players":[{"steamid":"1"}]}}"""))
         assertThrows(IllegalArgumentException::class.java) { Steam.playing("""{"response":{"players":[]}}""") }
 
