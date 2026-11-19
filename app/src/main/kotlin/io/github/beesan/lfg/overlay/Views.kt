@@ -11,6 +11,8 @@ import android.text.Spanned
 import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
+import android.view.KeyEvent
+import android.view.View
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.content.res.ColorStateList
@@ -127,7 +129,7 @@ internal class LinesView(context: Context, private val onTap: (line: Int, index:
 
 /** `A Add card · B Close · ◀ ▶ Word · ▲ ▼ Line`: what replaces the button while the controller drives. */
 internal fun Context.keyHints(confirm: String, close: String): TextView = label(12.5f, Ink.DIM).apply {
-    text = "$confirm Add card    $close Close    Y Listen    ◀ ▶ Word    ▲ ▼ Line    L1 R1 Entry"
+    text = "$confirm Add card    $close Close    Y Listen    X Note    ◀ ▶ Word    ▲ ▼ Line    L1 R1 Entry"
     setPadding(0, dp(6f), 0, 0)
 }
 
@@ -139,10 +141,18 @@ internal val TRANSPARENT = Color.TRANSPARENT
  * A note on a word, written without leaving the game: whether to keep the
  * picture of the game as it is now, and the text. Its window takes focus
  * while it shows, so the keyboard can come up; [OverlayHost] gives it back.
+ * With a controller, the confirm button saves and the other goes back, as
+ * they add a card and close in lookup mode ([swapConfirm] swaps them).
  */
 @SuppressLint("ViewConstructor")
-internal class NoteEditor(context: Context, onSave: (text: String, keepPicture: Boolean) -> Unit, onBack: () -> Unit) : LinearLayout(context) {
+internal class NoteEditor(
+    context: Context,
+    private val swapConfirm: () -> Boolean,
+    private val onSave: (text: String, keepPicture: Boolean) -> Unit,
+    private val onBack: () -> Unit,
+) : LinearLayout(context) {
     private val title = context.label(17f, Ink.TEXT, bold = true)
+    private val hints = context.label(12.5f, Ink.DIM)
     private val keep = CheckBox(context)
     private val field = EditText(context)
 
@@ -169,12 +179,30 @@ internal class NoteEditor(context: Context, onSave: (text: String, keepPicture: 
         val buttons = LinearLayout(context).apply { orientation = HORIZONTAL }
         buttons.addView(button(context, "Save note", primary = true) { onSave(field.text.toString(), keep.isChecked) }, wrap())
         buttons.addView(button(context, "Back", primary = false) { onBack() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
+        buttons.gravity = Gravity.CENTER_VERTICAL
+        buttons.addView(View(context), LayoutParams(0, 1, 1f))
+        buttons.addView(hints, wrap())
         addView(buttons, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
+    }
+
+    /** The controller's buttons reach the field first; the confirm one saves and the other goes back, on release. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val swap = swapConfirm()
+        val confirm = if (swap) KeyEvent.KEYCODE_BUTTON_B else KeyEvent.KEYCODE_BUTTON_A
+        val close = if (swap) KeyEvent.KEYCODE_BUTTON_A else KeyEvent.KEYCODE_BUTTON_B
+        when (event.keyCode) {
+            confirm -> if (event.action == KeyEvent.ACTION_UP) onSave(field.text.toString(), keep.isChecked)
+            close -> if (event.action == KeyEvent.ACTION_UP) onBack()
+            else -> return super.dispatchKeyEvent(event)
+        }
+        return true
     }
 
     /** Ready for a note on [word]: an empty field with the keyboard up. */
     fun open(word: String) {
         title.text = "Note on $word"
+        val swap = swapConfirm()
+        hints.text = "${if (swap) "B" else "A"} Save    ${if (swap) "A" else "B"} Back"
         keep.isChecked = true
         field.setText("")
         field.requestFocus()

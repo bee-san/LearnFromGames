@@ -86,6 +86,7 @@ class OverlayHost(
         onClose = { controller.exitControllerMode() },
         onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(0, dy) },
         chordActive = chordActive,
+        onNote = { startNote(state.entryIndex) },
     )
 
     /** True while something of ours is drawn on the game's screen, so a picture of that screen would include it. */
@@ -405,7 +406,7 @@ class OverlayHost(
         val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }
         private val message = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
-        private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
+        private val note = NoteEditor(context, { prefs().swapConfirm }, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
 
         init {
             orientation = VERTICAL
@@ -501,7 +502,7 @@ class OverlayHost(
 
         /** The entry in full: pictures, tables and each dictionary's own styling. */
         val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }
-        private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
+        private val note = NoteEditor(context, { prefs().swapConfirm }, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
         private val historyList = LinearLayout(context)
         private val historyScroll = ScrollView(context)
         private val message = context.label(12.5f, Ink.DIM)

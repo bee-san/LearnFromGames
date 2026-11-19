@@ -28,6 +28,8 @@ class ControllerInput(
     private val onScroll: (Int) -> Unit,
     /** True while the shortcut's own buttons are down, so releasing them does not also change entry. */
     private val chordActive: () -> Boolean,
+    /** X: a note on the word the cursor is on. */
+    private val onNote: () -> Unit,
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private val pad = Repeater()
@@ -83,6 +85,7 @@ class ControllerInput(
             close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) onClose()
             // On release, and not when the two were the shortcut being pressed.
             KeyEvent.KEYCODE_BUTTON_Y -> if (down && event.repeatCount == 0) controller.playAudio()
+            KeyEvent.KEYCODE_BUTTON_X -> if (down && event.repeatCount == 0) onNote()
             KeyEvent.KEYCODE_BUTTON_L1 -> if (!down && !chordActive()) controller.previousEntry()
             KeyEvent.KEYCODE_BUTTON_R1 -> if (!down && !chordActive()) controller.nextEntry()
             else -> return KeyEvent.isGamepadButton(event.keyCode)
