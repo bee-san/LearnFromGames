@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
             val draft by model.draft.collectAsStateWithLifecycle()
             val translation by model.translation.collectAsStateWithLifecycle()
             val keyTest by model.keyTest.collectAsStateWithLifecycle()
+            val recap by model.recap.collectAsStateWithLifecycle()
             val styles by model.styles.collectAsStateWithLifecycle()
             val dictionaries by model.dictionaries.collectAsStateWithLifecycle()
             val sources by model.sources.collectAsStateWithLifecycle()
@@ -120,7 +121,7 @@ class MainActivity : ComponentActivity() {
                 // Stats keeps its period and chart across the goals page, and opens on its defaults again after Home.
                 if (page == Page.STATS) saved.removeState(Page.STATS)
                 page = when (page) {
-                    Page.LINE, Page.NOTES, Page.STATS, Page.SETTINGS -> Page.HOME
+                    Page.LINE, Page.NOTES, Page.RECAP, Page.STATS, Page.SETTINGS -> Page.HOME
                     Page.NOTE_NEW -> Page.NOTES
                     Page.SOURCES -> Page.DICTIONARIES
                     Page.GOALS -> Page.STATS
@@ -171,6 +172,19 @@ class MainActivity : ComponentActivity() {
                             onStats = { page = Page.STATS },
                             onSettings = { page = Page.SETTINGS },
                             onNotes = { page = Page.NOTES },
+                            onRecap = {
+                                model.openRecap()
+                                page = Page.RECAP
+                            },
+                        )
+                        page == Page.RECAP -> RecapScreen(
+                            state = recap,
+                            games = games,
+                            hasKey = prefs.openRouterKey.isNotBlank(),
+                            onGame = model::recapGame,
+                            onWrite = model::writeRecap,
+                            onKey = { page = Page.TRANSLATION },
+                            onBack = ::back,
                         )
                         page == Page.NOTES -> NotesScreen(
                             notes = notes,

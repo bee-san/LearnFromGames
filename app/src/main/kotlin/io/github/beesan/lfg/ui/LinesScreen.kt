@@ -61,6 +61,7 @@ fun LinesScreen(
     onStats: () -> Unit,
     onSettings: () -> Unit,
     onNotes: () -> Unit,
+    onRecap: () -> Unit,
 ) {
     val time = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val zone = remember { ZoneId.systemDefault() }
@@ -68,6 +69,7 @@ fun LinesScreen(
     Column(Modifier.fillMaxSize()) {
         PageHeader("Lines") {
             LfgButton("Notes", onNotes)
+            LfgButton("Recap", onRecap)
             LfgButton("Stats", onStats)
             LfgButton("Open settings", onSettings)
         }

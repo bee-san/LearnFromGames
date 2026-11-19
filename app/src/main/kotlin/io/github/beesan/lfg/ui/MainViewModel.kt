@@ -12,6 +12,9 @@ import io.github.beesan.lfg.App
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.anki.AnkiStatus
 import io.github.beesan.lfg.ask.OpenRouter
+import io.github.beesan.lfg.ask.Recap
+import io.github.beesan.lfg.data.RecapRow
+import kotlinx.serialization.json.Json
 import io.github.beesan.lfg.ask.Translator
 import io.github.beesan.lfg.anki.AnkiTarget
 import io.github.beesan.lfg.anki.CardContent
@@ -308,6 +311,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 false to (e.message ?: "")
             }
         }
+    }
+
+    // ── recap ────────────────────────────────────────────────────────────────
+
+    /** A game's recap: the one kept, or being written, or what went wrong. */
+    data class RecapState(
+        val gameId: String? = null,
+        val recap: Recap? = null,
+        val lineCount: Int = 0,
+        val model: String = "",
+        val writtenAt: Long = 0,
+        val busy: Boolean = false,
+        val error: String? = null,
+    )
+
+    private val _recap = MutableStateFlow(RecapState())
+    val recap: StateFlow<RecapState> = _recap
+
+    /** Recap opens on the game read last, and writes the story on when something has been read since the kept recap. */
+    fun openRecap() = recapGame(lines.value.firstOrNull()?.gameId ?: games.value.firstOrNull()?.id)
+
+    fun recapGame(gameId: String?) {
+        _recap.value = RecapState(gameId)
+        if (gameId == null) return
+        viewModelScope.launch {
+            val row = app.database.recaps().latest(gameId)
+            show(gameId, row)
+            val newest = lines.value.firstOrNull { it.gameId == gameId }
+            if ((row == null || newest?.id != row.lastLineId) && app.settings.prefs.value.openRouterKey.isNotBlank()) writeRecap()
+        }
+    }
+
+    fun writeRecap() {
+        val gameId = _recap.value.gameId ?: return
+        if (_recap.value.busy) return
+        val name = games.value.firstOrNull { it.id == gameId }?.title.orEmpty()
+        _recap.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch {
+            try {
+                show(gameId, app.recapper.write(gameId, name))
+            } catch (e: OpenRouter.Failure) {
+                _recap.update { if (it.gameId == gameId) it.copy(busy = false, error = e.message) else it }
+            }
+        }
+    }
+
+    private fun show(gameId: String, row: RecapRow?) = _recap.update {
+        if (it.gameId != gameId) return@update it
+        if (row == null) return@update it.copy(busy = false)
+        it.copy(
+            recap = Json.decodeFromString<Recap>(row.json), lineCount = row.lineCount, model = row.model,
+            writtenAt = row.createdAt, busy = false,
+        )
     }
 
     // ── notes ────────────────────────────────────────────────────────────────

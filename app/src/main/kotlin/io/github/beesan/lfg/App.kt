@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import io.github.beesan.lfg.data.Notes
 import io.github.beesan.lfg.ask.OpenRouter
+import io.github.beesan.lfg.ask.Recapper
 import io.github.beesan.lfg.ask.Translator
 import java.io.File
 
@@ -47,6 +48,7 @@ class App : Application() {
         }
     }
     val translator by lazy { Translator(database) { settings.prefs.value } }
+    val recapper by lazy { Recapper(database, { settings.prefs.value }) }
     val dictionaries by lazy { DictionaryRepository(this) }
     val wordAudio by lazy { WordAudio(this) }
     val anki by lazy { AnkiBridge(this) }
