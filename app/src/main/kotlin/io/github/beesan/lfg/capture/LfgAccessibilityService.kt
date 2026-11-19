@@ -23,6 +23,7 @@ import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.EntryHtml
+import io.github.beesan.lfg.games.Hosts
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.overlay.OverlayHost
@@ -64,6 +65,8 @@ class LfgAccessibilityService : AccessibilityService() {
     private var front: Front? = null
     private val packageOfWindow = HashMap<Int, String>()
     private val games = HashMap<String, Game>()
+    /** Rows of games named inside an emulator, by package and key. */
+    private val namedGames = HashMap<String, Game>()
     private val unread = HashSet<String>()
     private val lastFullscreen = HashMap<String, Long>()
     private var ignored: Set<String> = emptySet()
@@ -202,7 +205,7 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun toggleStrips() {
         val current = front?.game ?: pipeline.latest.value?.game ?: return
         val next = current.copy(tapStrips = !current.tapStrips)
-        games[next.packageName] = next
+        if (next.detected.isEmpty()) games[next.packageName] = next else namedGames[next.packageName + "\n" + next.detected] = next
         overlays.onScreen(front?.displayId ?: Display.INVALID_DISPLAY, next.tapStrips, front != null)
         scope.launch(Dispatchers.IO) { app.database.games().update(next) }
     }
@@ -222,8 +225,8 @@ class LfgAccessibilityService : AccessibilityService() {
             if (++ticks % PERF_EVERY == 0) Perf.report().takeIf { it.isNotEmpty() }?.let { Log.i("LfgPerf", it) }
             val now = Perf.measure("front") { findFront() }
             front = now
-            if (now?.game?.packageName != lastFront) {
-                lastFront = now?.game?.packageName
+            if (now?.game?.id != lastFront) {
+                lastFront = now?.game?.id
                 // The game went behind something else, or came back: the overlays follow at once.
                 val reading = pipeline.latest.value
                 if (now == null) controller.clear()
@@ -272,6 +275,7 @@ class LfgAccessibilityService : AccessibilityService() {
         if (gamesChanged) {
             gamesChanged = false
             games.clear()
+            namedGames.clear()
             unread.clear()
         }
         class Candidate(
@@ -337,16 +341,25 @@ class LfgAccessibilityService : AccessibilityService() {
                 }
             }.also { games[c.name] = it }
             val bounds = Rect().also(c.window::getBoundsInScreen)
-            return Front(game, c.displayId, c.window.id, bounds, c.covered)
+            return Front(namedInside(game), c.displayId, c.window.id, bounds, c.covered)
         }
         return null
+    }
+
+    /** In an emulator or a Steam player, the game a front-end, Eden or Steam says it has open; else the app's own row. */
+    private suspend fun namedInside(host: Game): Game {
+        val named = app.gameFinder.nameFor(host.packageName) ?: return host
+        val key = host.packageName + "\n" + named.key
+        return namedGames[key] ?: withContext(Dispatchers.IO) {
+            app.lines.namedGame(host, named.key, named.title, named.source)
+        }.also { namedGames[key] = it }
     }
 
     private val declared = HashMap<String, Boolean>()
 
     /** Whether an app says it is a game, or is an emulator known by its package name. */
     private fun declaredGame(packageName: String): Boolean = declared.getOrPut(packageName) {
-        if (EMULATORS.any { packageName.startsWith(it) }) return@getOrPut true
+        if (Hosts.isEmulator(packageName)) return@getOrPut true
         try {
             val info = packageManager.getApplicationInfo(packageName, 0)
             @Suppress("DEPRECATION")
@@ -452,14 +465,6 @@ class LfgAccessibilityService : AccessibilityService() {
         private const val PICTURE_DAYS = 14
         private const val BARS_GRACE_MS = 8_000L
 
-        // Emulators and visual-novel players, which rarely declare themselves games.
-        private val EMULATORS = listOf(
-            "com.retroarch", "org.ppsspp.ppsspp", "org.dolphinemu.dolphinemu", "com.github.stenzek.duckstation",
-            "xyz.aethersx2.android", "com.dsemu.drastic", "me.magnum.melonds", "org.vita3k.emulator",
-            "org.citra", "io.github.lime3ds", "org.azahar_emu.azahar", "org.yuzu.yuzu_emu", "dev.eden.eden_emulator",
-            "org.mupen64plusae", "org.scummvm.scummvm", "org.tvp.kirikiri2", "com.winlator", "aenu.aps3e",
-            "com.github.panda3ds", "com.explusalpha", "com.fastemulator", "jp.ogapee.onscripter", "org.renpy",
-        )
         private val DPAD = setOf(
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
         )

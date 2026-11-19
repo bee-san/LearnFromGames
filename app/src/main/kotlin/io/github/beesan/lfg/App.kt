@@ -7,6 +7,7 @@ import io.github.beesan.lfg.anki.CardMaker
 import io.github.beesan.lfg.anki.MediaAttacher
 import io.github.beesan.lfg.anki.Speech
 import io.github.beesan.lfg.data.LfgDatabase
+import io.github.beesan.lfg.games.GameFinder
 import io.github.beesan.lfg.data.LineStore
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionaryRepository
@@ -59,6 +60,7 @@ class App : Application() {
     val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media"), wordAudio) { StatsWidgets.requestUpdate(this) } }
     val models by lazy { ModelStore(this) }
     val notes by lazy { Notes(database, File(filesDir, "notes")) }
+    val gameFinder by lazy { GameFinder(this, scope) { settings.prefs.value } }
 
     override fun onCreate() {
         super.onCreate()

@@ -15,6 +15,7 @@ import io.github.beesan.lfg.ask.OpenRouter
 import io.github.beesan.lfg.backup.Backup
 import android.content.Intent
 import io.github.beesan.lfg.ask.Recap
+import io.github.beesan.lfg.games.GameNameSources
 import io.github.beesan.lfg.data.RecapRow
 import kotlinx.serialization.json.Json
 import io.github.beesan.lfg.ask.Translator
@@ -352,6 +353,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ── game names ───────────────────────────────────────────────────────────
+
+    private val _gameNameStatus = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** What each source's folder holds, in words, by source. */
+    val gameNameStatus: StateFlow<Map<String, String>> = _gameNameStatus
+
+    private val _steamTest = MutableStateFlow<String?>(null)
+    val steamTest: StateFlow<String?> = _steamTest
+
+    fun checkGameNames() = viewModelScope.launch {
+        _gameNameStatus.value = GameNameSources.ALL.associateWith { app.gameFinder.describe(it) }
+    }
+
+    fun testSteam() = viewModelScope.launch {
+        _steamTest.value = "Asking Steam…"
+        _steamTest.value = app.gameFinder.testSteam()
+    }
+
+    /** A source's folder, kept with Android's leave to read it after a restart. */
+    fun chooseGameFolder(source: String, uri: Uri?) {
+        uri ?: return
+        try {
+            app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Some folders can be read now but not kept; it is still worth trying this session.
+        }
+        updatePrefs { GameNameSources.withFolder(it, source, uri.toString()) }
+        checkGameNames()
+    }
+
+    fun forgetGameFolder(source: String) {
+        val old = GameNameSources.folder(app.settings.prefs.value, source)
+        if (old.isNotEmpty()) {
+            try {
+                app.contentResolver.releasePersistableUriPermission(Uri.parse(old), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: SecurityException) {
+            }
+        }
+        updatePrefs { GameNameSources.withFolder(it, source, "") }
+        checkGameNames()
+    }
+
     /** "Change folder…": the folder is kept, with Android's leave to write to it after a restart. */
     fun chooseBackupFolder(uri: Uri?) {
         uri ?: return
@@ -550,7 +593,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateGame(game: Game) = viewModelScope.launch {
         withContext(Dispatchers.IO) {
-            val old = app.database.games().byPackage(game.packageName)
+            val old = app.database.games().byId(game.id)
             app.database.games().update(game)
             if (old != null && old.title != game.title) app.database.games().renameLines(game.id, game.title)
         }

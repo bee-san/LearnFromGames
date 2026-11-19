@@ -77,8 +77,15 @@ interface GameDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(game: Game)
 
-    @Query("SELECT * FROM games WHERE package = :packageName")
+    /** The app's own row: what is read in it that no source named. */
+    @Query("SELECT * FROM games WHERE package = :packageName AND detected = ''")
     suspend fun byPackage(packageName: String): Game?
+
+    @Query("SELECT * FROM games WHERE package = :packageName AND detected = :detected")
+    suspend fun byDetected(packageName: String, detected: String): Game?
+
+    @Query("SELECT * FROM games WHERE id = :id")
+    suspend fun byId(id: String): Game?
 
     @Update
     suspend fun update(game: Game)
@@ -152,10 +159,11 @@ interface RecapDao {
 /** Schema changes add a numbered migration; nothing here is ever rebuilt destructively. */
 @Database(
     entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
     // 2: a crop and a translation for each line, notes, and recaps. Room writes it from the exported schemas.
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    // 3: a row for each game named inside an emulator.
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class LfgDatabase : RoomDatabase() {
     abstract fun lines(): LineDao
