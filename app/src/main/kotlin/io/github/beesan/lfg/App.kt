@@ -22,7 +22,9 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import io.github.beesan.lfg.data.Notes
+import android.content.Intent
 import io.github.beesan.lfg.ask.OpenRouter
+import io.github.beesan.lfg.backup.BackupWorker
 import io.github.beesan.lfg.ask.Recapper
 import io.github.beesan.lfg.ask.Translator
 import java.io.File
@@ -64,5 +66,15 @@ class App : Application() {
         if (dictionaries.state.value is DictState.Missing || models.meikiFiles() == null || models.screenAiDir() == null) DictionaryWorker.start(this)
         // The widgets measure against the goals and draw in the chosen colours, so they redraw as soon as one changes.
         scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
+        // WorkManager keeps the automatic backup across restarts; it changes only when the setting does.
+        scope.launch { settings.prefs.map { it.backupEvery }.distinctUntilChanged().drop(1).collect { BackupWorker.schedule(this@App, it) } }
+    }
+
+    /** Starts the app again from its first screen: after a restore, which replaced the database under it. */
+    fun restart() {
+        packageManager.getLaunchIntentForPackage(packageName)?.let {
+            startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        }
+        Runtime.getRuntime().exit(0)
     }
 }

@@ -12,6 +12,8 @@ import io.github.beesan.lfg.App
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.anki.AnkiStatus
 import io.github.beesan.lfg.ask.OpenRouter
+import io.github.beesan.lfg.backup.Backup
+import android.content.Intent
 import io.github.beesan.lfg.ask.Recap
 import io.github.beesan.lfg.data.RecapRow
 import kotlinx.serialization.json.Json
@@ -310,6 +312,81 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: OpenRouter.Failure) {
                 false to (e.message ?: "")
             }
+        }
+    }
+
+    // ── backup ───────────────────────────────────────────────────────────────
+
+    /** What the last backup, export or restore did, or what went wrong. */
+    private val _backupMessage = MutableStateFlow<String?>(null)
+    val backupMessage: StateFlow<String?> = _backupMessage
+
+    /** A backup picked to restore from, waiting for "Restore" to be pressed. */
+    private val _pendingRestore = MutableStateFlow<Uri?>(null)
+    val pendingRestore: StateFlow<Uri?> = _pendingRestore
+
+    fun backUpTo(uri: Uri?) {
+        uri ?: return
+        _backupMessage.value = "Backing up…"
+        viewModelScope.launch(Dispatchers.IO) {
+            _backupMessage.value = try {
+                app.contentResolver.openOutputStream(uri)?.use { Backup.write(app, app.database, it, app.settings.prefs.value.backupPictures) }
+                    ?: throw java.io.IOException()
+                "Backed up."
+            } catch (_: Exception) {
+                "The backup couldn’t be written there. Try another folder."
+            }
+        }
+    }
+
+    fun exportLinesTo(uri: Uri?) {
+        uri ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            _backupMessage.value = try {
+                val all = app.database.lines().all()
+                app.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { Backup.linesCsv(all, it) } ?: throw java.io.IOException()
+                "Exported %,d lines.".format(all.size)
+            } catch (_: Exception) {
+                "The lines couldn’t be written there. Try another folder."
+            }
+        }
+    }
+
+    /** "Change folder…": the folder is kept, with Android's leave to write to it after a restart. */
+    fun chooseBackupFolder(uri: Uri?) {
+        uri ?: return
+        app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        updatePrefs { it.copy(backupFolder = uri.toString()) }
+    }
+
+    fun askRestore(uri: Uri?) {
+        _pendingRestore.value = uri
+    }
+
+    fun cancelRestore() {
+        _pendingRestore.value = null
+    }
+
+    /** Backs up what is here first (into the backup folder, or the app's own files), then restores and starts again. */
+    fun restore() {
+        val uri = _pendingRestore.value ?: return
+        _pendingRestore.value = null
+        _backupMessage.value = "Restoring…"
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val prefs = app.settings.prefs.value
+                if (prefs.backupFolder.isNotEmpty()) {
+                    Backup.toFolder(app, app.database, prefs.copy(backupKeep = 0, gsmFile = false))
+                } else {
+                    val dir = File(app.filesDir, "backups").apply { mkdirs() }
+                    File(dir, Backup.fileName()).outputStream().use { Backup.write(app, app.database, it, prefs.backupPictures) }
+                }
+                (app.contentResolver.openInputStream(uri) ?: throw java.io.IOException()).use { Backup.restore(app, app.database, it) }
+            } catch (e: Exception) {
+                _backupMessage.value = e.message?.takeIf { it.startsWith("This file") } ?: "The restore failed; nothing was changed. Try again."
+                return@launch
+            }
+            withContext(Dispatchers.Main) { app.restart() }
         }
     }
 

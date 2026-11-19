@@ -6,6 +6,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.core.view.WindowCompat
 import io.github.beesan.lfg.core.Palette
+import io.github.beesan.lfg.backup.Backup
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Intent
@@ -70,6 +71,12 @@ class MainActivity : ComponentActivity() {
             val translation by model.translation.collectAsStateWithLifecycle()
             val keyTest by model.keyTest.collectAsStateWithLifecycle()
             val recap by model.recap.collectAsStateWithLifecycle()
+            val backupMessage by model.backupMessage.collectAsStateWithLifecycle()
+            val pendingRestore by model.pendingRestore.collectAsStateWithLifecycle()
+            val saveBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { model.backUpTo(it) }
+            val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { model.askRestore(it) }
+            val saveLines = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { model.exportLinesTo(it) }
+            val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { model.chooseBackupFolder(it) }
             val styles by model.styles.collectAsStateWithLifecycle()
             val dictionaries by model.dictionaries.collectAsStateWithLifecycle()
             val sources by model.sources.collectAsStateWithLifecycle()
@@ -248,6 +255,19 @@ class MainActivity : ComponentActivity() {
                         page == Page.SOURCES -> SourcesScreen(sources, ::back)
                         page == Page.ANKI -> AnkiScreen(setup, model::connectAnki, { ankiPermission.launch(AnkiBridge.PERMISSION) }, ::back)
                         page == Page.APPEARANCE -> AppearanceScreen(prefs, model::updatePrefs, ::back)
+                        page == Page.BACKUP -> BackupScreen(
+                            prefs = prefs,
+                            onChange = model::updatePrefs,
+                            message = backupMessage,
+                            pendingRestore = pendingRestore?.lastPathSegment?.substringAfterLast('/'),
+                            onBackUp = { saveBackup.launch(Backup.fileName()) },
+                            onPickRestore = { openBackup.launch(arrayOf("application/zip", "application/octet-stream")) },
+                            onRestore = model::restore,
+                            onCancelRestore = model::cancelRestore,
+                            onExport = { saveLines.launch("lfg-lines-export.csv") },
+                            onChooseFolder = { pickFolder.launch(null) },
+                            onBack = ::back,
+                        )
                         page == Page.TRANSLATION -> TranslationScreen(prefs, model::updatePrefs, keyTest, model::testKey, ::back)
                         page == Page.CONTROLS -> ControlsScreen(prefs, model::updatePrefs, ::back)
                         page == Page.RECOGNITION -> RecognitionScreen(

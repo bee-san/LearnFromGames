@@ -56,6 +56,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.Prefs
+import androidx.compose.ui.platform.LocalContext
+import io.github.beesan.lfg.backup.Backup
 import io.github.beesan.lfg.anki.AnkiStatus
 import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingGoals
@@ -120,6 +122,7 @@ private fun OnOff(on: Boolean, onChange: (Boolean) -> Unit) = Choice(listOf("on"
 @Composable
 fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings", onBack) {
     Card("Appearance", "Colours, and light or dark", { onOpen(Page.APPEARANCE) })
+    Card("Backup", "Back up, restore, and back up on a schedule", { onOpen(Page.BACKUP) })
     Card("Translation", "Translate lines with your OpenRouter key", { onOpen(Page.TRANSLATION) })
     Card("Dictionaries", "Add, order and remove dictionaries", { onOpen(Page.DICTIONARIES) })
     Card("Anki", "The note type and deck cards go to", { onOpen(Page.ANKI) })
@@ -234,6 +237,67 @@ fun AppearanceScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack:
     Text("Colours", color = Lfg.Dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Choice(Palette.SCHEMES, prefs.colours) { v -> onChange { it.copy(colours = v) } }
+    }
+}
+
+/**
+ * Backing up and restoring, a spreadsheet of the lines, and automatic
+ * backups to a folder, with the lines file for GameSentenceMiner.
+ */
+@Composable
+fun BackupScreen(
+    prefs: Prefs,
+    onChange: ((Prefs) -> Prefs) -> Unit,
+    message: String?,
+    pendingRestore: String?,
+    onBackUp: () -> Unit,
+    onPickRestore: () -> Unit,
+    onRestore: () -> Unit,
+    onCancelRestore: () -> Unit,
+    onExport: () -> Unit,
+    onChooseFolder: () -> Unit,
+    onBack: () -> Unit,
+) = Page("Backup", onBack) {
+    message?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
+    Card("Back up now", "Lines, stats, notes, recaps, waiting cards and settings, in one file") { LfgButton("Back up…", onBackUp, primary = true) }
+    if (pendingRestore == null) {
+        Card("Restore", "Replaces what is here with a backup. What is here is backed up first.") { LfgButton("Restore…", onPickRestore) }
+    } else {
+        Card("Restore from $pendingRestore?", "Lines, notes and settings here are replaced, and LFG starts again.") {
+            LfgButton("Cancel", onCancelRestore)
+            LfgButton("Restore", onRestore, primary = true)
+        }
+    }
+    Card("Export lines", "A spreadsheet of every line: time, game, text and characters") { LfgButton("Export…", onExport) }
+    Card(
+        "Lines file for GSM",
+        if (prefs.gsmFile) "${Backup.LINES_FILE} in the backup folder, written with each automatic backup. GSM’s ExStatic import adds only lines it hasn’t seen."
+        else "Keeps every line in a file GameSentenceMiner can import",
+    ) {
+        Choice(listOf("off" to "Off", "on" to "On"), if (prefs.gsmFile) "on" else "off") { v -> onChange { it.copy(gsmFile = v == "on") } }
+    }
+    Text("Automatic backup", color = Lfg.Dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp))
+    val last = remember(prefs.backupLast) { java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(prefs.backupLast)) }
+    val status = when {
+        prefs.backupEvery == Prefs.BACKUP_OFF -> "Off"
+        prefs.backupFolder.isEmpty() -> "Choose a folder first"
+        prefs.backupLast == 0L -> "No backup yet: the first is at about 04:00"
+        else -> "Last: $last, " + android.text.format.Formatter.formatShortFileSize(LocalContext.current, prefs.backupLastSize)
+    }
+    Card("How often", status) {
+        Choice(
+            listOf(Prefs.BACKUP_OFF to "Off", Prefs.BACKUP_DAILY to "Daily", Prefs.BACKUP_WEEKLY to "Weekly"),
+            prefs.backupEvery,
+        ) { v -> onChange { it.copy(backupEvery = v) } }
+    }
+    Card("Folder", Backup.folderName(prefs.backupFolder).ifEmpty { "Not chosen. A folder a sync app keeps in the cloud works too." }) {
+        LfgButton(if (prefs.backupFolder.isEmpty()) "Choose folder…" else "Change folder…", onChooseFolder)
+    }
+    Card("Keep", "Older automatic backups are deleted") {
+        Choice(listOf("7" to "Last 7", "30" to "Last 30", "0" to "All"), "${prefs.backupKeep}") { v -> onChange { it.copy(backupKeep = v.toInt()) } }
+    }
+    Card("Pictures", "Pictures of lines and notes") {
+        Choice(listOf("in" to "Include", "out" to "Leave out"), if (prefs.backupPictures) "in" else "out") { v -> onChange { it.copy(backupPictures = v == "in") } }
     }
 }
 
@@ -708,4 +772,4 @@ private fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }
+enum class Page { HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }
