@@ -11,7 +11,8 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.beesan.lfg.fakegame"
+        // -PfakegameId=com.retroarch installs it as an emulator, to test naming the game inside one.
+        applicationId = (project.findProperty("fakegameId") as String?) ?: "io.github.beesan.lfg.fakegame"
         minSdk = 33
         targetSdk = 35
         versionCode = 1
