@@ -90,7 +90,7 @@ class CardMaker(
 
         val pictureName = "lfg_${card.createdAt}"
         // A short moving picture of the line appearing, when that is switched on and the frames are there; else the still.
-        val moving = if (prefs().animatedPicture) FrameRing.animation(content.lineStartMs, mediaDir, pictureName) else null
+        val moving = if (prefs().animatedPicture && !content.fromApp) FrameRing.animation(content.lineStartMs, mediaDir, pictureName) else null
         val picture = moving ?: content.picturePath?.let(::File)?.takeIf { it.isFile }
         val pictureHtml = picture?.let { anki.addPicture(it, pictureName) } ?: ""
         moving?.delete()
@@ -112,7 +112,7 @@ class CardMaker(
         val added = card.copy(noteId = noteId, state = Card.STATE_ADDED, pictureName = pictureName.takeIf { pictureHtml.isNotEmpty() })
         db.cards().update(added)
         store.attachNote(card.lineId, noteId)
-        media.audioFor(added, target, content.lineStartMs)
+        media.audioFor(added, target, content.lineStartMs, content.fromApp)
         return CardResult.Added(noteId)
     }
 }

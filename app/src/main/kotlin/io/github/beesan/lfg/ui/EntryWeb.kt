@@ -112,7 +112,10 @@ class EntryWebView(
      * put when a button changes; when L1 or R1 moves the controller to
      * another entry, the list scrolls to it.
      */
-    fun showList(entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, message: String?, palette: Palette) {
+    fun showList(
+        entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, message: String?, palette: Palette,
+        notes: Boolean = true,
+    ) {
         setBackgroundColor(palette.bg)
         val scroll = entries === listed && current != listedCurrent
         listed = entries
@@ -121,7 +124,7 @@ class EntryWebView(
             load(EntryHtml.page(null, styles, message, palette = palette))
             return
         }
-        load(EntryHtml.list(entries, styles, palette) { audio?.has(it) == true })
+        load(EntryHtml.list(entries, styles, palette, notes) { audio?.has(it) == true })
         val script = "lfgState([" + states.joinToString(",") { "'$it'" } + "],$current,$scroll)"
         if (loaded) evaluateJavascript(script, null) else pending = script
     }
@@ -153,10 +156,11 @@ fun EntryList(
     media: (String, String) -> ByteArray?,
     onLink: (EntryLink, Int) -> Unit,
     modifier: Modifier = Modifier,
+    notes: Boolean = true,
 ) {
     AndroidView(
         factory = { EntryWebView(it, media, onLink) },
-        update = { it.showList(state.entries, styles, state.buttons.map { b -> b.htmlState() }, state.entryIndex, state.message, Lfg.palette) },
+        update = { it.showList(state.entries, styles, state.buttons.map { b -> b.htmlState() }, state.entryIndex, state.message, Lfg.palette, notes) },
         modifier = modifier,
     )
 }

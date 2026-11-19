@@ -36,6 +36,10 @@ data class LookupLine(
     val geometry: TextLine? = null,
     /** When the line began to appear on screen, for sentence audio; null for a line from the store. */
     val appearedAtMs: Long? = null,
+    /** Read from an ordinary app rather than a game: its card gets no sentence audio and no moving picture. */
+    val fromApp: Boolean = false,
+    /** [LineStore.SOURCE_OCR], [LineStore.SOURCE_TREE] or another source, for the row it is saved as. */
+    val source: String = LineStore.SOURCE_OCR,
 )
 
 data class LookupState(
@@ -75,6 +79,12 @@ class LookupController(
     private val audio: WordAudio? = null,
     /** Adds to a lookup's entries before they show: the user's notes on each word. */
     private val decorate: suspend (List<Entry>) -> List<Entry> = { it },
+    /**
+     * Gives a line not kept in the store a row and a picture, the moment a
+     * card is made from it: lines from apps are kept only when asked, and a
+     * card needs the line it quotes.
+     */
+    private val prepare: suspend (LookupLine) -> LookupLine = { it },
 ) {
     private val _state = MutableStateFlow(LookupState())
     val state: StateFlow<LookupState> = _state
@@ -173,8 +183,7 @@ class LookupController(
     fun addCard(index: Int = _state.value.entryIndex) {
         val state = _state.value
         val entry = state.entries.getOrNull(index) ?: return
-        val line = state.selectedLine ?: return
-        val lineId = line.lineId ?: return
+        val shown = state.selectedLine ?: return
         when (state.buttons.getOrNull(index) ?: CardButton.ADD) {
             CardButton.IN_ANKI -> {
                 scope.launch(Dispatchers.IO) {
@@ -192,12 +201,21 @@ class LookupController(
         setButtons(entry.expression, CardButton.ADDING)
         _state.update { it.copy(message = null) }
         scope.launch {
+            val line = if (shown.lineId != null) shown else prepare(shown).also { ready ->
+                // The line has its row now: a second card from it goes to the same one.
+                _state.update { s -> s.copy(lines = s.lines.map { if (it === shown) ready else it }) }
+            }
+            val lineId = line.lineId ?: run {
+                setButtons(entry.expression, CardButton.ADD, message = "The line could not be saved.")
+                return@launch
+            }
             val content = CardContent(
                 expression = entry.expression, reading = entry.reading, sentence = line.text,
                 spanStart = state.spanStart, spanEnd = state.spanEnd, senses = entry.senses(),
                 pitchPositions = Pronunciation.accents(entry).map { it.position },
                 frequencyRank = Pronunciation.frequencyRank(entry),
-                gameName = line.gameName, picturePath = line.framePath, lineStartMs = line.appearedAtMs,
+                gameName = line.gameName, picturePath = line.framePath, lineStartMs = line.appearedAtMs.takeUnless { line.fromApp },
+                fromApp = line.fromApp,
             )
             val result = cards.add(lineId, content)
             val key = lineId to entry.expression

@@ -54,6 +54,13 @@ class OverlayHost(
     private val prefs: () -> Prefs,
     private val chordActive: () -> Boolean,
     private val onToggleStrips: () -> Unit,
+    /** A tap landed on the app, away from the strips and the entry, while a reading asked for is up. */
+    private val onTapElsewhere: () -> Unit,
+    /** The read button over an ordinary app: a tap, and a long press. */
+    private val onReadButton: () -> Unit,
+    private val onReadButtonHeld: () -> Unit,
+    /** A region dragged out: where, and whether to keep reading it. */
+    private val onRegion: (Box, Boolean) -> Unit,
     private val onHistoryLine: (LookupLine) -> Unit,
     private val styles: () -> List<EntryHtml.Style>,
     private val media: (dictionary: String, path: String) -> ByteArray?,
@@ -76,6 +83,19 @@ class OverlayHost(
     private var state = LookupState()
     private var stripsOn = true
     private var gameInFront = false
+
+    /** The lines on screen were read because the user asked, over an app that is not a game. */
+    private var asking = false
+
+    /** When a finger last went down on something of ours, to tell a tap on the app from one on a strip or the entry. */
+    private var lastOwnTouch = 0L
+    private var elsewhereCheck: Runnable? = null
+    private var readButton: Win? = null
+    private var readButtonDisplay = Display.INVALID_DISPLAY
+    private var buttonX = -1
+    private var buttonY = -1
+    private var picker: Win? = null
+    private val handler = android.os.Handler(service.mainLooper)
     private var history: List<LookupLine> = emptyList()
     private var session: String? = null
 
@@ -91,7 +111,11 @@ class OverlayHost(
     )
 
     /** True while something of ours is drawn on the game's screen, so a picture of that screen would include it. */
-    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true
+    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || notice?.shown == true
+
+    private var notice: Win? = null
+    private var noticeDisplay = Display.INVALID_DISPLAY
+    private val hideNotice = Runnable { notice?.hide() }
 
     // ── windows ──────────────────────────────────────────────────────────────
 
@@ -180,11 +204,33 @@ class OverlayHost(
     // ── state in ─────────────────────────────────────────────────────────────
 
     /** The text on screen changed, or the app in front did. */
-    fun onScreen(displayId: Int, tapStrips: Boolean, inFront: Boolean) {
+    fun onScreen(displayId: Int, tapStrips: Boolean, inFront: Boolean, asking: Boolean = false) {
         if (displayId != gameDisplay && displayId != Display.INVALID_DISPLAY) moveTo(displayId)
         stripsOn = tapStrips
         gameInFront = inFront
+        this.asking = asking && inFront
         render()
+    }
+
+    /** Something of ours was touched: a strip, the popup, the panel or the button. */
+    private fun ownTouch() {
+        lastOwnTouch = android.os.SystemClock.uptimeMillis()
+    }
+
+    /**
+     * A strip heard a touch outside itself. Every strip hears it, including
+     * for a touch on another strip, so it counts as a tap on the app only
+     * when nothing of ours was touched at the same moment.
+     */
+    private fun outsideTouch() {
+        if (!asking || elsewhereCheck != null) return
+        val heardAt = android.os.SystemClock.uptimeMillis()
+        val check = Runnable {
+            elsewhereCheck = null
+            if (asking && lastOwnTouch < heardAt - OWN_TOUCH_SLACK_MS) onTapElsewhere()
+        }
+        elsewhereCheck = check
+        handler.postDelayed(check, OUTSIDE_WAIT_MS)
     }
 
     fun onState(next: LookupState) {
@@ -337,8 +383,85 @@ class OverlayHost(
         win.place(x, y, width, height)
     }
 
+    // ── the read button and the region picker ────────────────────────────────
+
+    /** The read button on [displayId], or nowhere for null. */
+    fun showReadButton(displayId: Int?) {
+        if (displayId == null || displayId == Display.INVALID_DISPLAY) {
+            readButton?.hide()
+            return
+        }
+        if (displayId != readButtonDisplay) {
+            readButton?.remove()
+            readButton = null
+            readButtonDisplay = displayId
+        }
+        val host = manager(displayId) ?: return
+        val screen = bounds(displayId) ?: return
+        val size = host.first.dp(48f)
+        if (buttonX < 0) {
+            buttonX = screen.width - size - host.first.dp(8f)
+            buttonY = screen.height * 2 / 5
+        }
+        buttonX = buttonX.coerceIn(0, (screen.width - size).coerceAtLeast(0))
+        buttonY = buttonY.coerceIn(0, (screen.height - size).coerceAtLeast(0))
+        val win = readButton ?: Win(ReadButtonView(host.first), host.second, BUTTON_FLAGS).also { readButton = it }
+        (win.view as ReadButtonView).active = asking || state.lines.isNotEmpty() && !gameInFront
+        win.place(buttonX, buttonY, size, size)
+    }
+
+    /**
+     * A short message at the foot of [displayId] for a few seconds: what a
+     * reading asked for found, or why it found nothing. Drawn by us, so it
+     * shows whether or not the app may post notifications.
+     */
+    fun notice(displayId: Int, text: String) {
+        if (displayId != noticeDisplay) {
+            notice?.remove()
+            notice = null
+            noticeDisplay = displayId
+        }
+        val host = manager(displayId) ?: return
+        val screen = bounds(displayId) ?: return
+        val context = host.first
+        val win = notice ?: Win(
+            context.label(14f, Ink.TEXT).apply {
+                background = rounded(Ink.SURFACE, Ink.BORDER_STRONG, context.dp(8f).toFloat())
+                setPadding(context.dp(16f), context.dp(12f), context.dp(16f), context.dp(12f))
+                gravity = Gravity.CENTER
+            },
+            host.second, PASSIVE_FLAGS,
+        ).also { notice = it }
+        val view = win.view as TextView
+        view.text = text
+        val width = minOf(screen.width - context.dp(32f), context.dp(520f))
+        view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(screen.height, View.MeasureSpec.AT_MOST))
+        win.place((screen.width - width) / 2, screen.height - view.measuredHeight - context.dp(56f), width, view.measuredHeight)
+        handler.removeCallbacks(hideNotice)
+        handler.postDelayed(hideNotice, NOTICE_MS)
+    }
+
+    /** A screen-sized window to drag a box on; it reports the box and goes. */
+    fun pickRegion(displayId: Int) {
+        val host = manager(displayId) ?: return
+        val screen = bounds(displayId) ?: return
+        picker?.remove()
+        val view = RegionPicker(host.first) { box, keep ->
+            picker?.remove()
+            picker = null
+            if (box != null) onRegion(box, keep)
+        }
+        val win = Win(view, host.second, PICKER_FLAGS)
+        picker = win
+        win.place(0, 0, screen.width, screen.height)
+    }
+
     fun destroy() {
         input.release()
+        handler.removeCallbacks(hideNotice)
+        notice?.remove()
+        picker?.remove()
+        readButton?.remove()
         (strips + marks + listOfNotNull(popup, focus, panel)).forEach { it.remove() }
         strips.clear()
         marks.clear()
@@ -360,6 +483,11 @@ class OverlayHost(
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                outsideTouch()
+                return false
+            }
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) ownTouch()
             if (event.actionMasked == MotionEvent.ACTION_UP) {
                 val geometry = state.lines.getOrNull(line)?.geometry ?: return true
                 geometry.charIndexAt(originX + event.x.toInt(), originY + event.y.toInt(), STRIP_SLOP)?.let { controller.select(line, it) }
@@ -388,6 +516,8 @@ class OverlayHost(
         }
 
         private fun hideBars() {
+            // An ordinary app shows its bars; hiding them would move its text out from under the strips.
+            if (asking) return
             windowInsetsController?.let {
                 it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 it.hide(WindowInsets.Type.systemBars())
@@ -396,6 +526,80 @@ class OverlayHost(
 
         override fun dispatchKeyEvent(event: KeyEvent): Boolean = input.onKey(event) || super.dispatchKeyEvent(event)
         override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean = input.onMotion(event) || super.dispatchGenericMotionEvent(event)
+    }
+
+    /**
+     * The round LFG button over an ordinary app. A tap reads the screen (or,
+     * while a reading is up, takes it away); a long press drags out a region;
+     * a drag moves the button.
+     */
+    @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
+    private inner class ReadButtonView(context: Context) : TextView(context) {
+        var active = false
+            set(value) {
+                if (field == value) return
+                field = value
+                paint()
+            }
+        private var downX = 0f
+        private var downY = 0f
+        private var startX = 0
+        private var startY = 0
+        private var dragging = false
+        private val held = Runnable { if (!dragging) onReadButtonHeld() }
+
+        init {
+            text = "LFG"
+            gravity = Gravity.CENTER
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            contentDescription = "Read this screen with LFG. Hold to read a region."
+            elevation = context.dp(4f).toFloat()
+            paint()
+        }
+
+        private fun paint() {
+            setTextColor(if (active) Ink.FILL else Ink.ON_FILL)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(if (active) Ink.BG else Ink.FILL)
+                setStroke(context.dp(2f), Ink.FILL)
+            }
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    ownTouch()
+                    downX = event.rawX
+                    downY = event.rawY
+                    startX = buttonX
+                    startY = buttonY
+                    dragging = false
+                    this@OverlayHost.handler.postDelayed(held, android.view.ViewConfiguration.getLongPressTimeout().toLong())
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - downX
+                    val dy = event.rawY - downY
+                    if (!dragging && dx * dx + dy * dy > context.dp(10f).let { it * it }) {
+                        dragging = true
+                        this@OverlayHost.handler.removeCallbacks(held)
+                    }
+                    if (dragging) {
+                        buttonX = startX + dx.toInt()
+                        buttonY = startY + dy.toInt()
+                        showReadButton(readButtonDisplay)
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    val wasHeld = !this@OverlayHost.handler.hasCallbacks(held) && !dragging
+                    this@OverlayHost.handler.removeCallbacks(held)
+                    if (!dragging && !wasHeld) onReadButton()
+                }
+                MotionEvent.ACTION_CANCEL -> this@OverlayHost.handler.removeCallbacks(held)
+            }
+            return true
+        }
     }
 
     private fun hints(context: Context): TextView {
@@ -431,10 +635,16 @@ class OverlayHost(
             addView(hints)
             // A tap outside closes it.
             setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) outsideTouch()
                 // Not while a note is written: the keyboard is outside the popup.
                 if (event.actionMasked == MotionEvent.ACTION_OUTSIDE && !state.controllerMode && noting == null) controller.clear()
                 true
             }
+        }
+
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) ownTouch()
+            return super.dispatchTouchEvent(event)
         }
 
         fun showNote(word: String) {
@@ -541,7 +751,7 @@ class OverlayHost(
             sessionLine.visibility = View.GONE
             addView(sessionLine, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
             addView(top, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-            empty.text = "Waiting for text in the game…"
+            empty.text = "Waiting for text in the game. In an ordinary app, ask with the LFG tile, the LFG button or the lookup shortcut."
             empty.setPadding(pad, 0, pad, context.dp(10f))
             addView(empty)
             addView(divider(context))
@@ -575,6 +785,11 @@ class OverlayHost(
         private fun divider(context: Context) = View(context).apply {
             setBackgroundColor(Ink.BORDER)
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, 1)
+        }
+
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) ownTouch()
+            return super.dispatchTouchEvent(event)
         }
 
         fun show(state: LookupState, stripsOn: Boolean) {
@@ -628,7 +843,15 @@ class OverlayHost(
         const val STRIP_SLOP = 6
         const val MARK_PAD = 3
         const val BASE = LayoutParams.FLAG_NOT_FOCUSABLE or LayoutParams.FLAG_LAYOUT_IN_SCREEN or LayoutParams.FLAG_LAYOUT_NO_LIMITS
-        const val STRIP_FLAGS = BASE or LayoutParams.FLAG_NOT_TOUCH_MODAL
+        const val STRIP_FLAGS = BASE or LayoutParams.FLAG_NOT_TOUCH_MODAL or LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+        const val BUTTON_FLAGS = BASE or LayoutParams.FLAG_NOT_TOUCH_MODAL
+        const val PICKER_FLAGS = BASE
+
+        const val NOTICE_MS = 3500L
+
+        /** How long after a touch outside the strips to wait for the strip or entry it may have been on. */
+        const val OUTSIDE_WAIT_MS = 120L
+        const val OWN_TOUCH_SLACK_MS = 60L
         const val PASSIVE_FLAGS = BASE or LayoutParams.FLAG_NOT_TOUCHABLE
         const val POPUP_FLAGS = BASE or LayoutParams.FLAG_NOT_TOUCH_MODAL or LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
         const val PANEL_FLAGS = BASE or LayoutParams.FLAG_NOT_TOUCH_MODAL

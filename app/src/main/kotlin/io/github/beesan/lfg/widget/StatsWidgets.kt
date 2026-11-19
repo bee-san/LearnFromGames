@@ -115,7 +115,8 @@ object StatsWidgets {
         if (today.isEmpty() && week.isEmpty()) return
         val data = withContext(Dispatchers.Default) {
             val zone = ZoneId.systemDefault()
-            val stamps = app.database.lines().stamps().first()
+            val left = if (app.settings.prefs.value.appsInReadingTime) emptySet() else app.database.games().appIds().first().toSet()
+            val stamps = app.database.lines().stamps().first().filter { it.gameId !in left }
             val days = ReadingStats.byDay(stamps.map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }, zone)
             val cardDays = app.database.cards().madeTimes().map { ReadingStats.dayOf(it / 1000.0, zone) }
             val prefs = app.settings.prefs.value

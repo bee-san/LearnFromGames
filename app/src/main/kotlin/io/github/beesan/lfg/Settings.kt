@@ -64,6 +64,16 @@ data class Prefs(
     val steamAccount: String = "",
     /** The Steam Web API key. Kept apart from the rest, like the OpenRouter key. */
     val steamKey: String = "",
+    /**
+     * Keep the lines read from ordinary apps, as a game's are. Off: chats and
+     * mail can be private, so a lookup there leaves nothing behind but the
+     * line a card is made from.
+     */
+    val keepAppLines: Boolean = false,
+    /** A small LFG button over ordinary apps: a tap reads the screen, a long press reads a region. */
+    val readButton: Boolean = false,
+    /** Kept lines from apps count towards reading time and the goals, beside games. */
+    val appsInReadingTime: Boolean = true,
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
@@ -123,6 +133,9 @@ class Settings(context: Context) {
             edenFolder = store.getString("edenFolder", d.edenFolder) ?: d.edenFolder,
             steamAccount = store.getString("steamAccount", d.steamAccount) ?: d.steamAccount,
             steamKey = secrets.getString("steamKey", d.steamKey) ?: d.steamKey,
+            keepAppLines = store.getBoolean("keepAppLines", d.keepAppLines),
+            readButton = store.getBoolean("readButton", d.readButton),
+            appsInReadingTime = store.getBoolean("appsInReadingTime", d.appsInReadingTime),
         )
     }
 
@@ -157,6 +170,9 @@ class Settings(context: Context) {
             .putString("retroArchFolder", next.retroArchFolder)
             .putString("edenFolder", next.edenFolder)
             .putString("steamAccount", next.steamAccount)
+            .putBoolean("keepAppLines", next.keepAppLines)
+            .putBoolean("readButton", next.readButton)
+            .putBoolean("appsInReadingTime", next.appsInReadingTime)
             .apply()
         secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
         _prefs.value = next

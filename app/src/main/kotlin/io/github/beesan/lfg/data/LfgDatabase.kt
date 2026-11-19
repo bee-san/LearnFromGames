@@ -98,6 +98,10 @@ interface GameDao {
     @Query("SELECT * FROM games ORDER BY title COLLATE NOCASE")
     fun all(): Flow<List<Game>>
 
+    /** The rows of ordinary apps, whose lines can be left out of reading time. */
+    @Query("SELECT id FROM games WHERE app = 1")
+    fun appIds(): Flow<List<String>>
+
     @Query("UPDATE game_lines SET game_name = :title WHERE game_id = :gameId")
     suspend fun renameLines(gameId: String, title: String)
 }
@@ -171,11 +175,12 @@ interface RecapDao {
 /** Schema changes add a numbered migration; nothing here is ever rebuilt destructively. */
 @Database(
     entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
     // 2: a crop and a translation for each line, notes, and recaps. Room writes it from the exported schemas.
     // 3: a row for each game named inside an emulator.
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    // 4: whether a row is an ordinary app, read on demand.
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
 )
 abstract class LfgDatabase : RoomDatabase() {
     abstract fun lines(): LineDao

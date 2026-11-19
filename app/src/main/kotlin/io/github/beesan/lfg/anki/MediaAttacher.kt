@@ -41,10 +41,11 @@ class MediaAttacher(
     }
 
     /** Called when a card has been added. */
-    fun audioFor(card: Card, target: AnkiTarget, lineStartMs: Long?) {
+    fun audioFor(card: Card, target: AnkiTarget, lineStartMs: Long?, fromApp: Boolean = false) {
         if (card.noteId == null) return
         if (NoteTypes.audioField(target.family, target.fields) == null) return
-        if (!prefs().sentenceAudio || !SoundCapture.running.value) {
+        // An app's sound is not its text's voice: a line from an app is only ever spoken by Android.
+        if (fromApp || !prefs().sentenceAudio || !SoundCapture.running.value) {
             if (prefs().spokenLines) scope.launch(Dispatchers.IO) { speak(card, target) }
             return
         }

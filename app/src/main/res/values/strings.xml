@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LFG</string>
-    <string name="service_description">Reads Japanese text in the game on screen so a word can be looked up and made into an Anki card. Pictures of the screen stay on this device.</string>
+    <string name="service_description">Reads Japanese text in the game on screen, and in other apps when you ask, so a word can be looked up and made into an Anki card. Password fields are never read. Pictures of the screen stay on this device.</string>
+    <string name="tile_read_screen">Read screen</string>
+    <string name="tile_read_region">Read region</string>
     <string name="widget_today_label">Today</string>
     <string name="widget_today_description">Today\'s reading time, characters and cards against your daily goals, as rings</string>
     <string name="widget_week_label">Last 7 days</string>

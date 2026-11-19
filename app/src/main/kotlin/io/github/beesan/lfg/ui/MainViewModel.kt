@@ -42,6 +42,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -118,10 +119,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val games: StateFlow<List<Game>> =
         app.database.games().all().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val stats: StateFlow<StatsState> = combine(app.database.lines().stamps(), app.database.cards().madeByGame()) { stamps, cards ->
+    val stats: StateFlow<StatsState> = combine(
+        app.database.lines().stamps(), app.database.cards().madeByGame(), app.database.games().appIds(),
+        app.settings.prefs.map { it.appsInReadingTime }.distinctUntilChanged(),
+    ) { stamps, cards, apps, appsCount ->
         withContext(Dispatchers.Default) {
             val zone = ZoneId.systemDefault()
-            val all = stamps.map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }
+            val left = if (appsCount) emptySet() else apps.toSet()
+            val all = stamps.filter { it.gameId !in left }.map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }
             val summary = ReadingStats.summarise(all, zone)
             val days = summary.days
             StatsState(
@@ -135,7 +140,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsState())
 
     /** Lookup in a stored line, for a card made after the session. */
-    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio) { app.notes.withNotes(it) }
+    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) })
 
     private val _styles = MutableStateFlow<List<EntryHtml.Style>>(emptyList())
     val styles: StateFlow<List<EntryHtml.Style>> = _styles

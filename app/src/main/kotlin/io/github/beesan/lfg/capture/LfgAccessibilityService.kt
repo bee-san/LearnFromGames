@@ -16,6 +16,12 @@ import android.view.Display
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
+import io.github.beesan.lfg.core.Blocks
+import io.github.beesan.lfg.core.TextLine
+import io.github.beesan.lfg.core.TreeText
+import io.github.beesan.lfg.data.LineStore
+import io.github.beesan.lfg.ocr.Frame
+import kotlinx.coroutines.Job
 import io.github.beesan.lfg.App
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
@@ -40,6 +46,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -84,13 +91,20 @@ class LfgAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         app = application as App
         pipeline = ReadingPipeline(app.lines, File(filesDir, "frames"))
-        controller = LookupController(scope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio) { app.notes.withNotes(it) }
+        controller = LookupController(
+            scope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) }, ::prepareLine,
+        )
         overlays = OverlayHost(
             service = this,
             controller = controller,
             prefs = { app.settings.prefs.value },
             chordActive = { chordFired },
             onToggleStrips = ::toggleStrips,
+            onTapElsewhere = { if (asked?.continuous == false) endAsked() },
+            // While a reading is up, the button takes it away, a region kept reading included.
+            onReadButton = { if (asked != null) endAsked() else ask() },
+            onReadButtonHeld = { if (asked?.continuous == true) endAsked() else pickRegion() },
+            onRegion = { region, keep -> ask(region, keep) },
             onHistoryLine = { controller.setLines(listOf(it)) },
             styles = { styles },
             media = { dictionary, path -> app.dictionaries.mediaBlocking(dictionary, path) },
@@ -108,6 +122,7 @@ class LfgAccessibilityService : AccessibilityService() {
         )
         scope.launch { app.dictionaries.state.collect { styles = app.dictionaries.styles() } }
         ignored = ignoredPackages()
+        instance = this
         _running.value = true
         _pipeline.value = pipeline
 
@@ -175,7 +190,8 @@ class LfgAccessibilityService : AccessibilityService() {
     private suspend fun sessionLine(latest: GameLine?): String? {
         val now = System.currentTimeMillis() / 1000.0
         if (latest == null || now - latest.timestamp > ReadingStats.SESSION_GAP_SECONDS) return null
-        val stamps = app.database.lines().stampsSince(now - SESSION_LOOK_BACK_S)
+        val left = if (app.settings.prefs.value.appsInReadingTime) emptySet() else app.database.games().appIds().first().toSet()
+        val stamps = app.database.lines().stampsSince(now - SESSION_LOOK_BACK_S).filter { it.gameId !in left }
             .map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }
         val session = ReadingStats.summarise(stamps, ZoneId.systemDefault()).sessions
             .lastOrNull { it.gameId == latest.gameId }?.takeIf { GameStats.live(it, now) } ?: return null
@@ -183,7 +199,23 @@ class LfgAccessibilityService : AccessibilityService() {
         return GameStats.strip(latest.gameName, session, cards)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        val now = asked ?: return
+        val from = event.packageName?.toString() ?: return
+        if (from == packageName || from == "com.android.systemui") return
+        when (event.eventType) {
+            // Another app, or another window of this one: the lines read are not on screen any more. The same
+            // window reports a change too when it gets focus back from lookup mode; that changes nothing.
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> if (from != now.packageName || (!now.continuous && event.windowId != now.windowId)) endAsked()
+            // The text moved under the strips.
+            // Some apps report a scroll as they settle after the reading; only a later one is the user's.
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> if (
+                from == now.packageName && !now.continuous && SystemClock.uptimeMillis() - now.startedAt > SCROLL_GRACE_MS
+            ) {
+                endAsked()
+            }
+        }
+    }
 
     override fun onInterrupt() = Unit
 
@@ -200,6 +232,8 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun stop() {
         if (!_running.value) return
         _running.value = false
+        if (instance === this) instance = null
+        _asking.value = false
         _pipeline.value = null
         if (::overlays.isInitialized) overlays.destroy()
         scope.cancel()
@@ -213,6 +247,11 @@ class LfgAccessibilityService : AccessibilityService() {
      * why the default is the two stick clicks: emulators leave them unbound.
      */
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        // Back first takes away the strips of a reading asked for, before it reaches the app.
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && asked?.continuous == false && !controller.state.value.controllerMode) {
+            if (event.action == KeyEvent.ACTION_UP) endAsked()
+            return true
+        }
         if (!KeyEvent.isGamepadButton(event.keyCode) && event.keyCode !in DPAD) return false
         val (first, second) = when (app.settings.prefs.value.shortcut) {
             Prefs.SHORTCUT_L1_R1 -> KeyEvent.KEYCODE_BUTTON_L1 to KeyEvent.KEYCODE_BUTTON_R1
@@ -224,7 +263,9 @@ class LfgAccessibilityService : AccessibilityService() {
                 chordFired = true
                 val state = controller.state.value
                 if (state.controllerMode) controller.exitControllerMode()
-                else if (front != null && state.lines.isNotEmpty()) controller.enterControllerMode()
+                else if ((front != null || asked != null) && state.lines.isNotEmpty()) controller.enterControllerMode()
+                // An ordinary app, read on demand: read it now, then hand the controller the cursor.
+                else if (front == null) ask(thenController = true)
             } else if (event.keyCode != first && event.keyCode != second && event.repeatCount == 0) {
                 // A button meant for the game: the word looked up by touch is done with.
                 val state = controller.state.value
@@ -245,6 +286,298 @@ class LfgAccessibilityService : AccessibilityService() {
         scope.launch(Dispatchers.IO) { app.database.games().update(next) }
     }
 
+    // ── readings asked for ───────────────────────────────────────────────────
+
+    /** An ordinary app in front, which is read only when asked: its package, screen and window. */
+    private class Ordinary(val packageName: String, val displayId: Int, val windowId: Int, val bounds: Rect)
+
+    /**
+     * A reading asked for over an ordinary app. Its strips stay until a tap
+     * lands elsewhere, Back, or the app changes; a [continuous] one reads its
+     * region again on each settled change until it is turned off.
+     */
+    private class Asked(
+        val game: Game, val packageName: String, val displayId: Int, val windowId: Int, val continuous: Boolean,
+        /** The picture it was read from, kept in memory until a card wants it written. */
+        var frame: Bitmap?,
+        var framePath: String?,
+        val startedAt: Long = SystemClock.uptimeMillis(),
+    )
+
+    private var ordinaryFront: Ordinary? = null
+    private var asked: Asked? = null
+
+    /** While a picture is taken for a reading asked for, the read button stays out of it. */
+    private var shooting = false
+    private var askedJobs: List<Job> = emptyList()
+
+    /** Whether a reading asked for is up, for the tiles. */
+    private fun setAsked(next: Asked?) {
+        asked?.takeIf { it !== next }?.frame?.recycle()
+        asked = next
+        _asking.value = next?.continuous == true
+    }
+
+    /**
+     * Reads the app in front now: the tree where it has text, OCR for the
+     * rest. With [region], only that part of the screen; with [continuous],
+     * that region again on every settled change, stored as a game's lines are.
+     */
+    fun ask(region: Box? = null, continuous: Boolean = false, thenController: Boolean = false, collapse: Boolean = false) {
+        Log.i(TAG, "reading asked for: region=${region != null} continuous=$continuous controller=$thenController")
+        scope.launch {
+            endAsked()
+            // From a quick settings tile the shade is still down, and would be read instead of the app.
+            if (collapse) {
+                performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+                delay(SHADE_MS)
+            }
+            val playing = findFront().also { front = it }
+            if (playing != null && region == null) {
+                // A game is read by itself; asking only reads it again.
+                pipeline.forget()
+                toast("LFG reads this game by itself.")
+                return@launch
+            }
+            // A region of a game (a fullscreen video player counts as one) is read as asked, in its own row.
+            val target = playing?.let { Ordinary(it.game.packageName, it.displayId, it.windowId, it.bounds) } ?: ordinaryFront ?: run {
+                toast("There is no app in front to read.")
+                return@launch
+            }
+            val game = playing?.game ?: withContext(Dispatchers.IO) { app.lines.gameFor(target.packageName, titleOf(target.packageName), app = true) }
+            if (game.reading == Game.READ_OFF) {
+                toast("Reading is off for ${game.title} in Settings › Games.")
+                return@launch
+            }
+            if (continuous && region != null) startContinuous(game, target, region) else readOnce(game, target, region, thenController)
+        }
+    }
+
+    private suspend fun readOnce(game: Game, target: Ordinary, region: Box?, thenController: Boolean) {
+        // Nothing of ours may be in the picture, or on the text the tree is asked about.
+        controller.clear()
+        overlays.onScreen(target.displayId, false, false)
+        shooting = true
+        overlays.showReadButton(null)
+        delay(OVERLAY_SETTLE_MS)
+
+        val window = windowsOnAllDisplays.let { all ->
+            (0 until all.size()).asSequence().flatMap { all.valueAt(it).asSequence() }.firstOrNull { it.id == target.windowId }
+        }
+        val tree = withContext(Dispatchers.IO) { TreeReader.read(window?.root) }
+        val screen = Box(target.bounds.left, target.bounds.top, target.bounds.right, target.bounds.bottom)
+        val treeLines = TreeText.lines(tree.nodes, screen)
+
+        val shot = if (Readers.reader != null) shoot(target) else null
+        val reader = Readers.reader
+        val ocrLines = if (shot?.bitmap != null && reader != null) {
+            withContext(Dispatchers.Default) { readPixels(reader, shot.bitmap, shot.offsetX, shot.offsetY, region) }
+        } else {
+            emptyList()
+        }
+        var lines = TreeText.preferTree(treeLines, ocrLines, tree.sensitive)
+        if (region != null) lines = TreeText.within(lines, region)
+        shooting = false
+        // Counts only: what an app shows can be private, and the log is readable by anyone with adb.
+        Log.i(TAG, "read on demand: ${treeLines.size} from the tree, ${ocrLines.size} by OCR, ${tree.sensitive.size} sensitive, kept ${lines.size}, secure=${shot?.secure}")
+        if (lines.isEmpty()) {
+            shot?.bitmap?.recycle()
+            toast(if (shot?.secure == true) "This app blocks pictures of its screen, and shares no text here." else "No text was found here.")
+            return
+        }
+        if (shot?.secure == true) toast("This app blocks pictures of its screen; only the text it shares was read.")
+
+        val fromTree = treeLines.toHashSet()
+        val now = Asked(game, target.packageName, target.displayId, target.windowId, continuous = false, frame = shot?.bitmap, framePath = null)
+        val keep = app.settings.prefs.value.keepAppLines
+        val saved = if (keep) withContext(Dispatchers.IO) {
+            now.framePath = now.frame?.let(::writeFrame)
+            lines.map { line ->
+                val source = if (line in fromTree) LineStore.SOURCE_TREE else LineStore.SOURCE_OCR
+                app.lines.saveLine(
+                    game, line.text, source, if (source == LineStore.SOURCE_OCR) reader?.name.orEmpty() else "",
+                    now.framePath, target.displayId, line.box,
+                )
+            }
+        } else {
+            null
+        }
+        setAsked(now)
+        controller.setLines(
+            lines.mapIndexed { i, line ->
+                LookupLine(
+                    line.text, saved?.getOrNull(i)?.id, now.framePath, game.title, line,
+                    fromApp = true, source = if (line in fromTree) LineStore.SOURCE_TREE else LineStore.SOURCE_OCR,
+                )
+            },
+        )
+        overlays.onScreen(target.displayId, true, true, asking = true)
+        if (thenController) controller.enterControllerMode()
+    }
+
+    /** One region of the app read on every settled change, as a game is, until it is turned off. */
+    private fun startContinuous(game: Game, target: Ordinary, region: Box) {
+        val regional = ReadingPipeline(app.lines, File(filesDir, "frames"))
+        setAsked(Asked(game, target.packageName, target.displayId, target.windowId, continuous = true, frame = null, framePath = null))
+        toast("Reading this region until you turn it off.")
+        val reading = scope.launch {
+            regional.latest.collect { r ->
+                if (r == null || asked?.continuous != true) return@collect
+                controller.setLines(
+                    r.lines.mapIndexed { i, line ->
+                        LookupLine(line.text, r.saved.getOrNull(i)?.id, r.framePath, r.game.title, line, fromApp = true)
+                    },
+                )
+                overlays.onScreen(r.displayId, true, true, asking = true)
+            }
+        }
+        val looking = scope.launch {
+            while (isActive && asked?.continuous == true) {
+                delay(INTERVAL_MS)
+                if (Readers.reader == null || controller.state.value.controllerMode) continue
+                val shot = shoot(target, quiet = true) ?: continue
+                if (shot.secure) {
+                    shot.bitmap?.recycle()
+                    toast("This app blocks pictures of its screen, so LFG cannot read it.")
+                    endAsked()
+                    break
+                }
+                val whole = shot.bitmap ?: continue
+                val left = (region.left - shot.offsetX).coerceIn(0, whole.width - 1)
+                val top = (region.top - shot.offsetY).coerceIn(0, whole.height - 1)
+                val width = (region.right - shot.offsetX).coerceIn(left + 1, whole.width) - left
+                val height = (region.bottom - shot.offsetY).coerceIn(top + 1, whole.height) - top
+                val cut = try {
+                    Bitmap.createBitmap(whole, left, top, width, height)
+                } catch (_: Exception) {
+                    null
+                }
+                try {
+                    if (cut != null) withContext(Dispatchers.Default) {
+                        regional.onFrame(cut, game, target.displayId, System.currentTimeMillis(), left + shot.offsetX, top + shot.offsetY)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "reading a region failed", e)
+                } finally {
+                    if (cut !== whole) cut?.recycle()
+                    whole.recycle()
+                }
+            }
+        }
+        askedJobs = listOf(reading, looking)
+    }
+
+    /** The strips of a reading asked for go, and the app has its taps back. */
+    fun endAsked() {
+        if (asked == null) return
+        Log.i(TAG, "reading asked for ended")
+        askedJobs.forEach { it.cancel() }
+        askedJobs = emptyList()
+        setAsked(null)
+        if (controller.state.value.controllerMode) controller.exitControllerMode()
+        controller.setLines(emptyList())
+        overlays.onScreen(Display.INVALID_DISPLAY, true, false)
+    }
+
+    /** Shows where a region can be dragged out on the app in front. */
+    fun pickRegion(collapse: Boolean = false) {
+        scope.launch {
+            endAsked()
+            if (collapse) {
+                performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+                delay(SHADE_MS)
+            }
+            findFront().also { front = it }
+            val display = (front?.displayId ?: ordinaryFront?.displayId) ?: run {
+                toast("There is no app in front to read.")
+                return@launch
+            }
+            overlays.pickRegion(display)
+        }
+    }
+
+    /**
+     * A card is being made from a line that was not kept: the line gets its
+     * row, and the picture it was read from is written, now and not before.
+     */
+    private suspend fun prepareLine(line: LookupLine): LookupLine {
+        val now = asked ?: return line
+        return withContext(Dispatchers.IO) {
+            if (now.framePath == null) now.framePath = now.frame?.let(::writeFrame)
+            val row = app.lines.saveLine(
+                now.game, line.text, line.source, if (line.source == LineStore.SOURCE_OCR) Readers.reader?.name.orEmpty() else "",
+                now.framePath, now.displayId, line.geometry?.box,
+            )
+            line.copy(lineId = row.id, framePath = now.framePath)
+        }
+    }
+
+    private class Shot(val bitmap: Bitmap?, val offsetX: Int, val offsetY: Int, val secure: Boolean)
+
+    /**
+     * A picture of the app's window, or of its screen before Android 14. A
+     * window marked secure gives none (Android 14 says so) or a black one.
+     */
+    private suspend fun shoot(target: Ordinary, quiet: Boolean = false): Shot? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val (bitmap, error) = windowShot(target.windowId)
+            if (error == ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) return Shot(null, 0, 0, secure = true)
+            if (bitmap != null) return Shot(bitmap, target.bounds.left, target.bounds.top, secure = isBlack(bitmap))
+        }
+        // The whole screen: nothing of ours may be drawn on it.
+        if (quiet && overlays.drawingOnGame) return null
+        val bitmap = displayScreenshot(target.displayId) ?: return null
+        return Shot(bitmap, 0, 0, secure = isBlack(bitmap))
+    }
+
+    /** A capture that is black all over: what a secure window gives instead of itself. */
+    private fun isBlack(bitmap: Bitmap): Boolean {
+        val steps = 24
+        for (y in 0 until steps) for (x in 0 until steps) {
+            val p = bitmap.getPixel((x * 2 + 1) * bitmap.width / (steps * 2), (y * 2 + 1) * bitmap.height / (steps * 2))
+            if ((p and 0xFFFFFF) != 0) return false
+        }
+        return true
+    }
+
+    /** OCR over the picture, or the part of it in [region], as lines in display pixels. */
+    private suspend fun readPixels(reader: TextReader, bitmap: Bitmap, offsetX: Int, offsetY: Int, region: Box?): List<TextLine> {
+        val left = region?.let { (it.left - offsetX).coerceIn(0, bitmap.width - 1) } ?: 0
+        val top = region?.let { (it.top - offsetY).coerceIn(0, bitmap.height - 1) } ?: 0
+        val right = region?.let { (it.right - offsetX).coerceIn(left + 1, bitmap.width) } ?: bitmap.width
+        val bottom = region?.let { (it.bottom - offsetY).coerceIn(top + 1, bitmap.height) } ?: bitmap.height
+        val width = right - left
+        val height = bottom - top
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, left, top, width, height)
+        val rows = try {
+            reader.read(Frame(width, height, pixels))
+        } catch (e: Exception) {
+            Log.w(TAG, "reading the app failed", e)
+            emptyList()
+        }
+        return Blocks.group(rows.filter { it.text.isNotBlank() }.map { it.moved(left + offsetX, top + offsetY) })
+    }
+
+    /** Writes a picture for a card or a kept line, beside the game's frames. */
+    private fun writeFrame(bitmap: Bitmap): String? {
+        val dir = File(filesDir, "frames").apply { mkdirs() }
+        val file = File(dir, "${java.util.UUID.randomUUID()}.webp")
+        return try {
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 85, it) }
+            file.path
+        } catch (e: Exception) {
+            file.delete()
+            null
+        }
+    }
+
+    /** A message over the app in front, drawn by us: a toast would be hidden when notifications are off. */
+    private fun toast(text: String) {
+        val display = asked?.displayId ?: ordinaryFront?.displayId ?: front?.displayId ?: Display.DEFAULT_DISPLAY
+        overlays.notice(display, text)
+    }
+
     // ── pictures ─────────────────────────────────────────────────────────────
 
     /** Screenshots are copied out of the graphics memory here, not on the thread that draws the overlays. */
@@ -260,6 +593,13 @@ class LfgAccessibilityService : AccessibilityService() {
             if (++ticks % PERF_EVERY == 0) Perf.report().takeIf { it.isNotEmpty() }?.let { Log.i("LfgPerf", it) }
             val now = Perf.measure("front") { findFront() }
             front = now
+            val prefs = app.settings.prefs.value
+            if (!shooting) overlays.showReadButton(ordinaryFront?.displayId?.takeIf { prefs.readButton && (now == null || asked != null) })
+            // A reading asked for owns the overlays until it ends; the game's own reading waits.
+            if (asked != null) {
+                lastFront = null
+                continue
+            }
             if (now?.game?.id != lastFront) {
                 lastFront = now?.game?.id
                 // The game went behind something else, or came back: the overlays follow at once.
@@ -341,14 +681,23 @@ class LfgAccessibilityService : AccessibilityService() {
             if (packageOfWindow.size > 32) packageOfWindow.keys.retainAll(alive)
         } catch (e: Exception) {
             Log.w(TAG, "could not list windows", e)
+            ordinaryFront = null
             return null
         }
+        var ordinary: Ordinary? = null
+        fun noteOrdinary(c: Candidate) {
+            if (ordinary == null && c.name !in neverAsked) ordinary = Ordinary(c.name, c.displayId, c.window.id, Rect().also(c.window::getBoundsInScreen))
+        }
         for (c in candidates) {
-            if (c.name in ignored) continue
+            if (c.name in ignored) {
+                // Settings and AnkiDroid are never games, but their text can still be asked for.
+                noteOrdinary(c)
+                continue
+            }
             val known = games[c.name] ?: if (c.name in unread) null else withContext(Dispatchers.IO) { app.lines.gameOrNull(c.name) }
             val read = when (known?.reading ?: Game.READ_AUTO) {
                 Game.READ_ON -> true
-                Game.READ_OFF -> false
+                Game.READ_OFF, Game.READ_ON_DEMAND -> false
                 else -> {
                     // A swipe from the edge slides the system bars over a game for a few seconds; it is still the game.
                     val now = SystemClock.uptimeMillis()
@@ -359,6 +708,7 @@ class LfgAccessibilityService : AccessibilityService() {
             if (!read) {
                 // Remembered so an app that is never read costs no database lookup each time round.
                 if (known == null) unread += c.name else games[c.name] = known
+                if (known?.reading != Game.READ_OFF) noteOrdinary(c)
                 continue
             }
             unread -= c.name
@@ -376,8 +726,10 @@ class LfgAccessibilityService : AccessibilityService() {
                 }
             }.also { games[c.name] = it }
             val bounds = Rect().also(c.window::getBoundsInScreen)
+            ordinaryFront = ordinary
             return Front(namedInside(game), c.displayId, c.window.id, bounds, c.covered)
         }
+        ordinaryFront = ordinary
         return null
     }
 
@@ -420,6 +772,13 @@ class LfgAccessibilityService : AccessibilityService() {
         return (launchers + listOf(packageName, "com.android.systemui", "com.android.settings", "com.ichi2.anki", "android")).toSet()
     }
 
+    /** Never read even when asked: this app, the system's own bars and dialogs, and launchers. */
+    private val neverAsked: Set<String> by lazy {
+        val launchers = packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
+            .mapNotNull { it.activityInfo?.packageName }
+        (launchers + listOf(packageName, "com.android.systemui", "android")).toSet()
+    }
+
     private fun titleOf(packageName: String): String = try {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
     } catch (_: Exception) {
@@ -454,6 +813,28 @@ class LfgAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             Log.w(TAG, "takeScreenshot threw", e)
             if (continuation.isActive) continuation.resume(null)
+        }
+    }
+
+    /** Android 14's picture of one window, or the reason it gave for none. */
+    private suspend fun windowShot(windowId: Int): Pair<Bitmap?, Int?> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return null to null
+        return suspendCancellableCoroutine { continuation ->
+            try {
+                takeScreenshotOfWindow(windowId, shots, object : TakeScreenshotCallback {
+                    override fun onSuccess(result: ScreenshotResult) {
+                        val bitmap = copy(result)
+                        if (continuation.isActive) continuation.resume(bitmap to null) else bitmap?.recycle()
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        if (continuation.isActive) continuation.resume(null to errorCode)
+                    }
+                })
+            } catch (e: Exception) {
+                Log.w(TAG, "takeScreenshotOfWindow threw", e)
+                if (continuation.isActive) continuation.resume(null to null)
+            }
         }
     }
 
@@ -517,6 +898,25 @@ class LfgAccessibilityService : AccessibilityService() {
 
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running
+
+        /** A quick settings tile's swipe away of the shade takes this long. */
+        private const val SHADE_MS = 450L
+
+        /** Scrolls an app reports this soon after a reading are its own settling, not the user's. */
+        private const val SCROLL_GRACE_MS = 800L
+
+        /** Our windows take a frame or two to leave the screen before a picture of it is taken. */
+        private const val OVERLAY_SETTLE_MS = 60L
+
+        /** The service while it runs, for the quick settings tiles. */
+        @Volatile
+        var instance: LfgAccessibilityService? = null
+            private set
+
+        private val _asking = MutableStateFlow(false)
+
+        /** A region of an app is being read on every change. */
+        val asking: StateFlow<Boolean> = _asking
 
         private val _pipeline = MutableStateFlow<ReadingPipeline?>(null)
         val pipeline: StateFlow<ReadingPipeline?> = _pipeline

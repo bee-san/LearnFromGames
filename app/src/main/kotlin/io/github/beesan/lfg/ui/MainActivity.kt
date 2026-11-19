@@ -306,6 +306,7 @@ class MainActivity : ComponentActivity() {
                             onTestSteam = model::testSteam,
                             onBack = ::back,
                         )
+                        page == Page.APPS -> AppsScreen(prefs, model::updatePrefs, onBack = ::back)
                         page == Page.MEDIA -> MediaScreen(
                             prefs, recording, model::updatePrefs,
                             onStartRecording = { microphone.launch(android.Manifest.permission.RECORD_AUDIO) },

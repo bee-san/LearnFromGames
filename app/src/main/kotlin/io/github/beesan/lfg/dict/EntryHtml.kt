@@ -67,14 +67,15 @@ object EntryHtml {
      * `lfgState`, so pressing a button does not reload the page and lose the
      * scroll.
      */
-    fun list(entries: List<Entry>, styles: List<Style>, palette: Palette, audio: (Entry) -> Boolean): String = buildString {
+    /** [notes] off leaves out each entry's note button, where there is no game's line to hang a note on. */
+    fun list(entries: List<Entry>, styles: List<Style>, palette: Palette, notes: Boolean = true, audio: (Entry) -> Boolean): String = buildString {
         append("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>")
         append(colours(palette)).append(BASE_CSS)
         for (style in styles) append(scope(style.css, style.dictionary))
         append("</style><script>").append(STATE_SCRIPT).append("</script></head><body>")
         entries.forEachIndexed { i, entry ->
             append("<section class=\"lfg-entry\" id=\"e").append(i).append("\">")
-            append(body(entry, audio(entry), index = i))
+            append(body(entry, audio(entry), index = i, notes = notes))
             append("</section>")
         }
         append("</body></html>")
@@ -87,7 +88,7 @@ object EntryHtml {
      * [index] is the entry's place in the popup's list, or null in a page of
      * one entry.
      */
-    fun body(entry: Entry, audio: Boolean = false, index: Int? = null): String = buildString {
+    fun body(entry: Entry, audio: Boolean = false, index: Int? = null, notes: Boolean = true): String = buildString {
         val accents = Pronunciation.accents(entry)
         append("<div class=\"lfg-head\"><span class=\"lfg-term\" lang=\"ja\">").append(furigana(entry.expression, entry.reading)).append("</span>")
         accents.firstOrNull()?.let { append(graph(it)) }
@@ -96,9 +97,11 @@ object EntryHtml {
             append("<a class=\"lfg-button lfg-audio\" href=\"").append(AUDIO_URL).append(if (index != null) "/$index" else "")
             append("\" aria-label=\"Listen\" title=\"Listen\">").append(SPEAKER).append("</a>")
         }
-        if (index != null) {
+        if (index != null && notes) {
             append("<a class=\"lfg-button lfg-note\" href=\"").append(NOTE_URL).append('/').append(index)
             append("\" aria-label=\"Note\" title=\"Note\">").append(PENCIL).append("</a>")
+        }
+        if (index != null) {
             append("<a class=\"lfg-button lfg-card\" id=\"c").append(index).append("\" href=\"").append(CARD_URL).append('/').append(index)
             append("\" data-state=\"add\" aria-label=\"Add card\" title=\"Add card\">").append(CARD_ICONS).append("</a>")
         }

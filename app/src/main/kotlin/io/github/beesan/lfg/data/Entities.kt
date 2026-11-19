@@ -28,7 +28,7 @@ data class GameLine(
     @ColumnInfo(name = "note_ids") val noteIds: String = "",
     @ColumnInfo(name = "created_at") val createdAt: Long,
     @ColumnInfo(name = "last_modified") val lastModified: Long,
-    /** `ocr`, `hook` or `practice`. */
+    /** `ocr`, `tree`, `selection`, `hook` or `practice`. */
     val source: String,
     /** The reader that produced the text, e.g. `screenai`; empty for a hook. */
     val engine: String = "",
@@ -59,16 +59,26 @@ data class Game(
     /** Invisible tap strips over each line; off for touch-driven games. */
     @ColumnInfo(name = "tap_strips") val tapStrips: Boolean = true,
     /**
-     * [READ_AUTO], [READ_ON] or [READ_OFF]. Automatic reads the app while it
-     * is fullscreen, or always if it says it is a game: an ordinary app with
-     * its status bar showing is left alone, so taps on its text stay its own.
+     * [READ_AUTO], [READ_ON], [READ_OFF] or [READ_ON_DEMAND]. Automatic reads
+     * the app while it is fullscreen, or always if it says it is a game: an
+     * ordinary app with its status bar showing is left alone, so taps on its
+     * text stay its own, and is read only when asked, as with on demand.
      */
     val reading: Int = READ_AUTO,
+    /**
+     * An ordinary app rather than a game: its row was made by a reading asked
+     * for over it. Its lines can be left out of reading time, and its cards
+     * get neither sentence audio nor a moving picture.
+     */
+    @ColumnInfo(name = "app", defaultValue = "0") val app: Boolean = false,
 ) {
     companion object {
         const val READ_AUTO = 0
         const val READ_ON = 1
         const val READ_OFF = 2
+
+        /** Never read by itself, even fullscreen: only when a reading is asked for. */
+        const val READ_ON_DEMAND = 3
     }
 }
 

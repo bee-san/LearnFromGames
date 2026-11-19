@@ -24,6 +24,8 @@ data class CardContent(
     val pitchPositions: List<Int> = emptyList(),
     /** The word's frequency rank, averaged over the frequency dictionaries, for sorting. */
     val frequencyRank: Int? = null,
+    /** Read from an ordinary app, not a game: no sentence audio and no moving picture. */
+    val fromApp: Boolean = false,
 )
 
 enum class Family { SENREN, LAPIS, KIKU, OWN }
