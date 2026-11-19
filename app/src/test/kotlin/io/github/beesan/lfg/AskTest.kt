@@ -57,11 +57,8 @@ class AskTest {
         val lines = listOf(line("a", "灯台の明かりが消えた。", 0), line("b", "新しい剣を手に入れた！", 1))
         val earlier = Recap(moments = listOf(Moment("x", "村の長老", "/gone.webp", "The elder")))
         val prompt = Recapper.prompt("Quest", lines, earlier, "English", ZoneOffset.UTC)
-        assertTrue(prompt.contains("<day date=\"2 November 2026\">
-[1] 灯台の明かりが消えた。
-</day>"))
-        assertTrue(prompt.contains("<day date=\"3 November 2026\">
-[2] 新しい剣を手に入れた！"))
+        assertTrue(prompt.contains("<day date=\"2 November 2026\">\n[1] 灯台の明かりが消えた。\n</day>"))
+        assertTrue(prompt.contains("<day date=\"3 November 2026\">\n[2] 新しい剣を手に入れた！"))
         assertTrue(prompt.contains("<earlier>"))
         assertFalse(prompt.contains("/gone.webp"))   // no file paths go out
 
