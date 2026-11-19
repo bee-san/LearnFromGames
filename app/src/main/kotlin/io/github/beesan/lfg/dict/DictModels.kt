@@ -72,8 +72,16 @@ data class Entry(
     /** Each sense as one line of plain text, across dictionaries in order. */
     fun senses(): List<String> = meanings.flatMap { GlossaryText.senses(it.glossary) }
 
-    /** The glossaries that are meanings. JMdict also lists an entry's written forms as one, tagged `forms`. */
-    val meanings: List<Glossary> get() = glossaries.filter { "forms" !in it.definitionTags.split(' ') }
+    /**
+     * The glossaries that are meanings. JMdict also lists an entry's written
+     * forms as one, tagged `forms`; the user's own notes are not meanings either.
+     */
+    val meanings: List<Glossary> get() = glossaries.filter { "forms" !in it.definitionTags.split(' ') && it.dictionary != MY_NOTES }
 
     val sources: List<String> get() = glossaries.map { it.dictionary }.distinct()
+
+    companion object {
+        /** The dictionary a word's notes show as, first in its entry. */
+        const val MY_NOTES = "My notes"
+    }
 }

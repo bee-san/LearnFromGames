@@ -35,6 +35,8 @@ class CardMaker(
     private val media: MediaAttacher,
     private val mediaDir: File,
     private val wordAudio: WordAudio? = null,
+    /** A card was made: the Today widget counts them. */
+    private val onCard: () -> Unit = {},
 ) {
     suspend fun add(lineId: String, content: CardContent): CardResult = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -44,6 +46,7 @@ class CardMaker(
         )
         if (anki.status() != AnkiStatus.READY) {
             db.cards().insert(row)
+            onCard()
             return@withContext CardResult.Waiting(
                 if (anki.status() == AnkiStatus.NOT_INSTALLED) "AnkiDroid is not installed." else "AnkiDroid is not connected.",
             )
@@ -51,6 +54,7 @@ class CardMaker(
         try {
             if (anki.target?.let { anki.isDuplicate(it, content.expression) } == true) return@withContext CardResult.Duplicate
             val id = db.cards().insert(row)
+            onCard()
             send(row.copy(id = id), content)
         } catch (e: Exception) {
             CardResult.Failed(e.message ?: "AnkiDroid did not answer.")

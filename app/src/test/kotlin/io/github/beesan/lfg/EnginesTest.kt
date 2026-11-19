@@ -146,7 +146,7 @@ class EnginesTest {
             glossaries = listOf(Glossary("JMdict", sense, "1 v1 vt", "")),
         )
         val html = EntryHtml.page(entry, listOf(EntryHtml.Style("JMdict", ".x{color:red}")))
-        assertTrue(html.contains("""<span class="lfg-term" lang="ja">見る</span><span class="lfg-reading" lang="ja">みる</span>"""))
+        assertTrue(html.contains("""<span class="lfg-term" lang="ja"><ruby>見<rt>み</rt></ruby>る</span>"""))
         assertTrue(html.contains("見た → 見る · -た"))
         assertTrue(html.contains("""<div class="lfg-dict" data-dictionary="JMdict">"""))
         assertTrue(html.contains("""<span class="lfg-tag">v1</span><span class="lfg-tag">vt</span>"""))

@@ -11,32 +11,38 @@ import android.text.Spanned
 import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
-import android.view.Gravity
 import android.view.MotionEvent
-import android.view.View
 import android.view.ViewGroup
+import android.content.res.ColorStateList
+import android.text.InputType
+import android.view.Gravity
+import android.view.inputmethod.InputMethodManager
+import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
-import io.github.beesan.lfg.App
-import io.github.beesan.lfg.dict.Entry
-import io.github.beesan.lfg.dict.Pronunciation
-import io.github.beesan.lfg.lookup.CardButton
+import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.lookup.LookupState
 
-/** The app's palette as plain colour ints, for the Views drawn over the game. */
+/**
+ * The app's colours as plain colour ints, for the Views drawn over the game.
+ * [OverlayHost] sets [palette] from Settings and makes its views again when
+ * it changes.
+ */
 internal object Ink {
-    const val BG = 0xFF22232C.toInt()
-    const val SURFACE = 0xFF2B2B36.toInt()
-    const val BORDER = 0xFF454653.toInt()
-    const val BORDER_STRONG = 0xFF747586.toInt()
-    const val TEXT = 0xFFE8E5EB.toInt()
-    const val DIM = 0xFFAAA8B2.toInt()
-    const val ACCENT = 0xFFB1A5EE.toInt()
-    const val FILL = 0xFFA89CE4.toInt()
-    const val SOFT = 0xFF353247.toInt()
-    const val ON_FILL = 0xFF211D30.toInt()
-    const val WASH = 0x3DB1A5EE
+    var palette: Palette = Palette.of(Palette.PINK, Palette.THEME_DARK, systemDark = true)
+
+    val BG get() = palette.bg
+    val BORDER get() = palette.border
+    val BORDER_STRONG get() = palette.borderStrong
+    val TEXT get() = palette.text
+    val DIM get() = palette.dim
+    val ACCENT get() = palette.accent
+    val WASH get() = palette.wash
+    val SURFACE get() = palette.surface
+    val SUNKEN get() = palette.sunken
+    val FILL get() = palette.fill
+    val ON_FILL get() = palette.onFill
 }
 
 internal fun Context.dp(value: Float): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics).toInt()
@@ -52,96 +58,6 @@ internal fun Context.label(sizeSp: Float, color: Int, bold: Boolean = false) = T
     setTextColor(color)
     if (bold) typeface = Typeface.DEFAULT_BOLD
     includeFontPadding = false
-}
-
-/** The Add card button. A plain TextView: a Button would want focus, and nothing here may take it. */
-@SuppressLint("ViewConstructor")
-internal class CardButtonView(context: Context, onPress: () -> Unit) : TextView(context) {
-    init {
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-        typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.CENTER
-        minHeight = context.dp(44f)
-        setPadding(context.dp(18f), 0, context.dp(18f), 0)
-        isFocusable = false
-        setOnClickListener { onPress() }
-        show(CardButton.ADD)
-    }
-
-    fun show(state: CardButton) {
-        val enabled = state == CardButton.ADD
-        text = when (state) {
-            CardButton.ADD -> "Add card"
-            CardButton.ADDING -> "Adding…"
-            CardButton.IN_ANKI -> "In Anki"
-            CardButton.WAITING -> "Waiting for AnkiDroid"
-        }
-        isEnabled = enabled
-        setTextColor(if (enabled) Ink.ON_FILL else Ink.DIM)
-        background = rounded(if (enabled) Ink.FILL else Ink.SOFT, if (enabled) Ink.FILL else Ink.SOFT, context.dp(5f).toFloat())
-    }
-}
-
-/** One dictionary entry as text: the headword, its reading, how it was inflected, and the senses. */
-internal class EntryView(context: Context) : LinearLayout(context) {
-    private val term = context.label(28f, Ink.TEXT, bold = true)
-    private val reading = context.label(15f, Ink.DIM)
-    private val path = context.label(12.5f, Ink.DIM)
-    private val meta = context.label(12.5f, Ink.DIM)
-    private val audio = (context.applicationContext as? App)?.wordAudio
-    private var shown: Entry? = null
-    private val senses = context.label(15f, Ink.TEXT)
-    private val scroll = ScrollView(context)
-
-    init {
-        orientation = VERTICAL
-        val head = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.BOTTOM
-            addView(term)
-            addView(reading, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f); bottomMargin = context.dp(3f) })
-        }
-        addView(head)
-        // A tap on the word says it, when there is word audio for it.
-        head.setOnClickListener { shown?.let { audio?.play(it) } }
-        addView(meta, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(2f) })
-        addView(path, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(2f) })
-        senses.setLineSpacing(context.dp(3f).toFloat(), 1f)
-        scroll.isVerticalScrollBarEnabled = false
-        scroll.isFocusable = false
-        scroll.addView(senses)
-        addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = context.dp(6f) })
-    }
-
-    fun show(entry: Entry?, message: String?) {
-        if (entry == null) {
-            term.text = ""
-            reading.text = ""
-            path.text = ""
-            meta.visibility = View.GONE
-            shown = null
-            senses.text = message ?: ""
-            return
-        }
-        term.text = entry.expression
-        shown = entry
-        reading.text = (if (entry.reading != entry.expression) entry.reading else "") + if (audio?.has(entry) == true) "  🔊" else ""
-        meta.text = Pronunciation.summary(entry)
-        meta.visibility = if (meta.text.isEmpty()) View.GONE else View.VISIBLE
-        path.text = entry.path
-        path.visibility = if (entry.path.isEmpty()) View.GONE else View.VISIBLE
-        senses.text = entry.senses().mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n")
-        scroll.scrollTo(0, 0)
-    }
-
-    /** The right stick scrolls the entry. */
-    fun scrollBy(dy: Int) = scroll.smoothScrollBy(0, dy)
-
-    /** For a wrapped height: the popup grows with the entry up to a cap rather than filling its window. */
-    fun wrapSenses(maxHeight: Int) {
-        scroll.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6f) }
-        senses.maxHeight = maxHeight
-    }
 }
 
 /**
@@ -218,3 +134,63 @@ internal fun Context.keyHints(confirm: String, close: String): TextView = label(
 internal fun wrap() = ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
 internal val TRANSPARENT = Color.TRANSPARENT
+
+/**
+ * A note on a word, written without leaving the game: whether to keep the
+ * picture of the game as it is now, and the text. Its window takes focus
+ * while it shows, so the keyboard can come up; [OverlayHost] gives it back.
+ */
+@SuppressLint("ViewConstructor")
+internal class NoteEditor(context: Context, onSave: (text: String, keepPicture: Boolean) -> Unit, onBack: () -> Unit) : LinearLayout(context) {
+    private val title = context.label(17f, Ink.TEXT, bold = true)
+    private val keep = CheckBox(context)
+    private val field = EditText(context)
+
+    init {
+        orientation = VERTICAL
+        val pad = context.dp(14f)
+        setPadding(pad, context.dp(12f), pad, context.dp(12f))
+        addView(title)
+        keep.text = "Keep this picture"
+        keep.setTextColor(Ink.TEXT)
+        keep.buttonTintList = ColorStateList.valueOf(Ink.ACCENT)
+        keep.minHeight = context.dp(44f)
+        addView(keep, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6f) })
+        field.hint = "Note"
+        field.setTextColor(Ink.TEXT)
+        field.setHintTextColor(Ink.DIM)
+        field.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        field.gravity = Gravity.TOP or Gravity.START
+        field.minLines = 4
+        field.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        field.background = rounded(Ink.SUNKEN, Ink.ACCENT, context.dp(6f).toFloat())
+        field.setPadding(context.dp(12f), context.dp(10f), context.dp(12f), context.dp(10f))
+        addView(field, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = context.dp(6f) })
+        val buttons = LinearLayout(context).apply { orientation = HORIZONTAL }
+        buttons.addView(button(context, "Save note", primary = true) { onSave(field.text.toString(), keep.isChecked) }, wrap())
+        buttons.addView(button(context, "Back", primary = false) { onBack() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
+        addView(buttons, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
+    }
+
+    /** Ready for a note on [word]: an empty field with the keyboard up. */
+    fun open(word: String) {
+        title.text = "Note on $word"
+        keep.isChecked = true
+        field.setText("")
+        field.requestFocus()
+        field.post { context.getSystemService(InputMethodManager::class.java)?.showSoftInput(field, 0) }
+    }
+
+    private fun button(context: Context, text: String, primary: Boolean, onPress: () -> Unit) = TextView(context).apply {
+        this.text = text
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        minHeight = context.dp(44f)
+        setPadding(context.dp(18f), 0, context.dp(18f), 0)
+        setTextColor(if (primary) Ink.ON_FILL else Ink.TEXT)
+        background = rounded(if (primary) Ink.FILL else Ink.SURFACE, if (primary) Ink.FILL else Ink.BORDER_STRONG, context.dp(5f).toFloat())
+        isFocusable = false
+        setOnClickListener { onPress() }
+    }
+}

@@ -36,6 +36,10 @@ data class GameLine(
     @ColumnInfo(name = "display_id") val displayId: Int = 0,
     /** `left,top,right,bottom` in frame pixels. */
     val box: String = "",
+    /** A picture of the line alone, cut from the screen. Kept when the screen's picture is cleared. */
+    @ColumnInfo(name = "crop_path") val cropPath: String? = null,
+    /** The line's translation, once asked for. */
+    val translation: String? = null,
 )
 
 /** A game is the app in front, by default: an emulator is one "game" until it is renamed or split. */
@@ -91,3 +95,44 @@ data class Card(
         const val STATE_FAILED = "failed"
     }
 }
+
+/**
+ * A note about what happened in a game, or about a word in it (an item, a
+ * place, a person). With [term], and [inLookups] on, it shows first in that
+ * word's lookups, as the dictionary "My notes".
+ */
+@Entity(tableName = "notes", indices = [Index("term"), Index("game_id")])
+data class Note(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "game_id") val gameId: String,
+    @ColumnInfo(name = "game_name") val gameName: String,
+    /** The line it was made from, or null for a note on its own. */
+    @ColumnInfo(name = "line_id") val lineId: String? = null,
+    @ColumnInfo(name = "line_text") val lineText: String = "",
+    /** The word it is about, as the dictionary has it, or empty. */
+    val term: String = "",
+    val reading: String = "",
+    /** The word's first meaning, to remind the note's reader. */
+    val gloss: String = "",
+    val title: String = "",
+    val text: String,
+    /** Its own copy of the picture, so clearing old pictures never takes it. */
+    @ColumnInfo(name = "picture_path") val picturePath: String? = null,
+    @ColumnInfo(name = "in_lookups") val inLookups: Boolean = true,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+)
+
+/**
+ * A game's story so far, as JSON ([io.github.beesan.lfg.recap.Recap]), from
+ * its lines up to [lastLineId]. The next recap carries on from the newest one.
+ */
+@Entity(tableName = "recaps", indices = [Index("game_id")])
+data class RecapRow(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "game_id") val gameId: String,
+    val json: String,
+    @ColumnInfo(name = "last_line_id") val lastLineId: String,
+    @ColumnInfo(name = "line_count") val lineCount: Int,
+    val model: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+)

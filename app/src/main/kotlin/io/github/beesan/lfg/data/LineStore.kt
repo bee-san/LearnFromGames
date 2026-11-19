@@ -5,7 +5,7 @@ import io.github.beesan.lfg.core.Box
 import java.util.UUID
 
 /** Saving lines and lookups: step 7 of the plan, "every line is saved for stats later". [onSaved] follows each line saved. */
-class LineStore(private val db: LfgDatabase, private val onSaved: () -> Unit = {}) {
+class LineStore(private val db: LfgDatabase, private val onSaved: (GameLine) -> Unit = {}) {
 
     suspend fun gameOrNull(packageName: String): Game? = db.games().byPackage(packageName)
 
@@ -42,9 +42,11 @@ class LineStore(private val db: LfgDatabase, private val onSaved: () -> Unit = {
             box = box?.encode() ?: "",
         )
         db.lines().insert(line)
-        onSaved()
+        onSaved(line)
         return line
     }
+
+    suspend fun setCrop(lineId: String, path: String) = db.lines().setCrop(lineId, path)
 
     /** The last few lines saved for a game, newest first. */
     suspend fun recent(game: Game, limit: Int = 6): List<GameLine> = db.lines().lastOf(game.id, limit)

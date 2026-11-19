@@ -23,8 +23,10 @@ import android.view.View
 import android.widget.RemoteViews
 import io.github.beesan.lfg.App
 import io.github.beesan.lfg.R
+import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.ui.MainActivity
+import io.github.beesan.lfg.ui.palette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -55,19 +57,28 @@ class WeekWidget : AppWidgetProvider() {
  */
 object StatsWidgets {
     private const val SETTLE_MS = 30_000L
-    private const val TEXT = 0xFFE8E5EB.toInt()
-    private const val DIM = 0xFFAAA8B2.toInt()
-    private const val ACCENT = 0xFFB1A5EE.toInt()
-    private const val OK = 0xFF8BB79B.toInt()
+    /** The palette Settings picked, set at each redraw. */
+    private var colours = Palette.of(Palette.PINK, Palette.THEME_DARK, systemDark = true)
+    private val TEXT get() = colours.text
+    private val DIM get() = colours.dim
+    private val TIME get() = colours.ringTime
+    private val CHARS get() = colours.ringChars
+    private val CARDS get() = colours.ringCards
+    private val MET get() = colours.ok
     /** Each layout and the smallest size, in dp, it is drawn at; Android picks the largest that fits. */
     private val TODAY_SQUARE = SizeF(100f, 100f)
     private val TODAY_WIDE = SizeF(230f, 100f)
+    private val TODAY_LARGE = SizeF(230f, 230f)
     private val WEEK_COMPACT = SizeF(170f, 80f)
     private val WEEK_FULL = SizeF(170f, 150f)
     private const val RING_PX = 320
+    private const val DAY_RING_PX = 96
 
     private val BARS = intArrayOf(R.id.bar0, R.id.bar1, R.id.bar2, R.id.bar3, R.id.bar4, R.id.bar5, R.id.bar6)
     private val DAYS = intArrayOf(R.id.day0, R.id.day1, R.id.day2, R.id.day3, R.id.day4, R.id.day5, R.id.day6)
+    private val DAY_RINGS = intArrayOf(R.id.day_ring0, R.id.day_ring1, R.id.day_ring2, R.id.day_ring3, R.id.day_ring4, R.id.day_ring5, R.id.day_ring6)
+
+    private enum class Size { SQUARE, WIDE, LARGE }
 
     private var pending: Job? = null
 
@@ -106,8 +117,11 @@ object StatsWidgets {
             val zone = ZoneId.systemDefault()
             val stamps = app.database.lines().stamps().first()
             val days = ReadingStats.byDay(stamps.map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }, zone)
-            WidgetData.of(days, app.settings.prefs.value.goals, ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, zone))
+            val cardDays = app.database.cards().madeTimes().map { ReadingStats.dayOf(it / 1000.0, zone) }
+            val prefs = app.settings.prefs.value
+            WidgetData.of(days, prefs.goals, ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, zone), cardDays, prefs.goalCards)
         }
+        colours = app.palette(app.settings.prefs.value)
         val manager = AppWidgetManager.getInstance(app)
         val open = PendingIntent.getActivity(
             app, 0,
@@ -115,8 +129,14 @@ object StatsWidgets {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         if (today.isNotEmpty()) {
-            val rings = data.rings.takeIf { it.isNotEmpty() }?.let { r -> rings(r.map { (f, ring) -> f to if (ring == WidgetData.Ring.TIME) ACCENT else OK }) }
-            val views = RemoteViews(mapOf(TODAY_SQUARE to todayViews(app, data, rings, wide = false, open), TODAY_WIDE to todayViews(app, data, rings, wide = true, open)))
+            val rings = data.rings.takeIf { it.isNotEmpty() }?.let { rings(colored(it), RING_PX) }
+            val views = RemoteViews(
+                mapOf(
+                    TODAY_SQUARE to todayViews(app, data, rings, Size.SQUARE, open),
+                    TODAY_WIDE to todayViews(app, data, rings, Size.WIDE, open),
+                    TODAY_LARGE to todayViews(app, data, rings, Size.LARGE, open),
+                ),
+            )
             today.forEach { manager.updateAppWidget(it, views) }
         }
         if (week.isNotEmpty()) {
@@ -127,8 +147,26 @@ object StatsWidgets {
 
     // ── Today ────────────────────────────────────────────────────────────────
 
-    private fun todayViews(context: Context, data: WidgetData, rings: Bitmap?, wide: Boolean, open: PendingIntent): RemoteViews {
-        val v = RemoteViews(context.packageName, if (wide) R.layout.widget_today_wide else R.layout.widget_today)
+    private fun colored(rings: List<Pair<Float, WidgetData.Ring>>) = rings.map { (f, ring) ->
+        f to when (ring) {
+            WidgetData.Ring.TIME -> TIME
+            WidgetData.Ring.CHARS -> CHARS
+            WidgetData.Ring.CARDS -> CARDS
+        }
+    }
+
+    private fun todayViews(context: Context, data: WidgetData, rings: Bitmap?, size: Size, open: PendingIntent): RemoteViews {
+        val wide = size != Size.SQUARE
+        val layout = when (size) {
+            Size.SQUARE -> R.layout.widget_today
+            Size.WIDE -> R.layout.widget_today_wide
+            Size.LARGE -> R.layout.widget_today_large
+        }
+        val v = RemoteViews(context.packageName, layout)
+        card(v)
+        v.setTextColor(R.id.today_title, TEXT)
+        v.setTextColor(R.id.today_streak, DIM)
+        if (size == Size.WIDE) v.setTextColor(R.id.today_detail, DIM)
         val t = data.today
         val g = data.goals
         v.setOnClickPendingIntent(android.R.id.background, open)
@@ -144,11 +182,29 @@ object StatsWidgets {
 
         val time = figure(WidgetData.timeParts(t.seconds), if (g.minutes > 0) "of " + WidgetData.goalTime(g.minutes) else "", g.timeMet(t))
         v.setTextViewText(R.id.today_time, time)
-        v.setTextColor(R.id.today_time, if (g.minutes > 0) ACCENT else TEXT)
+        v.setTextColor(R.id.today_time, if (g.minutes > 0) TIME else TEXT)
         val chars = figure(listOf("%,d".format(t.chars) to ""), (if (g.chars > 0) "of " + "%,d".format(g.chars) + " " else "") + "chars", g.charsMet(t))
         v.setTextViewText(R.id.today_chars, chars)
-        v.setTextColor(R.id.today_chars, if (g.chars > 0) OK else TEXT)
-        if (wide) {
+        v.setTextColor(R.id.today_chars, if (g.chars > 0) CHARS else TEXT)
+        // Cards show only with their goal: the ring is what they are for.
+        val cards = if (data.cardGoal > 0) figure(listOf("${data.cards}" to ""), "of ${data.cardGoal} cards", data.cardsMet) else ""
+        v.setTextViewText(R.id.today_cards, cards)
+        v.setTextColor(R.id.today_cards, CARDS)
+        v.setViewVisibility(R.id.today_cards, if (data.cardGoal > 0) View.VISIBLE else View.GONE)
+        if (size == Size.LARGE) {
+            // The week as small rings, a day each, today last; only when a goal is set to draw them against.
+            val week = data.weekRings
+            val letters = data.chart().bars
+            v.setViewVisibility(R.id.today_week, if (rings != null) View.VISIBLE else View.GONE)
+            if (rings != null) {
+                week.forEachIndexed { i, day ->
+                    v.setImageViewBitmap(DAY_RINGS[i], StatsWidgets.rings(colored(day), DAY_RING_PX))
+                    v.setTextViewText(DAYS[i], letters[i].letter)
+                    v.setTextColor(DAYS[i], if (letters[i].today) TEXT else DIM)
+                }
+            }
+        }
+        if (size == Size.WIDE) {
             val speed = ReadingStats.perHour(t.timedChars, t.seconds)
             v.setTextViewText(
                 R.id.today_detail,
@@ -160,7 +216,7 @@ object StatsWidgets {
                 },
             )
         }
-        v.setContentDescription(android.R.id.background, "Today: $time, $chars")
+        v.setContentDescription(android.R.id.background, listOf("Today: $time", "$chars", "$cards").filter { it.isNotEmpty() }.joinToString(", "))
         return v
     }
 
@@ -169,11 +225,15 @@ object StatsWidgets {
      * top. Past a full turn the ring goes on round over itself, its end shadowed
      * so the overlap shows, up to twice round.
      */
-    private fun rings(rings: List<Pair<Float, Int>>): Bitmap {
-        val size = RING_PX.toFloat()
-        val bitmap = Bitmap.createBitmap(RING_PX, RING_PX, Bitmap.Config.ARGB_8888)
+    private fun rings(rings: List<Pair<Float, Int>>, px: Int): Bitmap {
+        val size = px.toFloat()
+        val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        val stroke = size * if (rings.size == 1) 0.14f else 0.12f
+        val stroke = size * when (rings.size) {
+            1 -> 0.14f
+            2 -> 0.12f
+            else -> 0.1f
+        }
         val gap = size * 0.03f
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
@@ -208,6 +268,14 @@ object StatsWidgets {
 
     private fun weekViews(context: Context, data: WidgetData, compact: Boolean, open: PendingIntent): RemoteViews {
         val v = RemoteViews(context.packageName, if (compact) R.layout.widget_week_compact else R.layout.widget_week)
+        card(v)
+        v.setTextColor(R.id.week_title, DIM)
+        v.setTextColor(R.id.week_total, TEXT)
+        v.setColorStateList(R.id.week_goal, "setProgressTintList", ColorStateList.valueOf(MET))
+        if (!compact) {
+            v.setTextColor(R.id.week_streak, DIM)
+            v.setTextColor(R.id.week_detail, DIM)
+        }
         val w = data.week.totals
         v.setOnClickPendingIntent(android.R.id.background, open)
         val time = WidgetData.timeParts(w.seconds)
@@ -225,7 +293,8 @@ object StatsWidgets {
         val chart = data.chart()
         chart.bars.forEachIndexed { i, bar ->
             v.setProgressBar(BARS[i], WidgetData.LEVELS, bar.level, false)
-            v.setColorStateList(BARS[i], "setProgressTintList", ColorStateList.valueOf(if (bar.met) OK else ACCENT))
+            v.setColorStateList(BARS[i], "setProgressTintList", ColorStateList.valueOf(if (bar.met) MET else TIME))
+            v.setColorStateList(BARS[i], "setProgressBackgroundTintList", ColorStateList.valueOf((TIME and 0xFFFFFF) or (0x2E shl 24)))
             v.setTextViewText(DAYS[i], bar.letter)
             v.setTextColor(DAYS[i], if (bar.today) TEXT else DIM)
         }
@@ -241,6 +310,10 @@ object StatsWidgets {
         )
         return v
     }
+
+    /** The widget's card in the palette's raised colour; the drawable gives its shape. */
+    private fun card(v: RemoteViews) =
+        v.setColorStateList(android.R.id.background, "setBackgroundTintList", ColorStateList.valueOf(colours.surface))
 
     // ── Text ─────────────────────────────────────────────────────────────────
 

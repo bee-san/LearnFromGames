@@ -41,6 +41,7 @@ data class ReadingGoals(val minutes: Int = 0, val chars: Int = 0) {
     companion object {
         /** The goals a step of − or + moves between; 0 is off. */
         val MINUTE_STEPS = listOf(0, 15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 480)
+        val CARD_STEPS = listOf(0, 1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 50)
         val CHAR_STEPS = listOf(0, 500, 1_000, 2_000, 3_000, 4_000, 5_000, 7_500, 10_000, 15_000, 20_000, 25_000, 30_000, 40_000, 50_000, 75_000, 100_000)
 
         /** The step after [current] up or down, from a value on the list or between two of them; it stops at either end. */

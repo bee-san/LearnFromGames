@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.ui
 
+import android.graphics.drawable.ColorDrawable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
+import androidx.core.view.WindowCompat
+import io.github.beesan.lfg.core.Palette
+import io.github.beesan.lfg.backup.Backup
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Intent
@@ -60,11 +66,32 @@ class MainActivity : ComponentActivity() {
             val games by model.games.collectAsStateWithLifecycle()
             val stats by model.stats.collectAsStateWithLifecycle()
             val lookup by model.lineLookup.state.collectAsStateWithLifecycle()
+            val notes by model.notes.collectAsStateWithLifecycle()
+            val draft by model.draft.collectAsStateWithLifecycle()
+            val translation by model.translation.collectAsStateWithLifecycle()
+            val keyTest by model.keyTest.collectAsStateWithLifecycle()
+            val recap by model.recap.collectAsStateWithLifecycle()
+            val backupMessage by model.backupMessage.collectAsStateWithLifecycle()
+            val pendingRestore by model.pendingRestore.collectAsStateWithLifecycle()
+            val saveBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { model.backUpTo(it) }
+            val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { model.askRestore(it) }
+            val saveLines = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { model.exportLinesTo(it) }
+            val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { model.chooseBackupFolder(it) }
             val styles by model.styles.collectAsStateWithLifecycle()
             val dictionaries by model.dictionaries.collectAsStateWithLifecycle()
             val sources by model.sources.collectAsStateWithLifecycle()
             val wordAudio by model.wordAudio.collectAsStateWithLifecycle()
             val recording by SoundCapture.running.collectAsStateWithLifecycle()
+            // The colours Settings picked, light or dark as the theme says, "Match system" following the system.
+            val palette = Palette.of(prefs.colours, prefs.theme, isSystemInDarkTheme())
+            if (Lfg.palette != palette) Lfg.palette = palette
+            SideEffect {
+                window.setBackgroundDrawable(ColorDrawable(palette.bg))
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !palette.dark
+                    isAppearanceLightNavigationBars = !palette.dark
+                }
+            }
             var page by rememberSaveable { mutableStateOf(Page.HOME) }
             val saved = rememberSaveableStateHolder()
 
@@ -101,7 +128,8 @@ class MainActivity : ComponentActivity() {
                 // Stats keeps its period and chart across the goals page, and opens on its defaults again after Home.
                 if (page == Page.STATS) saved.removeState(Page.STATS)
                 page = when (page) {
-                    Page.LINE, Page.STATS, Page.SETTINGS -> Page.HOME
+                    Page.LINE, Page.NOTES, Page.RECAP, Page.STATS, Page.SETTINGS -> Page.HOME
+                    Page.NOTE_NEW -> Page.NOTES
                     Page.SOURCES -> Page.DICTIONARIES
                     Page.GOALS -> Page.STATS
                     Page.HOME -> Page.HOME
@@ -150,15 +178,61 @@ class MainActivity : ComponentActivity() {
                             },
                             onStats = { page = Page.STATS },
                             onSettings = { page = Page.SETTINGS },
+                            onNotes = { page = Page.NOTES },
+                            onRecap = {
+                                model.openRecap()
+                                page = Page.RECAP
+                            },
+                        )
+                        page == Page.RECAP -> RecapScreen(
+                            state = recap,
+                            games = games,
+                            hasKey = prefs.openRouterKey.isNotBlank(),
+                            onGame = model::recapGame,
+                            onWrite = model::writeRecap,
+                            onKey = { page = Page.TRANSLATION },
+                            onBack = ::back,
+                        )
+                        page == Page.NOTES -> NotesScreen(
+                            notes = notes,
+                            onNew = {
+                                model.newNote()
+                                page = Page.NOTE_NEW
+                            },
+                            onBack = ::back,
+                        )
+                        page == Page.NOTE_NEW -> NoteNewScreen(
+                            draft = draft,
+                            lookup = lookup,
+                            onTap = { model.lineLookup.select(0, it) },
+                            onLineBefore = model::noteOnLineBefore,
+                            onRemovePicture = model::removeNotePicture,
+                            onClearWord = model.lineLookup::clear,
+                            onSave = { title, text, inLookups ->
+                                model.saveNote(title, text, inLookups)
+                                page = Page.NOTES
+                            },
+                            onCancel = ::back,
                         )
                         page == Page.LINE -> LineLookupScreen(
                             state = lookup,
                             styles = styles,
                             media = model::mediaBlocking,
                             onTap = { model.lineLookup.select(0, it) },
-                            onAddCard = model.lineLookup::addCard,
-                            onPreviousEntry = model.lineLookup::previousEntry,
-                            onNextEntry = model.lineLookup::nextEntry,
+                            onLink = { link, index ->
+                                when (link) {
+                                    EntryLink.CARD -> model.lineLookup.addCard(index)
+                                    EntryLink.AUDIO -> model.lineLookup.playAudio(index)
+                                    EntryLink.NOTE -> {
+                                        model.noteFromLine(index)
+                                        page = Page.NOTE_NEW
+                                    }
+                                }
+                            },
+                            translation = translation,
+                            translate = prefs.translate,
+                            translateContext = prefs.translateContext,
+                            onTranslate = model::translateLine,
                             onBack = ::back,
                         )
                         page == Page.STATS -> saved.SaveableStateProvider(Page.STATS) {
@@ -180,6 +254,21 @@ class MainActivity : ComponentActivity() {
                         )
                         page == Page.SOURCES -> SourcesScreen(sources, ::back)
                         page == Page.ANKI -> AnkiScreen(setup, model::connectAnki, { ankiPermission.launch(AnkiBridge.PERMISSION) }, ::back)
+                        page == Page.APPEARANCE -> AppearanceScreen(prefs, model::updatePrefs, ::back)
+                        page == Page.BACKUP -> BackupScreen(
+                            prefs = prefs,
+                            onChange = model::updatePrefs,
+                            message = backupMessage,
+                            pendingRestore = pendingRestore?.lastPathSegment?.substringAfterLast('/'),
+                            onBackUp = { saveBackup.launch(Backup.fileName()) },
+                            onPickRestore = { openBackup.launch(arrayOf("application/zip", "application/octet-stream")) },
+                            onRestore = model::restore,
+                            onCancelRestore = model::cancelRestore,
+                            onExport = { saveLines.launch("lfg-lines-export.csv") },
+                            onChooseFolder = { pickFolder.launch(null) },
+                            onBack = ::back,
+                        )
+                        page == Page.TRANSLATION -> TranslationScreen(prefs, model::updatePrefs, keyTest, model::testKey, ::back)
                         page == Page.CONTROLS -> ControlsScreen(prefs, model::updatePrefs, ::back)
                         page == Page.RECOGNITION -> RecognitionScreen(
                             prefs, reader, screenAi, ScreenAi.available(), model::updatePrefs, { model.downloadScreenAi() }, ::back,

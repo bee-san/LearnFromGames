@@ -6,11 +6,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,6 +28,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.dict.EntryHtml
@@ -61,12 +60,16 @@ fun LinesScreen(
     onOpenLine: (GameLine) -> Unit,
     onStats: () -> Unit,
     onSettings: () -> Unit,
+    onNotes: () -> Unit,
+    onRecap: () -> Unit,
 ) {
     val time = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val zone = remember { ZoneId.systemDefault() }
     val today = remember(lines.size) { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, zone) }
     Column(Modifier.fillMaxSize()) {
         PageHeader("Lines") {
+            LfgButton("Notes", onNotes)
+            LfgButton("Recap", onRecap)
             LfgButton("Stats", onStats)
             LfgButton("Open settings", onSettings)
         }
@@ -99,6 +102,7 @@ fun LinesScreen(
                         Text(time.format(Date(line.createdAt)), color = Lfg.Dim, fontSize = 13.sp, modifier = Modifier.width(52.dp).padding(top = 4.dp))
                         Column {
                             Text(line.lineText, color = Lfg.Text, fontSize = 17.sp, lineHeight = 26.sp)
+                            line.translation?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp, lineHeight = 20.sp) }
                             if (line.noteIds.isNotEmpty()) Text("Card", color = Lfg.Dim, fontSize = 12.sp)
                         }
                     }
@@ -144,16 +148,19 @@ fun cardButtonLabel(button: CardButton) = when (button) {
     CardButton.WAITING -> "Waiting for AnkiDroid"
 }
 
-/** One stored line, opened: tap a word, read the whole entry, make the card. */
+/** One stored line, opened: tap a word, read every entry in one scrolling list, make a card or a note from one. */
 @Composable
 fun LineLookupScreen(
     state: LookupState,
     styles: List<EntryHtml.Style>,
     media: (String, String) -> ByteArray?,
     onTap: (Int) -> Unit,
-    onAddCard: () -> Unit,
-    onPreviousEntry: () -> Unit,
-    onNextEntry: () -> Unit,
+    onLink: (EntryLink, Int) -> Unit,
+    translation: MainViewModel.TranslationState,
+    /** What Settings › Translation says: nothing shows while it is off. */
+    translate: String,
+    translateContext: Int,
+    onTranslate: () -> Unit,
     onBack: () -> Unit,
 ) {
     val line = state.lines.firstOrNull()
@@ -165,23 +172,29 @@ fun LineLookupScreen(
             Column(Modifier.weight(1f)) {
                 TappableSentence(line.text, state.spanStart, if (state.selected) state.spanEnd else 0, onTap)
                 if (!state.selected) Text("Tap a word.", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 10.dp))
+                if (translate != Prefs.TRANSLATE_OFF) {
+                    HorizontalDivider(color = Lfg.Border, modifier = Modifier.padding(top = 18.dp))
+                    Text("Translation", color = Lfg.Dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp))
+                    when {
+                        translation.text != null -> Text(translation.text, color = Lfg.Text, fontSize = 17.sp, lineHeight = 25.sp)
+                        translation.busy -> Text("Translating…", color = Lfg.Dim, fontSize = 15.sp)
+                    }
+                    translation.error?.let { Text(it, color = Lfg.Warn, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
+                        Text(
+                            if (translateContext == 0) "Without the lines before" else "With the $translateContext lines before",
+                            color = Lfg.Dim, fontSize = 13.sp, modifier = Modifier.weight(1f),
+                        )
+                        LfgButton(if (translation.text == null) "Translate" else "Translate again", onTranslate, enabled = !translation.busy)
+                    }
+                }
             }
             Column(Modifier.weight(1.2f).fillMaxHeight()) {
                 if (state.selected) {
-                    EntryWeb(state.entry, styles, state.message, media, Modifier.fillMaxWidth().weight(1f))
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
-                        if (state.entry != null) {
-                            LfgButton(cardButtonLabel(state.button), onAddCard, primary = true, enabled = state.button == CardButton.ADD)
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Text(state.message.takeIf { state.entry != null } ?: "", color = Lfg.Dim, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                        if (state.entries.size > 1) {
-                            LfgButton("◀", onPreviousEntry, enabled = state.entryIndex > 0)
-                            Text("${state.entryIndex + 1}/${state.entries.size}", color = Lfg.Dim, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 10.dp))
-                            LfgButton("▶", onNextEntry, enabled = state.entryIndex < state.entries.size - 1)
-                        }
+                    EntryList(state, styles, media, onLink, Modifier.fillMaxWidth().weight(1f))
+                    state.message.takeIf { state.entries.isNotEmpty() }?.let {
+                        Text(it, color = Lfg.Dim, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
                     }
-                    Spacer(Modifier.height(4.dp))
                 }
             }
         }

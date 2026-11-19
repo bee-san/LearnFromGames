@@ -11,6 +11,13 @@ import androidx.lifecycle.viewModelScope
 import io.github.beesan.lfg.App
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.anki.AnkiStatus
+import io.github.beesan.lfg.ask.OpenRouter
+import io.github.beesan.lfg.backup.Backup
+import android.content.Intent
+import io.github.beesan.lfg.ask.Recap
+import io.github.beesan.lfg.data.RecapRow
+import kotlinx.serialization.json.Json
+import io.github.beesan.lfg.ask.Translator
 import io.github.beesan.lfg.anki.AnkiTarget
 import io.github.beesan.lfg.anki.CardContent
 import io.github.beesan.lfg.anki.CardResult
@@ -19,6 +26,7 @@ import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LineStore
+import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
 import io.github.beesan.lfg.dict.DictionaryWorker
@@ -118,7 +126,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsState())
 
     /** Lookup in a stored line, for a card made after the session. */
-    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio)
+    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio) { app.notes.withNotes(it) }
 
     private val _styles = MutableStateFlow<List<EntryHtml.Style>>(emptyList())
     val styles: StateFlow<List<EntryHtml.Style>> = _styles
@@ -256,8 +264,231 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── lines ────────────────────────────────────────────────────────────────
 
+    /** The stored line open in [lineLookup]. */
+    private var opened: GameLine? = null
+
     fun openLine(line: GameLine) {
-        lineLookup.setLines(listOf(LookupLine(line.lineText, line.id, line.screenshotPath?.takeIf { File(it).isFile }, line.gameName)))
+        opened = line
+        _translation.value = TranslationState(line.translation)
+        lineLookup.setLines(listOf(LookupLine(line.lineText, line.id, picture(line), line.gameName)))
+    }
+
+    /** The screen's picture is cleared after two weeks; the line's own picture stays and stands in for it. */
+    private fun picture(line: GameLine): String? =
+        line.screenshotPath?.takeIf { File(it).isFile } ?: line.cropPath?.takeIf { File(it).isFile }
+
+    // ── translation ──────────────────────────────────────────────────────────
+
+    /** The open line's translation: kept, being asked for, or what went wrong. */
+    data class TranslationState(val text: String? = null, val busy: Boolean = false, val error: String? = null)
+
+    private val _translation = MutableStateFlow(TranslationState())
+    val translation: StateFlow<TranslationState> = _translation
+
+    fun translateLine() {
+        val line = opened ?: return
+        if (_translation.value.busy) return
+        _translation.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch {
+            _translation.value = try {
+                TranslationState(app.translator.translate(line))
+            } catch (e: OpenRouter.Failure) {
+                TranslationState(_translation.value.text, error = e.message)
+            }
+        }
+    }
+
+    /** What "Test the key" found: a translation of a sample line, or what went wrong. */
+    private val _keyTest = MutableStateFlow<Pair<Boolean, String>?>(null)
+    val keyTest: StateFlow<Pair<Boolean, String>?> = _keyTest
+
+    fun testKey() {
+        _keyTest.value = true to "Asking OpenRouter…"
+        viewModelScope.launch {
+            val p = app.settings.prefs.value
+            _keyTest.value = try {
+                val answer = OpenRouter.ask(p.openRouterKey, p.model, Translator.system(p.translateInto), Translator.prompt("", emptyList(), TEST_LINE))
+                true to "Works: 「$TEST_LINE」 → “$answer”"
+            } catch (e: OpenRouter.Failure) {
+                false to (e.message ?: "")
+            }
+        }
+    }
+
+    // ── backup ───────────────────────────────────────────────────────────────
+
+    /** What the last backup, export or restore did, or what went wrong. */
+    private val _backupMessage = MutableStateFlow<String?>(null)
+    val backupMessage: StateFlow<String?> = _backupMessage
+
+    /** A backup picked to restore from, waiting for "Restore" to be pressed. */
+    private val _pendingRestore = MutableStateFlow<Uri?>(null)
+    val pendingRestore: StateFlow<Uri?> = _pendingRestore
+
+    fun backUpTo(uri: Uri?) {
+        uri ?: return
+        _backupMessage.value = "Backing up…"
+        viewModelScope.launch(Dispatchers.IO) {
+            _backupMessage.value = try {
+                app.contentResolver.openOutputStream(uri)?.use { Backup.write(app, app.database, it, app.settings.prefs.value.backupPictures) }
+                    ?: throw java.io.IOException()
+                "Backed up."
+            } catch (_: Exception) {
+                "The backup couldn’t be written there. Try another folder."
+            }
+        }
+    }
+
+    fun exportLinesTo(uri: Uri?) {
+        uri ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            _backupMessage.value = try {
+                val all = app.database.lines().all()
+                app.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { Backup.linesCsv(all, it) } ?: throw java.io.IOException()
+                "Exported %,d lines.".format(all.size)
+            } catch (_: Exception) {
+                "The lines couldn’t be written there. Try another folder."
+            }
+        }
+    }
+
+    /** "Change folder…": the folder is kept, with Android's leave to write to it after a restart. */
+    fun chooseBackupFolder(uri: Uri?) {
+        uri ?: return
+        app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        updatePrefs { it.copy(backupFolder = uri.toString()) }
+    }
+
+    fun askRestore(uri: Uri?) {
+        _pendingRestore.value = uri
+    }
+
+    fun cancelRestore() {
+        _pendingRestore.value = null
+    }
+
+    /** Backs up what is here first (into the backup folder, or the app's own files), then restores and starts again. */
+    fun restore() {
+        val uri = _pendingRestore.value ?: return
+        _pendingRestore.value = null
+        _backupMessage.value = "Restoring…"
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val prefs = app.settings.prefs.value
+                if (prefs.backupFolder.isNotEmpty()) {
+                    Backup.toFolder(app, app.database, prefs.copy(backupKeep = 0, gsmFile = false))
+                } else {
+                    val dir = File(app.filesDir, "backups").apply { mkdirs() }
+                    File(dir, Backup.fileName()).outputStream().use { Backup.write(app, app.database, it, prefs.backupPictures) }
+                }
+                (app.contentResolver.openInputStream(uri) ?: throw java.io.IOException()).use { Backup.restore(app, app.database, it) }
+            } catch (e: Exception) {
+                _backupMessage.value = e.message?.takeIf { it.startsWith("This file") } ?: "The restore failed; nothing was changed. Try again."
+                return@launch
+            }
+            withContext(Dispatchers.Main) { app.restart() }
+        }
+    }
+
+    // ── recap ────────────────────────────────────────────────────────────────
+
+    /** A game's recap: the one kept, or being written, or what went wrong. */
+    data class RecapState(
+        val gameId: String? = null,
+        val recap: Recap? = null,
+        val lineCount: Int = 0,
+        val model: String = "",
+        val writtenAt: Long = 0,
+        val busy: Boolean = false,
+        val error: String? = null,
+    )
+
+    private val _recap = MutableStateFlow(RecapState())
+    val recap: StateFlow<RecapState> = _recap
+
+    /** Recap opens on the game read last, and writes the story on when something has been read since the kept recap. */
+    fun openRecap() = recapGame(lines.value.firstOrNull()?.gameId ?: games.value.firstOrNull()?.id)
+
+    fun recapGame(gameId: String?) {
+        _recap.value = RecapState(gameId)
+        if (gameId == null) return
+        viewModelScope.launch {
+            val row = app.database.recaps().latest(gameId)
+            show(gameId, row)
+            val newest = lines.value.firstOrNull { it.gameId == gameId }
+            if ((row == null || newest?.id != row.lastLineId) && app.settings.prefs.value.openRouterKey.isNotBlank()) writeRecap()
+        }
+    }
+
+    fun writeRecap() {
+        val gameId = _recap.value.gameId ?: return
+        if (_recap.value.busy) return
+        val name = games.value.firstOrNull { it.id == gameId }?.title.orEmpty()
+        _recap.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch {
+            try {
+                show(gameId, app.recapper.write(gameId, name))
+            } catch (e: OpenRouter.Failure) {
+                _recap.update { if (it.gameId == gameId) it.copy(busy = false, error = e.message) else it }
+            }
+        }
+    }
+
+    private fun show(gameId: String, row: RecapRow?) = _recap.update {
+        if (it.gameId != gameId) return@update it
+        if (row == null) return@update it.copy(busy = false)
+        it.copy(
+            recap = Json.decodeFromString<Recap>(row.json), lineCount = row.lineCount, model = row.model,
+            writtenAt = row.createdAt, busy = false,
+        )
+    }
+
+    // ── notes ────────────────────────────────────────────────────────────────
+
+    val notes: StateFlow<List<Note>> = app.notes.all.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** A note being written in the app: the line it is on, its place in [lines], and the picture it keeps. */
+    data class NoteDraft(val line: GameLine? = null, val lineIndex: Int = 0, val picture: String? = null)
+
+    private val _draft = MutableStateFlow(NoteDraft())
+    val draft: StateFlow<NoteDraft> = _draft
+
+    /** "New note…": on the newest line read, with its picture; tap a word in it to note that word. */
+    fun newNote() = noteOn(0)
+
+    /** "Use the line before". */
+    fun noteOnLineBefore() = noteOn(_draft.value.lineIndex + 1)
+
+    private fun noteOn(index: Int) {
+        val line = lines.value.getOrNull(index)
+        if (line == null) {
+            if (index == 0) _draft.value = NoteDraft()
+            return
+        }
+        _draft.value = NoteDraft(line, index, picture(line))
+        openLine(line)
+    }
+
+    /** The note button of an entry on the open line: a note on that word. */
+    fun noteFromLine(entryIndex: Int) {
+        val line = opened ?: return
+        lineLookup.selectEntry(entryIndex)
+        _draft.value = NoteDraft(line, lines.value.indexOfFirst { it.id == line.id }.coerceAtLeast(0), picture(line))
+    }
+
+    fun removeNotePicture() = _draft.update { it.copy(picture = null) }
+
+    /** The note's word is the entry the line's lookup is on; empty when none is. */
+    fun saveNote(title: String, text: String, inLookups: Boolean) {
+        val draft = _draft.value
+        val line = draft.line
+        val entry = lineLookup.state.value.entry
+        val note = Note(
+            gameId = line?.gameId.orEmpty(), gameName = line?.gameName.orEmpty(), lineId = line?.id, lineText = line?.lineText.orEmpty(),
+            term = entry?.expression.orEmpty(), reading = entry?.reading.orEmpty(), gloss = entry?.senses()?.firstOrNull().orEmpty(),
+            title = title.trim(), text = text.trim(), inLookups = inLookups, createdAt = System.currentTimeMillis(),
+        )
+        viewModelScope.launch { app.notes.save(note, draft.picture) }
     }
 
     // ── dictionaries ─────────────────────────────────────────────────────────
@@ -327,6 +558,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        private const val TEST_LINE = "新しい剣を手に入れた！"
         const val PRACTICE_GAME = "LFG practice"
 
         fun dayLabel(day: LocalDate, today: LocalDate): String = when (day) {

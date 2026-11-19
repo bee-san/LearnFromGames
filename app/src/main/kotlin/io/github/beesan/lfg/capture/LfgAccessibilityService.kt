@@ -21,6 +21,7 @@ import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.data.Game
+import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
@@ -74,7 +75,7 @@ class LfgAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         app = application as App
         pipeline = ReadingPipeline(app.lines, File(filesDir, "frames"))
-        controller = LookupController(scope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio)
+        controller = LookupController(scope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio) { app.notes.withNotes(it) }
         overlays = OverlayHost(
             service = this,
             controller = controller,
@@ -84,6 +85,17 @@ class LfgAccessibilityService : AccessibilityService() {
             onHistoryLine = { controller.setLines(listOf(it)) },
             styles = { styles },
             media = { dictionary, path -> app.dictionaries.mediaBlocking(dictionary, path) },
+            onSaveNote = { line, entry, text, keepPicture ->
+                val gameId = front?.game?.id.orEmpty()
+                scope.launch {
+                    val note = Note(
+                        gameId = gameId, gameName = line.gameName, lineId = line.lineId, lineText = line.text,
+                        term = entry.expression, reading = entry.reading, gloss = entry.senses().firstOrNull().orEmpty(),
+                        text = text, createdAt = System.currentTimeMillis(),
+                    )
+                    app.notes.save(note, if (keepPicture) line.framePath else null)
+                }
+            },
         )
         scope.launch { app.dictionaries.state.collect { styles = app.dictionaries.styles() } }
         ignored = ignoredPackages()

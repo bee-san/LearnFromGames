@@ -2,6 +2,7 @@
 package io.github.beesan.lfg.data
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Insert
@@ -47,6 +48,24 @@ interface LineDao {
     @Query("UPDATE game_lines SET audio_path = :path, last_modified = :now WHERE id = :id")
     suspend fun setAudio(id: String, path: String, now: Long)
 
+    @Query("UPDATE game_lines SET crop_path = :path WHERE id = :id")
+    suspend fun setCrop(id: String, path: String)
+
+    @Query("UPDATE game_lines SET translation = :text WHERE id = :id")
+    suspend fun setTranslation(id: String, text: String)
+
+    /** The lines of a game read before [before], newest first: what a translation is given as context. */
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp < :before AND source != 'practice' ORDER BY timestamp DESC LIMIT :count")
+    suspend fun before(gameId: String, before: Double, count: Int): List<GameLine>
+
+    /** A game's lines in the order they were read. */
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND source != 'practice' ORDER BY timestamp")
+    suspend fun ofGame(gameId: String): List<GameLine>
+
+    /** Every line in the order it was read: for a lines file. */
+    @Query("SELECT * FROM game_lines WHERE source != 'practice' ORDER BY timestamp")
+    suspend fun all(): List<GameLine>
+
     @Query("UPDATE game_lines SET note_ids = :noteIds, last_modified = :now WHERE id = :id")
     suspend fun setNoteIds(id: String, noteIds: String, now: Long)
 }
@@ -88,6 +107,10 @@ interface CardDao {
     @Query("UPDATE cards SET audio_name = :name WHERE id = :id")
     suspend fun setAudio(id: Long, name: String)
 
+    /** When each card was made, added or still waiting; a failed one was never made. */
+    @Query("SELECT created_at FROM cards WHERE state != 'failed'")
+    suspend fun madeTimes(): List<Long>
+
     @Query("SELECT * FROM cards WHERE state = 'pending' ORDER BY created_at")
     suspend fun pending(): List<Card>
 
@@ -98,13 +121,49 @@ interface CardDao {
     fun forLines(lineIds: List<String>): Flow<List<Card>>
 }
 
+@Dao
+interface NoteDao {
+    @Insert
+    suspend fun insert(note: Note): Long
+
+    @Query("SELECT * FROM notes ORDER BY created_at DESC")
+    fun all(): Flow<List<Note>>
+
+    /** The notes shown in lookups of these words. */
+    @Query("SELECT * FROM notes WHERE in_lookups = 1 AND term IN (:terms) ORDER BY created_at DESC")
+    suspend fun forTerms(terms: List<String>): List<Note>
+
+    @Query("SELECT picture_path FROM notes WHERE picture_path IS NOT NULL")
+    suspend fun pictures(): List<String>
+}
+
+@Dao
+interface RecapDao {
+    @Insert
+    suspend fun insert(recap: RecapRow): Long
+
+    @Query("SELECT * FROM recaps WHERE game_id = :gameId ORDER BY created_at DESC LIMIT 1")
+    suspend fun latest(gameId: String): RecapRow?
+
+    @Query("SELECT * FROM recaps WHERE game_id = :gameId ORDER BY created_at DESC LIMIT 1")
+    fun latestFlow(gameId: String): Flow<RecapRow?>
+}
+
 /** Schema changes add a numbered migration; nothing here is ever rebuilt destructively. */
-@Database(entities = [GameLine::class, Game::class, LookupRecord::class, Card::class], version = 1, exportSchema = true)
+@Database(
+    entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class],
+    version = 2,
+    exportSchema = true,
+    // 2: a crop and a translation for each line, notes, and recaps. Room writes it from the exported schemas.
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
+)
 abstract class LfgDatabase : RoomDatabase() {
     abstract fun lines(): LineDao
     abstract fun games(): GameDao
     abstract fun lookups(): LookupDao
     abstract fun cards(): CardDao
+    abstract fun notes(): NoteDao
+    abstract fun recaps(): RecapDao
 
     companion object {
         fun open(context: Context): LfgDatabase =

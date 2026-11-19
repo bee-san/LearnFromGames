@@ -92,9 +92,10 @@ android {
     }
 
     lint {
-        // AnkiDroid's API artifact ships AnkiDroid's own house rule (its collection
-        // clock), which does not apply outside AnkiDroid.
+        // AnkiDroid's API artifact ships AnkiDroid's own house rules (its collection
+        // clock), which do not apply outside AnkiDroid.
         disable += "DirectSystemCurrentTimeMillisUsage"
+        disable += "DirectDateInstantiation"
     }
 
     buildFeatures {

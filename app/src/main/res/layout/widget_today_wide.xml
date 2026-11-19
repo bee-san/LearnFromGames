@@ -65,6 +65,15 @@
                 android:autoSizeMaxTextSize="28sp" />
 
             <TextView
+                android:id="@+id/today_cards"
+                style="@style/Widget.Lfg.Figure"
+                android:layout_width="match_parent"
+                android:layout_height="32dp"
+                android:autoSizeMaxTextSize="28sp"
+                android:textColor="@color/widget_cards"
+                android:visibility="gone" />
+
+            <TextView
                 android:id="@+id/today_detail"
                 style="@style/Widget.Lfg.Detail"
                 android:layout_width="match_parent"

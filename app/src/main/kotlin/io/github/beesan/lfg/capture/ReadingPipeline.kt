@@ -64,6 +64,9 @@ class ReadingPipeline(
     /** Pictures are written behind the reading: the text is tappable before its picture is on disk. */
     private val pictures = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** Where each line's own picture goes, beside the frames. */
+    private val cropsDir = File(framesDir.parentFile, "crops")
+
     /**
      * Whether [bitmap] is the last picture again, by every fourth row of it. Text is taller than
      * four rows, so no change to it can hide between them; and this costs a fortieth of the probe.
@@ -144,12 +147,14 @@ class ReadingPipeline(
         val appearedNow = detector.changeStartedMs.takeIf { it in 1..nowMs } ?: nowMs
         val carriedTimes = _latest.value?.takeIf { it.game.id == game.id }
             ?.let { old -> old.lines.map { it.text }.zip(old.appearedAtMs).toMap() } ?: emptyMap()
+        val fresh = ArrayList<Pair<GameLine, Box>>()
         val saved = lines.map { line ->
             carried[line.text] ?: store.saveLine(
                 game = game, text = line.text, source = LineStore.SOURCE_OCR, engine = engine.name,
                 screenshotPath = framePath, displayId = displayId, box = line.box, nowMs = nowMs,
-            )
+            ).also { fresh += it to line.box }
         }
+        Perf.measure("save.crops") { saveCrops(bitmap, fresh, offsetX, offsetY) }
         _latest.value = Reading(game, displayId, lines, saved, framePath, nowMs, lines.map { carriedTimes[it.text] ?: appearedNow })
         return still
     }
@@ -159,6 +164,39 @@ class ReadingPipeline(
      * which takes longer than reading the text did; a card made in that fifth of a second goes
      * without, as it does when the picture has been cleared away.
      */
+    /**
+     * A picture of each new line alone, cut from [frame] and written behind
+     * the reading like the frame's. It is kept when the frame's picture is
+     * cleared, so an old line can still go on a card, and a crop beside its
+     * text is what a reader learns from.
+     */
+    private fun saveCrops(frame: Bitmap, fresh: List<Pair<GameLine, Box>>, offsetX: Int, offsetY: Int) {
+        for ((line, box) in fresh) {
+            val left = (box.left - offsetX - CROP_PAD).coerceIn(0, frame.width)
+            val top = (box.top - offsetY - CROP_PAD).coerceIn(0, frame.height)
+            val right = (box.right - offsetX + CROP_PAD).coerceIn(left, frame.width)
+            val bottom = (box.bottom - offsetY + CROP_PAD).coerceIn(top, frame.height)
+            if (right - left <= 0 || bottom - top <= 0) continue
+            val crop = try {
+                Bitmap.createBitmap(frame, left, top, right - left, bottom - top)
+            } catch (_: Throwable) {
+                continue
+            }
+            val file = File(cropsDir, "${line.id}.webp")
+            pictures.launch {
+                try {
+                    cropsDir.mkdirs()
+                    file.outputStream().use { crop.compress(Bitmap.CompressFormat.WEBP_LOSSY, 90, it) }
+                    store.setCrop(line.id, file.path)
+                } catch (_: Exception) {
+                    file.delete()
+                } finally {
+                    if (crop !== frame) crop.recycle()
+                }
+            }
+        }
+    }
+
     private fun saveFrame(frame: Bitmap): String? {
         val copy = try {
             frame.copy(Bitmap.Config.ARGB_8888, false)
@@ -179,3 +217,6 @@ class ReadingPipeline(
         return file.path
     }
 }
+
+/** Pixels kept around a line's box when it is cut out, so no stroke at its edge is lost. */
+private const val CROP_PAD = 4

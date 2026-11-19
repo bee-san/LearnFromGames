@@ -45,13 +45,16 @@ data class LookupState(
     val spanStart: Int = 0,
     val spanEnd: Int = 0,
     val entries: List<Entry> = emptyList(),
+    /** The entry the controller is on: what A adds and Y says. */
     val entryIndex: Int = 0,
-    val button: CardButton = CardButton.ADD,
+    /** Each entry's card button, in the order of [entries]. */
+    val buttons: List<CardButton> = emptyList(),
     val message: String? = null,
     /** The controller drives the app and the game receives nothing. */
     val controllerMode: Boolean = false,
 ) {
     val entry: Entry? get() = entries.getOrNull(entryIndex)
+    val button: CardButton get() = buttons.getOrNull(entryIndex) ?: CardButton.ADD
     val selected: Boolean get() = line in lines.indices
     val selectedLine: LookupLine? get() = lines.getOrNull(line)
 }
@@ -70,6 +73,8 @@ class LookupController(
     private val anki: AnkiBridge,
     private val store: LineStore,
     private val audio: WordAudio? = null,
+    /** Adds to a lookup's entries before they show: the user's notes on each word. */
+    private val decorate: suspend (List<Entry>) -> List<Entry> = { it },
 ) {
     private val _state = MutableStateFlow(LookupState())
     val state: StateFlow<LookupState> = _state
@@ -100,7 +105,7 @@ class LookupController(
         if (index !in target.text.indices) return
         selecting?.cancel()
         selecting = scope.launch {
-            val entries = io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index)) }
+            val entries = decorate(io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index)) })
             val first = entries.firstOrNull()
             val length = first?.matched?.length ?: Character.charCount(target.text.codePointAt(index))
             val end = (index + length).coerceAtMost(target.text.length)
@@ -108,13 +113,14 @@ class LookupController(
                 if (it.lines.getOrNull(line)?.text != target.text) return@update it
                 it.copy(
                     line = line, spanStart = index, spanEnd = end, entries = entries, entryIndex = 0,
-                    button = first?.let { e -> done[target.lineId to e.expression] } ?: CardButton.ADD,
+                    buttons = entries.map { e -> done[target.lineId to e.expression] ?: CardButton.ADD },
                     message = if (first == null) "No entry" else null,
                 )
             }
             if (first == null) return@launch
             target.lineId?.let { store.recordLookup(it, first.expression, first.reading) }
-            checkDuplicate(target, first)
+            // Every entry shows its own button, so each is checked; the first is looked at first.
+            for (entry in entries.distinctBy { it.expression }) checkDuplicate(target, entry)
         }
     }
 
@@ -128,13 +134,28 @@ class LookupController(
             }
         }
         if (!duplicate) return
-        _state.update { if (it.entry === entry && it.button == CardButton.ADD) it.copy(button = CardButton.IN_ANKI) else it }
+        setButtons(entry.expression, CardButton.IN_ANKI, onlyFrom = CardButton.ADD)
     }
 
-    /** Says the shown word, from the word audio when it is installed. */
-    fun playAudio() {
-        _state.value.entry?.let { audio?.play(it) }
+    /** Sets the button of each shown entry with this headword; the same word's entries share a card. */
+    private fun setButtons(expression: String, button: CardButton, onlyFrom: CardButton? = null, message: String? = null) = _state.update { s ->
+        if (s.entries.none { it.expression == expression }) return@update s
+        s.copy(
+            buttons = s.entries.mapIndexed { i, e ->
+                val now = s.buttons.getOrNull(i) ?: CardButton.ADD
+                if (e.expression == expression && (onlyFrom == null || now == onlyFrom)) button else now
+            },
+            message = message ?: s.message,
+        )
     }
+
+    /** Says a shown word, the controller's by default, from the word audio when it is installed. */
+    fun playAudio(index: Int = _state.value.entryIndex) {
+        _state.value.entries.getOrNull(index)?.let { audio?.play(it) }
+    }
+
+    /** Makes the entry at [index] the one A adds and a note is on. */
+    fun selectEntry(index: Int) = _state.update { if (index in it.entries.indices) it.copy(entryIndex = index) else it }
 
     fun nextEntry() = stepEntry(+1)
     fun previousEntry() = stepEntry(-1)
@@ -142,17 +163,34 @@ class LookupController(
     private fun stepEntry(step: Int) = _state.update {
         val index = (it.entryIndex + step).coerceIn(0, (it.entries.size - 1).coerceAtLeast(0))
         if (index == it.entryIndex) return@update it
-        val line = it.selectedLine
-        it.copy(entryIndex = index, message = null, button = done[line?.lineId to it.entries[index].expression] ?: CardButton.ADD)
+        it.copy(entryIndex = index, message = null)
     }
 
-    fun addCard() {
+    /**
+     * The card button of a shown entry, the controller's by default: adds the
+     * card, or opens it in AnkiDroid when it is there already.
+     */
+    fun addCard(index: Int = _state.value.entryIndex) {
         val state = _state.value
-        val entry = state.entry ?: return
+        val entry = state.entries.getOrNull(index) ?: return
         val line = state.selectedLine ?: return
         val lineId = line.lineId ?: return
-        if (state.button != CardButton.ADD) return
-        _state.update { it.copy(button = CardButton.ADDING, message = null) }
+        when (state.buttons.getOrNull(index) ?: CardButton.ADD) {
+            CardButton.IN_ANKI -> {
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        anki.target?.let { anki.noteId(it, entry.expression) }?.let { anki.openNote(it) }
+                    } catch (_: Exception) {
+                        // AnkiDroid is gone, refused, or too old for the link; the card is still there.
+                    }
+                }
+                return
+            }
+            CardButton.ADD -> Unit
+            else -> return
+        }
+        setButtons(entry.expression, CardButton.ADDING)
+        _state.update { it.copy(message = null) }
         scope.launch {
             val content = CardContent(
                 expression = entry.expression, reading = entry.reading, sentence = line.text,
@@ -168,14 +206,13 @@ class LookupController(
                 is CardResult.Waiting -> done[key] = CardButton.WAITING
                 is CardResult.Failed -> Unit
             }
-            _state.update {
-                // The reply may arrive after another word was chosen; leave that word's button alone.
-                if (it.entry !== entry) it else when (result) {
-                    is CardResult.Added -> it.copy(button = CardButton.IN_ANKI, message = "Card added")
-                    CardResult.Duplicate -> it.copy(button = CardButton.IN_ANKI)
-                    is CardResult.Waiting -> it.copy(button = CardButton.WAITING, message = result.reason)
-                    is CardResult.Failed -> it.copy(button = CardButton.ADD, message = result.reason)
-                }
+            // The reply may arrive after another word was chosen; that word's buttons are left alone.
+            if (_state.value.selectedLine?.lineId != lineId) return@launch
+            when (result) {
+                is CardResult.Added -> setButtons(entry.expression, CardButton.IN_ANKI, message = "Card added")
+                CardResult.Duplicate -> setButtons(entry.expression, CardButton.IN_ANKI)
+                is CardResult.Waiting -> setButtons(entry.expression, CardButton.WAITING, message = result.reason)
+                is CardResult.Failed -> setButtons(entry.expression, CardButton.ADD, message = result.reason)
             }
         }
     }
@@ -184,7 +221,7 @@ class LookupController(
     fun clear() {
         selecting?.cancel()
         resting?.cancel()
-        _state.update { it.copy(line = -1, spanStart = 0, spanEnd = 0, entries = emptyList(), entryIndex = 0, message = null, button = CardButton.ADD) }
+        _state.update { it.copy(line = -1, spanStart = 0, spanEnd = 0, entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList()) }
     }
 
     /**
@@ -238,7 +275,7 @@ class LookupController(
             _state.update {
                 it.copy(
                     line = to.line, spanStart = to.index, spanEnd = to.index + Character.charCount(text.codePointAt(to.index)),
-                    entries = emptyList(), entryIndex = 0, message = null, button = CardButton.ADD,
+                    entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList(),
                 )
             }
             resting = scope.launch {

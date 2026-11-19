@@ -21,8 +21,12 @@ import android.widget.ScrollView
 import android.widget.TextView
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
+import io.github.beesan.lfg.ui.EntryLink
 import io.github.beesan.lfg.ui.EntryWebView
+import io.github.beesan.lfg.ui.htmlState
+import io.github.beesan.lfg.ui.palette
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.lookup.LookupState
@@ -52,6 +56,8 @@ class OverlayHost(
     private val onHistoryLine: (LookupLine) -> Unit,
     private val styles: () -> List<EntryHtml.Style>,
     private val media: (dictionary: String, path: String) -> ByteArray?,
+    /** A note written on a word over the game: the line, the entry, the text, and whether to keep the picture. */
+    private val onSaveNote: (LookupLine, Entry, String, Boolean) -> Unit,
 ) {
     private val displays = service.getSystemService(DisplayManager::class.java)
     private val managers = HashMap<Int, Pair<Context, WindowManager>>()
@@ -71,11 +77,14 @@ class OverlayHost(
     private var gameInFront = false
     private var history: List<LookupLine> = emptyList()
 
+    /** The line and entry a note is being written on, while the note editor shows. */
+    private var noting: Pair<LookupLine, Entry>? = null
+
     val input = ControllerInput(
         controller,
         swapConfirm = { prefs().swapConfirm },
         onClose = { controller.exitControllerMode() },
-        onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(dy) },
+        onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(0, dy) },
         chordActive = chordActive,
     )
 
@@ -90,7 +99,8 @@ class OverlayHost(
         (context to context.getSystemService(WindowManager::class.java)).also { managers[displayId] = it }
     }
 
-    private inner class Win(val view: View, private val wm: WindowManager, private val flags: Int) {
+    private inner class Win(val view: View, private val wm: WindowManager, private val baseFlags: Int) {
+        private var flags = baseFlags
         private val lp = LayoutParams(1, 1, LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, flags, PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.TOP or Gravity.START
             layoutInDisplayCutoutMode = LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
@@ -126,6 +136,17 @@ class OverlayHost(
             lp.height = 1
             lp.flags = flags or LayoutParams.FLAG_NOT_TOUCHABLE or LayoutParams.FLAG_NOT_FOCUSABLE
             view.visibility = View.INVISIBLE
+            apply()
+        }
+
+        /** Focusable while a note is written in it, so the keyboard can come up; never otherwise. */
+        fun setFocusable(on: Boolean) {
+            val next = if (on) baseFlags and LayoutParams.FLAG_NOT_FOCUSABLE.inv() else baseFlags
+            if (next == flags) return
+            flags = next
+            lp.softInputMode = if (on) LayoutParams.SOFT_INPUT_STATE_VISIBLE or LayoutParams.SOFT_INPUT_ADJUST_PAN else LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
+            if (!shown) return
+            lp.flags = flags
             apply()
         }
 
@@ -166,6 +187,8 @@ class OverlayHost(
 
     fun onState(next: LookupState) {
         val wasController = state.controllerMode
+        // Another word, or none: a note half written on the last one is let go.
+        noting?.let { (line, _) -> if (!next.selected || next.selectedLine?.lineId != line.lineId) endNote() }
         state = next
         if (wasController && !next.controllerMode) input.release()
         render()
@@ -198,6 +221,18 @@ class OverlayHost(
 
     private fun render() {
         if (gameDisplay == Display.INVALID_DISPLAY) return
+        // A new scheme, or light and dark swapped: the views take their colours when made, so they are made again.
+        val palette = service.palette(prefs())
+        if (palette != Ink.palette) {
+            Ink.palette = palette
+            noting = null
+            (marks + listOfNotNull(popup, panel)).forEach { it.remove() }
+            marks.clear()
+            popup = null
+            popupView = null
+            panel = null
+            panelView = null
+        }
         val host = manager(gameDisplay) ?: return
         val lines = if (gameInFront) state.lines else emptyList()
 
@@ -239,7 +274,7 @@ class OverlayHost(
         }
 
         // Lookup mode: a window that can take focus, and so the controller.
-        if (state.controllerMode && gameInFront) {
+        if (state.controllerMode && gameInFront && noting == null) {
             val win = focus ?: Win(FocusView(host.first), host.second, FOCUS_FLAGS).also { focus = it }
             win.place(0, 0, 1, 1)
             win.view.requestFocus()
@@ -276,13 +311,11 @@ class OverlayHost(
         val view = popupView ?: PopupView(context).also { popupView = it }
         val win = popup ?: Win(view, host.second, POPUP_FLAGS).also { popup = it }
         view.show(state)
-        val width = minOf(context.dp(360f), screen.width * 45 / 100)
-        val maxHeight = screen.height * 55 / 100
-        view.measure(
-            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST),
-        )
-        val height = view.measuredHeight
+        // Portrait: near the full width, as Hachidori's popup is. Landscape: Yomitan's
+        // popup beside the word, which is what GameSentenceMiner's overlay shows.
+        val width = if (screen.height > screen.width) screen.width - 2 * context.dp(12f) else minOf(context.dp(360f), screen.width * 45 / 100)
+        // A fixed height, as Yomitan's popup has: the entries scroll inside it. "No entry" needs one line.
+        val height = if (state.entries.isEmpty()) context.dp(56f) else screen.height * 55 / 100
         val gap = context.dp(10f)
         // Clear of the line: above it when there is room, else below, else wherever fits.
         // Clear of the row the word is on; in a tall block the other rows may be covered.
@@ -357,70 +390,120 @@ class OverlayHost(
         override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean = input.onMotion(event) || super.dispatchGenericMotionEvent(event)
     }
 
-    private fun pager(state: LookupState): String {
-        val entry = state.entry ?: return ""
-        val count = if (state.entries.size > 1) "${state.entryIndex + 1}/${state.entries.size} · " else ""
-        return count + entry.sources.joinToString { it.substringBefore(" [") }
-    }
-
     private fun hints(context: Context): TextView {
         val swap = prefs().swapConfirm
         return context.keyHints(if (swap) "B" else "A", if (swap) "A" else "B")
     }
 
+    /**
+     * The popup beside the word: every entry of the lookup in one scrolling
+     * list, each with its own card and audio buttons, drawn with the same HTML
+     * as the app's entry page.
+     */
     @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
     private inner class PopupView(context: Context) : LinearLayout(context) {
-        val entry = EntryView(context)
-        private val button = CardButtonView(context) { controller.addCard() }
-        private val pager = context.label(12.5f, Ink.DIM)
+        val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }
         private val message = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
-        private val actions = LinearLayout(context)
+        private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
 
         init {
             orientation = VERTICAL
-            background = rounded(Ink.SURFACE, Ink.BORDER_STRONG, context.dp(12f).toFloat())
-            val pad = context.dp(14f)
-            setPadding(pad, context.dp(12f), pad, context.dp(12f))
-            entry.wrapSenses(context.dp(190f))
-            addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-            actions.orientation = HORIZONTAL
-            actions.gravity = Gravity.CENTER_VERTICAL
-            actions.addView(button, wrap())
-            actions.addView(View(context), LayoutParams(0, 1, 1f))
-            actions.addView(pager, wrap())
-            addView(actions, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
-            addView(message, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6f) })
+            background = rounded(Ink.BG, Ink.BORDER_STRONG, context.dp(10f).toFloat())
+            val pad = context.dp(1f)
+            setPadding(pad, pad, pad, context.dp(4f))
+            clipToOutline = true
+            addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            note.visibility = View.GONE
+            addView(note, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            val text = context.dp(14f)
+            message.setPadding(text, context.dp(4f), text, 0)
+            addView(message)
+            hints.setPadding(text, context.dp(4f), text, context.dp(2f))
             addView(hints)
             // A tap outside closes it.
             setOnTouchListener { _, event ->
-                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE && !state.controllerMode) controller.clear()
+                // Not while a note is written: the keyboard is outside the popup.
+                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE && !state.controllerMode && noting == null) controller.clear()
                 true
             }
         }
 
+        fun showNote(word: String) {
+            entry.visibility = View.GONE
+            message.visibility = View.GONE
+            hints.visibility = View.GONE
+            note.visibility = View.VISIBLE
+            note.open(word)
+        }
+
+        fun hideNote() {
+            note.visibility = View.GONE
+            entry.visibility = View.VISIBLE
+        }
+
         fun show(state: LookupState) {
-            entry.show(state.entry, state.message)
-            button.show(state.button)
-            button.visibility = if (state.entry == null || state.controllerMode) View.GONE else View.VISIBLE
-            pager.text = pager(state)
-            message.text = state.message.takeIf { state.entry != null } ?: ""
+            if (note.visibility == View.VISIBLE) return
+            showEntries(entry, state)
+            message.text = state.message.takeIf { state.entries.isNotEmpty() } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.GONE
         }
     }
 
-    /** The bottom screen: the line to tap, the entry, and Add card where a thumb already rests. */
+    /** A button in the entry list, by the entry's place in the list. */
+    private fun onEntryLink(link: EntryLink, index: Int) {
+        when (link) {
+            EntryLink.CARD -> controller.addCard(index)
+            EntryLink.AUDIO -> controller.playAudio(index)
+            EntryLink.NOTE -> startNote(index)
+        }
+    }
+
+    /** The note button of an entry: the popup, or the panel, becomes a note on its word. */
+    private fun startNote(index: Int) {
+        val entry = state.entries.getOrNull(index) ?: return
+        val line = state.selectedLine ?: return
+        noting = line to entry
+        if (panel?.shown == true) {
+            panelView?.showNote(entry.expression)
+            panel?.setFocusable(true)
+        } else {
+            popupView?.showNote(entry.expression)
+            popup?.setFocusable(true)
+        }
+        render()
+    }
+
+    private fun saveNote(text: String, keepPicture: Boolean) {
+        val (line, entry) = noting ?: return
+        if (text.isNotBlank()) onSaveNote(line, entry, text.trim(), keepPicture)
+        endNote()
+        render()
+    }
+
+    private fun endNote() {
+        if (noting == null) return
+        noting = null
+        popupView?.hideNote()
+        panelView?.hideNote()
+        popup?.setFocusable(false)
+        panel?.setFocusable(false)
+    }
+
+    private fun showEntries(view: EntryWebView, state: LookupState) =
+        view.showList(state.entries, styles(), state.buttons.map { it.htmlState() }, state.entryIndex, state.message, Ink.palette)
+
+    /** The bottom screen: the line to tap, then every entry of the lookup in one scrolling list, as in the popup. */
     @SuppressLint("ViewConstructor")
     private inner class PanelView(context: Context) : LinearLayout(context) {
         private val lines = LinesView(context) { line, index -> controller.select(line, index) }
 
         /** The entry in full: pictures, tables and each dictionary's own styling. */
-        val entry = EntryWebView(context, media)
+        val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }
+        private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
         private val historyList = LinearLayout(context)
         private val historyScroll = ScrollView(context)
-        private val button = CardButtonView(context) { controller.addCard() }
-        private val pager = context.label(12.5f, Ink.DIM)
         private val message = context.label(12.5f, Ink.DIM)
         private val stripsToggle = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
@@ -449,6 +532,8 @@ class OverlayHost(
             addView(divider(context))
 
             addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            note.visibility = View.GONE
+            addView(note, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
             historyList.orientation = VERTICAL
             historyScroll.isFocusable = false
             historyScroll.addView(historyList)
@@ -462,10 +547,8 @@ class OverlayHost(
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(pad, context.dp(10f), pad, context.dp(12f))
-                addView(button, wrap())
                 addView(hints, wrap())
                 addView(View(context), LayoutParams(0, 1, 1f))
-                addView(pager, wrap())
                 addView(stripsToggle, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(14f) })
             }
             stripsToggle.minHeight = context.dp(40f)
@@ -484,16 +567,25 @@ class OverlayHost(
             lines.visibility = if (state.lines.isEmpty()) View.GONE else View.VISIBLE
             empty.visibility = if (state.lines.isEmpty()) View.VISIBLE else View.GONE
             val showEntry = state.selected && (state.entry != null || state.message != null)
-            entry.visibility = if (showEntry) View.VISIBLE else View.GONE
-            historyScroll.visibility = if (showEntry) View.GONE else View.VISIBLE
-            if (showEntry) entry.show(state.entry, styles(), state.message)
-            button.show(state.button)
-            button.visibility = if (state.entry == null || state.controllerMode) View.GONE else View.VISIBLE
+            val writing = note.visibility == View.VISIBLE
+            entry.visibility = if (showEntry && !writing) View.VISIBLE else View.GONE
+            historyScroll.visibility = if (showEntry || writing) View.GONE else View.VISIBLE
+            if (showEntry) showEntries(entry, state)
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.GONE
-            pager.text = pager(state)
             message.text = state.message.takeIf { state.entry != null } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
             stripsToggle.text = if (stripsOn) "Tap on game: on" else "Tap on game: off"
+        }
+
+        fun showNote(word: String) {
+            entry.visibility = View.GONE
+            historyScroll.visibility = View.GONE
+            note.visibility = View.VISIBLE
+            note.open(word)
+        }
+
+        fun hideNote() {
+            note.visibility = View.GONE
         }
 
         /** While nothing is selected, the lines read before: tap one to look a word up in it. */

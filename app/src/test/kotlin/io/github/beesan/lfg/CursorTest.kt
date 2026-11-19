@@ -327,6 +327,15 @@ class CursorTest {
         assertEquals(900, chars.chart(Locale.UK).goal)             // the goal is above every day
         assertNull(WidgetData.of(days, ReadingGoals(), today).chart(Locale.UK).goal)
         assertEquals(listOf("1" to "h", "5" to "min"), WidgetData.timeParts(3900.0))
+
+        // A cards goal adds a third ring, inside the other two, and each day of the week gets its rings.
+        val cardDays = listOf(today, today, today, today.minusDays(2))
+        val carded = WidgetData.of(days, ReadingGoals(minutes = 60, chars = 5000), today, cardDays, cardGoal = 4)
+        assertEquals(listOf(0.5f to WidgetData.Ring.TIME, 0.4f to WidgetData.Ring.CHARS, 0.75f to WidgetData.Ring.CARDS), carded.rings)
+        assertEquals(listOf(0, 0, 0, 0, 1, 0, 3), carded.weekCards)
+        assertEquals(0.25f to WidgetData.Ring.CARDS, carded.weekRings[4][2])
+        assertFalse(carded.cardsMet)
+        assertEquals(timed.rings, WidgetData.of(days, ReadingGoals(minutes = 60, chars = 5000), today, cardDays).rings) // no goal, no ring
     }
 
     @Test
