@@ -29,6 +29,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -64,6 +65,11 @@ import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.data.Game
+import io.github.beesan.lfg.games.CocoonLog
+import io.github.beesan.lfg.games.Eden
+import io.github.beesan.lfg.games.EsdeLog
+import io.github.beesan.lfg.games.GameNameSources
+import io.github.beesan.lfg.games.RetroArchHistory
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
 import io.github.beesan.lfg.dict.WordAudio
@@ -129,6 +135,7 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Card("Controls", "The lookup shortcut", { onOpen(Page.CONTROLS) })
     Card("Text recognition", "The engine that reads the game", { onOpen(Page.RECOGNITION) })
     Card("Games", "Rename a game, turn tap strips off for it", { onOpen(Page.GAMES) })
+    Card("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", { onOpen(Page.GAME_NAMES) })
     Card("Sound and pictures", "Sentence audio, spoken lines and animated pictures", { onOpen(Page.MEDIA) })
     Card("Practice line", "Try a lookup and a card without a game", { onOpen(Page.PRACTICE) })
 }
@@ -411,6 +418,7 @@ fun RecognitionScreen(
 fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit, onBack: () -> Unit) = Page("Games", onBack) {
     val list = games.filter { it.packageName != ownPackage }
     if (list.isEmpty()) Text("No game has been read yet. A game is the app in front when it is fullscreen.", color = Lfg.Dim, fontSize = 15.sp)
+    val apps = list.filter { it.detected.isEmpty() }.associate { it.packageName to it.title }
     for (game in list) {
         var title by remember(game.id) { mutableStateOf(game.title) }
         val shape = RoundedCornerShape(8.dp)
@@ -430,16 +438,20 @@ fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit,
                 Spacer(Modifier.width(8.dp))
                 LfgButton("Rename", { onUpdate(game.copy(title = title.trim())) }, enabled = title.trim().isNotEmpty() && title.trim() != game.title)
             }
-            Text(game.packageName, color = Lfg.Dim, fontSize = 13.sp)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text("Read this app", color = Lfg.Text, fontSize = 15.sp)
-                    Text("Automatic reads it while it is fullscreen.", color = Lfg.Dim, fontSize = 13.sp)
+            if (game.detected.isEmpty()) {
+                Text(game.packageName, color = Lfg.Dim, fontSize = 13.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Read this app", color = Lfg.Text, fontSize = 15.sp)
+                        Text("Automatic reads it while it is fullscreen.", color = Lfg.Dim, fontSize = 13.sp)
+                    }
+                    Choice(
+                        listOf("${Game.READ_AUTO}" to "Automatic", "${Game.READ_ON}" to "Always", "${Game.READ_OFF}" to "Never"),
+                        "${game.reading}",
+                    ) { onUpdate(game.copy(reading = it.toInt())) }
                 }
-                Choice(
-                    listOf("${Game.READ_AUTO}" to "Automatic", "${Game.READ_ON}" to "Always", "${Game.READ_OFF}" to "Never"),
-                    "${game.reading}",
-                ) { onUpdate(game.copy(reading = it.toInt())) }
+            } else {
+                Text("In ${apps[game.packageName] ?: game.packageName}, named by ${game.namedBy}", color = Lfg.Dim, fontSize = 13.sp)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
@@ -449,6 +461,56 @@ fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit,
                 OnOff(game.tapStrips) { onUpdate(game.copy(tapStrips = it)) }
             }
         }
+    }
+}
+
+/** Where the game inside an emulator gets its name: front-ends' logs, RetroArch's history, Eden, and Steam. */
+@Composable
+fun GameNamesScreen(
+    prefs: Prefs,
+    status: Map<String, String>,
+    steamTest: String?,
+    onCheck: () -> Unit,
+    onChoose: (String) -> Unit,
+    onForget: (String) -> Unit,
+    onChange: ((Prefs) -> Prefs) -> Unit,
+    onTestSteam: () -> Unit,
+    onBack: () -> Unit,
+) = Page("Game names", onBack) {
+    LaunchedEffect(Unit) { onCheck() }
+    Text(
+        "An emulator runs many games, and Android only says which app is in front. Choose what you launch games from, " +
+            "and lines, stats and recaps go to the game itself instead of to RetroArch or Eden.",
+        color = Lfg.Dim, fontSize = 14.sp,
+    )
+    val folders = listOf(
+        Triple(CocoonLog.SOURCE, "Cocoon", "The folder with Cocoon's files, which has launch_debug.log in it or one folder down."),
+        Triple(EsdeLog.SOURCE, "ES-DE", "The ES-DE folder, with logs/es_log.txt in it."),
+        Triple(RetroArchHistory.SOURCE, "RetroArch", "The RetroArch folder, with playlists in it. For games started from RetroArch itself."),
+        Triple(Eden.SOURCE, "Eden", "In the file picker's side menu, choose Eden. For Switch games started from Eden itself."),
+    )
+    for ((source, name, help) in folders) {
+        val chosen = GameNameSources.folder(prefs, source).isNotEmpty()
+        Card(name, if (chosen) status[source] ?: "Looking…" else help) {
+            if (chosen) LfgButton("Forget", { onForget(source) })
+            LfgButton(if (chosen) "Change…" else "Choose…", { onChoose(source) }, primary = !chosen)
+        }
+    }
+    Text("Steam", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+    Text(
+        "For DroidDeck, GameNative and Winlator: Steam is asked what you are playing every 30 seconds while one is in front. " +
+            "Your profile's game details must be public, or the key must be your own account's.",
+        color = Lfg.Dim, fontSize = 14.sp,
+    )
+    SettingText("Steam profile", "Your SteamID64, profile link, or custom profile name", prefs.steamAccount) { v ->
+        onChange { it.copy(steamAccount = v.trim()) }
+    }
+    SettingText("Web API key", "From steamcommunity.com/dev/apikey. Kept on this device, and never in a backup.", prefs.steamKey, secret = true) { v ->
+        onChange { it.copy(steamKey = v.trim()) }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        LfgButton("Ask Steam", onTestSteam, primary = true, enabled = prefs.steamKey.isNotBlank() && prefs.steamAccount.isNotBlank())
+        steamTest?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp, modifier = Modifier.weight(1f)) }
     }
 }
 
@@ -772,4 +834,4 @@ private fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, MEDIA, PRACTICE }
+enum class Page { HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, MEDIA, PRACTICE }

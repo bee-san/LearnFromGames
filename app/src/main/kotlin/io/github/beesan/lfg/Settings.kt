@@ -55,6 +55,15 @@ data class Prefs(
     /** When the last automatic backup was made, in milliseconds since 1970, and its size in bytes; 0 for none yet. */
     val backupLast: Long = 0,
     val backupLastSize: Long = 0,
+    /** Folders the game inside an emulator is named from (Settings › Game names): document trees' links, or empty. */
+    val cocoonFolder: String = "",
+    val esdeFolder: String = "",
+    val retroArchFolder: String = "",
+    val edenFolder: String = "",
+    /** The Steam profile asked what is being played: a SteamID64, a profile link or a custom name. */
+    val steamAccount: String = "",
+    /** The Steam Web API key. Kept apart from the rest, like the OpenRouter key. */
+    val steamKey: String = "",
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
@@ -77,7 +86,7 @@ data class Prefs(
 class Settings(context: Context) {
     private val store = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
-    /** The OpenRouter key, in a file of its own so a backup of the settings never holds it. */
+    /** The OpenRouter and Steam keys, in a file of their own so a backup of the settings never holds them. */
     private val secrets = context.getSharedPreferences("secrets", Context.MODE_PRIVATE)
     private val _prefs = MutableStateFlow(read())
     val prefs: StateFlow<Prefs> = _prefs
@@ -108,6 +117,12 @@ class Settings(context: Context) {
             gsmFile = store.getBoolean("gsmFile", d.gsmFile),
             backupLast = store.getLong("backupLast", d.backupLast),
             backupLastSize = store.getLong("backupLastSize", d.backupLastSize),
+            cocoonFolder = store.getString("cocoonFolder", d.cocoonFolder) ?: d.cocoonFolder,
+            esdeFolder = store.getString("esdeFolder", d.esdeFolder) ?: d.esdeFolder,
+            retroArchFolder = store.getString("retroArchFolder", d.retroArchFolder) ?: d.retroArchFolder,
+            edenFolder = store.getString("edenFolder", d.edenFolder) ?: d.edenFolder,
+            steamAccount = store.getString("steamAccount", d.steamAccount) ?: d.steamAccount,
+            steamKey = secrets.getString("steamKey", d.steamKey) ?: d.steamKey,
         )
     }
 
@@ -137,8 +152,13 @@ class Settings(context: Context) {
             .putBoolean("gsmFile", next.gsmFile)
             .putLong("backupLast", next.backupLast)
             .putLong("backupLastSize", next.backupLastSize)
+            .putString("cocoonFolder", next.cocoonFolder)
+            .putString("esdeFolder", next.esdeFolder)
+            .putString("retroArchFolder", next.retroArchFolder)
+            .putString("edenFolder", next.edenFolder)
+            .putString("steamAccount", next.steamAccount)
             .apply()
-        secrets.edit().putString("openRouterKey", next.openRouterKey).apply()
+        secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
         _prefs.value = next
     }
 }

@@ -16,6 +16,21 @@ class LineStore(private val db: LfgDatabase, private val onSaved: (GameLine) -> 
         return db.games().byPackage(packageName)!!
     }
 
+    /**
+     * The row for a game named inside [host]: made the first time it is seen,
+     * reading and tap strips as the app's own row has them.
+     */
+    suspend fun namedGame(host: Game, detected: String, title: String, namedBy: String): Game {
+        db.games().byDetected(host.packageName, detected)?.let { return it }
+        db.games().insert(
+            Game(
+                id = UUID.randomUUID().toString(), packageName = host.packageName, title = title, detected = detected,
+                namedBy = namedBy, tapStrips = host.tapStrips, reading = host.reading,
+            ),
+        )
+        return db.games().byDetected(host.packageName, detected)!!
+    }
+
     suspend fun saveLine(
         game: Game,
         text: String,

@@ -42,12 +42,20 @@ data class GameLine(
     val translation: String? = null,
 )
 
-/** A game is the app in front, by default: an emulator is one "game" until it is renamed or split. */
-@Entity(tableName = "games", indices = [Index("package", unique = true)])
+/**
+ * A game is the app in front, by default. An emulator, or a Steam player, also
+ * has a row for each game named inside it ([detected]), from Settings › Game
+ * names; its own row, with [detected] empty, holds what nothing named.
+ */
+@Entity(tableName = "games", indices = [Index("package", "detected", unique = true)])
 data class Game(
     @PrimaryKey val id: String,
     @ColumnInfo(name = "package") val packageName: String,
     val title: String,
+    /** The named game's key ([io.github.beesan.lfg.games.GameTitle.key]), or empty for the app itself. */
+    @ColumnInfo(defaultValue = "") val detected: String = "",
+    /** What named it: Cocoon, ES-DE, RetroArch, Eden or Steam; empty for the app itself. */
+    @ColumnInfo(name = "named_by", defaultValue = "") val namedBy: String = "",
     /** Invisible tap strips over each line; off for touch-driven games. */
     @ColumnInfo(name = "tap_strips") val tapStrips: Boolean = true,
     /**

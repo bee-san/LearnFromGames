@@ -77,6 +77,11 @@ class MainActivity : ComponentActivity() {
             val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { model.askRestore(it) }
             val saveLines = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { model.exportLinesTo(it) }
             val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { model.chooseBackupFolder(it) }
+            val gameNameStatus by model.gameNameStatus.collectAsStateWithLifecycle()
+            val steamTest by model.steamTest.collectAsStateWithLifecycle()
+            // Which source the folder being picked is for; kept across the picker in case Android recreates this activity.
+            var pickingFor by rememberSaveable { mutableStateOf("") }
+            val pickGameFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { model.chooseGameFolder(pickingFor, it) }
             val styles by model.styles.collectAsStateWithLifecycle()
             val dictionaries by model.dictionaries.collectAsStateWithLifecycle()
             val sources by model.sources.collectAsStateWithLifecycle()
@@ -274,6 +279,20 @@ class MainActivity : ComponentActivity() {
                             prefs, reader, screenAi, ScreenAi.available(), model::updatePrefs, { model.downloadScreenAi() }, ::back,
                         )
                         page == Page.GAMES -> GamesScreen(games, packageName, { model.updateGame(it) }, ::back)
+                        page == Page.GAME_NAMES -> GameNamesScreen(
+                            prefs = prefs,
+                            status = gameNameStatus,
+                            steamTest = steamTest,
+                            onCheck = model::checkGameNames,
+                            onChoose = { source ->
+                                pickingFor = source
+                                pickGameFolder.launch(null)
+                            },
+                            onForget = model::forgetGameFolder,
+                            onChange = model::updatePrefs,
+                            onTestSteam = model::testSteam,
+                            onBack = ::back,
+                        )
                         page == Page.MEDIA -> MediaScreen(
                             prefs, recording, model::updatePrefs,
                             onStartRecording = { microphone.launch(android.Manifest.permission.RECORD_AUDIO) },
