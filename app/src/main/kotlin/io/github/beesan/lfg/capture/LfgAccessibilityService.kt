@@ -38,6 +38,8 @@ import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.overlay.OverlayHost
 import io.github.beesan.lfg.ui.MainActivity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -62,7 +64,13 @@ import kotlin.coroutines.resume
  * without a further prompt.
  */
 class LfgAccessibilityService : AccessibilityService() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /**
+     * A task that throws (a full disk, a database error, AnkiDroid going away) is logged and the
+     * rest carries on: uncaught, it would take the whole app down with it, game reading and all.
+     */
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main.immediate + CoroutineExceptionHandler { _, e -> Log.e(TAG, "a service task failed", e) },
+    )
     private lateinit var app: App
     private lateinit var pipeline: ReadingPipeline
     private lateinit var controller: LookupController
@@ -238,6 +246,7 @@ class LfgAccessibilityService : AccessibilityService() {
         _pipeline.value = null
         if (::overlays.isInitialized) overlays.destroy()
         scope.cancel()
+        shots.shutdown()
     }
 
     // ── the controller ───────────────────────────────────────────────────────
@@ -347,10 +356,19 @@ class LfgAccessibilityService : AccessibilityService() {
             }
             val game = playing?.game ?: withContext(Dispatchers.IO) { app.lines.gameFor(target.packageName, titleOf(target.packageName), app = true) }
             if (game.reading == Game.READ_OFF) {
-                toast("Reading is off for ${game.title} in Settings › Games.")
+                toast("Reading is off for ${game.title} in Settings › Games and apps.")
                 return@launch
             }
-            if (continuous && region != null) startContinuous(game, target, region) else readOnce(game, target, region, thenController)
+            if (continuous && region != null) {
+                startContinuous(game, target, region)
+            } else {
+                // The read button comes back however the reading ends.
+                try {
+                    readOnce(game, target, region, thenController)
+                } finally {
+                    shooting = false
+                }
+            }
         }
     }
 
@@ -369,7 +387,15 @@ class LfgAccessibilityService : AccessibilityService() {
         val screen = Box(target.bounds.left, target.bounds.top, target.bounds.right, target.bounds.bottom)
         val treeLines = TreeText.lines(tree.nodes, screen)
 
-        val shot = if (Readers.reader != null) shoot(target) else null
+        // Android gives a service about three screenshots a second; one refused is tried again once.
+        val shot = if (Readers.reader != null) {
+            shoot(target)?.takeIf { it.bitmap != null || it.secure } ?: run {
+                delay(INTERVAL_MS)
+                shoot(target)
+            }
+        } else {
+            null
+        }
         val reader = Readers.reader
         val ocrLines = if (shot?.bitmap != null && reader != null) {
             withContext(Dispatchers.Default) { readPixels(reader, shot.bitmap, shot.offsetX, shot.offsetY, region) }
@@ -383,10 +409,16 @@ class LfgAccessibilityService : AccessibilityService() {
         Log.i(TAG, "read on demand: ${treeLines.size} from the tree, ${ocrLines.size} by OCR, ${tree.sensitive.size} sensitive, kept ${lines.size}, secure=${shot?.secure}")
         if (lines.isEmpty()) {
             shot?.bitmap?.recycle()
-            toast(if (shot?.secure == true) "This app blocks pictures of its screen, and shares no text here." else "No text was found here.")
+            toast(
+                when {
+                    shot?.secure != true -> "No text was found here."
+                    shot.bitmap == null -> "This app blocks pictures of its screen, and shares no text here."
+                    else -> "The screen came back black: the app may block pictures of it, or it was dark. Try again when something is showing."
+                },
+            )
             return
         }
-        if (shot?.secure == true) toast("This app blocks pictures of its screen; only the text it shares was read.")
+        if (shot?.secure == true && shot.bitmap == null) toast("This app blocks pictures of its screen; only the text it shares was read.")
 
         val fromTree = treeLines.toHashSet()
         val now = Asked(game, target.packageName, target.displayId, target.windowId, continuous = false, frame = shot?.bitmap, framePath = null)
@@ -433,16 +465,23 @@ class LfgAccessibilityService : AccessibilityService() {
             }
         }
         val looking = scope.launch {
+            var blackLooks = 0
             while (isActive && asked?.continuous == true) {
                 delay(INTERVAL_MS)
                 if (Readers.reader == null || controller.state.value.controllerMode) continue
                 val shot = shoot(target, quiet = true) ?: continue
                 if (shot.secure) {
                     shot.bitmap?.recycle()
-                    toast("This app blocks pictures of its screen, so LFG cannot read it.")
-                    endAsked()
-                    break
+                    // Android 14 says when a window is secure; before it, a secure window is only black,
+                    // and so is a fade, a loading screen or a dark scene. Black for a while is the app's doing.
+                    if (shot.bitmap == null || ++blackLooks * INTERVAL_MS >= BLACK_GIVE_UP_MS) {
+                        toast("This app blocks pictures of its screen, so LFG cannot read it.")
+                        endAsked()
+                        break
+                    }
+                    continue
                 }
+                blackLooks = 0
                 val whole = shot.bitmap ?: continue
                 val left = (region.left - shot.offsetX).coerceIn(0, whole.width - 1)
                 val top = (region.top - shot.offsetY).coerceIn(0, whole.height - 1)
@@ -592,7 +631,15 @@ class LfgAccessibilityService : AccessibilityService() {
             // A screen that has not changed for a while is looked at half as often, until it does.
             delay(if (stillLooks >= RESTING_AFTER) INTERVAL_MS * 2 else INTERVAL_MS)
             if (++ticks % PERF_EVERY == 0) Perf.report().takeIf { it.isNotEmpty() }?.let { Log.i("LfgPerf", it) }
-            val now = Perf.measure("front") { findFront() }
+            val now = try {
+                Perf.measure("front") { findFront() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A database error naming the game: this look is skipped, the next tries again.
+                Log.w(TAG, "finding the game in front failed", e)
+                null
+            }
             front = now
             val prefs = app.settings.prefs.value
             if (!shooting) overlays.showReadButton(ordinaryFront?.displayId?.takeIf { prefs.readButton && (now == null || asked != null) })
@@ -610,6 +657,8 @@ class LfgAccessibilityService : AccessibilityService() {
             }
             // No reader, no picture: nothing is captured until something can read it.
             if (now == null || Readers.reader == null) continue
+            // A reading asked for is taking its own picture: Android allows only about three a second.
+            if (shooting) continue
             // While a word is being read, the screen is the player's; and the cursor must not move under them.
             if (controller.state.value.controllerMode) continue
 
@@ -878,6 +927,9 @@ class LfgAccessibilityService : AccessibilityService() {
 
         // Android answers a service's screenshot request at most once per 333 ms.
         private const val INTERVAL_MS = 350L
+
+        /** How long a region read waits through a black screen before taking it for an app that blocks pictures. */
+        private const val BLACK_GIVE_UP_MS = 15_000L
 
         /** Timings go to the log (tag LfgPerf) every this many looks at the screen. */
         private const val PERF_EVERY = 60

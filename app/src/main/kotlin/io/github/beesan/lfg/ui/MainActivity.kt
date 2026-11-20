@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
             val practice by model.practice.collectAsStateWithLifecycle()
             val practiceDone by model.practiceDone.collectAsStateWithLifecycle()
             val lines by model.lines.collectAsStateWithLifecycle()
+            val linesLoaded by model.linesLoaded.collectAsStateWithLifecycle()
             val games by model.games.collectAsStateWithLifecycle()
             val stats by model.stats.collectAsStateWithLifecycle()
             val lookup by model.lineLookup.state.collectAsStateWithLifecycle()
@@ -181,6 +182,8 @@ class MainActivity : ComponentActivity() {
                         }
                         page == Page.HOME -> LinesScreen(
                             lines = lines,
+                            shortcut = shortcutLabel(prefs),
+                            loaded = linesLoaded,
                             problem = null,
                             onProblem = {},
                             onOpenLine = {

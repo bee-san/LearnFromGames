@@ -2,6 +2,7 @@
 package io.github.beesan.lfg.ocr
 
 import android.content.Context
+import io.github.beesan.lfg.core.downloadProblem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -57,7 +58,7 @@ class ModelStore(context: Context) {
             _screenAi.value = ModelState.Ready
             true
         } catch (e: Exception) {
-            _screenAi.value = ModelState.Failed(e.message ?: "The ScreenAI download failed.")
+            _screenAi.value = ModelState.Failed(downloadProblem(e, "The text recognition download failed."))
             false
         }
     }

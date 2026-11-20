@@ -2,6 +2,7 @@
 package io.github.beesan.lfg.dict
 
 import android.content.Context
+import io.github.beesan.lfg.core.downloadProblem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -260,7 +261,7 @@ class DictionaryRepository(private val context: Context) {
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    e.message ?: "${source.name} could not be downloaded."
+                    downloadProblem(e, "${source.name} could not be downloaded.")
                 }
                 if (error != null) {
                     lastError = error

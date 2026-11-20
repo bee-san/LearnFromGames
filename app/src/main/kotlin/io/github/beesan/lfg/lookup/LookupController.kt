@@ -231,7 +231,7 @@ class LookupController(
             when (result) {
                 is CardResult.Added -> setButtons(entry.expression, CardButton.IN_ANKI, message = "Card added")
                 CardResult.Duplicate -> setButtons(entry.expression, CardButton.IN_ANKI)
-                is CardResult.Waiting -> setButtons(entry.expression, CardButton.WAITING, message = result.reason)
+                is CardResult.Waiting -> setButtons(entry.expression, CardButton.WAITING, message = result.reason + " The card is kept here until it is.")
                 is CardResult.Failed -> setButtons(entry.expression, CardButton.ADD, message = result.reason)
             }
         }

@@ -137,6 +137,7 @@ class EntryWebView(
                 // New styles or colours: the whole page, once.
                 listHead = head
                 listBody = body
+                pageBody = body
                 load(head + body + EntryHtml.LIST_END)
                 state
             }
@@ -149,7 +150,14 @@ class EntryWebView(
             }
             else -> state
         }
-        if (loaded) run(script) else pending = script
+        if (loaded) {
+            run(script)
+            pageBody = listBody
+        } else {
+            // Still loading: whatever comes next replaces what was waiting, so it must carry the
+            // entries too, or a change of buttons alone would leave the page as it loaded.
+            pending = if (listBody != pageBody) "lfgShow(" + JsonPrimitive(listBody) + ");" + state else state
+        }
     }
 
     /**
@@ -163,11 +171,15 @@ class EntryWebView(
         val head = Perf.measure("entry.head") { EntryHtml.listHead(styles, palette) }
         listHead = head
         listBody = ""
+        pageBody = ""
         load(head + EntryHtml.LIST_END)
     }
 
     private var listHead: String? = null
     private var listBody: String? = null
+
+    /** The entries the page holds, or will once it has loaded and run what is waiting. */
+    private var pageBody: String? = null
     private var swapStarted = 0L
 
     private fun run(script: String) {

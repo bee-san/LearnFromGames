@@ -115,8 +115,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _practiceDone = MutableStateFlow(ui.getBoolean("practiceDone", false))
     val practiceDone: StateFlow<Boolean> = _practiceDone
 
-    val lines: StateFlow<List<GameLine>> =
-        app.database.lines().recent(300).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** The newest lines; null until the store has answered, so an empty list really is empty. */
+    private val recentLines: StateFlow<List<GameLine>?> =
+        app.database.lines().recent(300).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val lines: StateFlow<List<GameLine>> = recentLines.map { it.orEmpty() }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val linesLoaded: StateFlow<Boolean> = recentLines.map { it != null }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val games: StateFlow<List<Game>> =
         app.database.games().all().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -180,6 +183,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         if (status == AnkiStatus.READY && app.anki.target == null) connectAnki()
+        // AnkiDroid back (installed again, or its permission given again): cards made meanwhile go now.
+        if (status == AnkiStatus.READY && app.anki.target != null) viewModelScope.launch { runCatching { app.cards.flushPending() } }
         if (status == AnkiStatus.READY) {
             viewModelScope.launch {
                 val never = withContext(Dispatchers.IO) { runCatching { app.anki.neverSynced() }.getOrDefault(false) }

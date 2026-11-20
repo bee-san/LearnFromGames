@@ -135,7 +135,7 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Card("Dictionaries", "Add, order and remove dictionaries", { onOpen(Page.DICTIONARIES) })
     Card("Anki", "The note type and deck cards go to", { onOpen(Page.ANKI) })
     Card("Controls", "The lookup shortcut", { onOpen(Page.CONTROLS) })
-    Card("Text recognition", "ScreenAI, which reads the game", { onOpen(Page.RECOGNITION) })
+    Card("Text recognition", "ScreenAI, which reads the screen", { onOpen(Page.RECOGNITION) })
     Card("Games and apps", "Rename one, choose when it is read, turn tap strips off", { onOpen(Page.GAMES) })
     Card("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", { onOpen(Page.GAME_NAMES) })
     Card("Sound and pictures", "Sentence audio, spoken lines and animated pictures", { onOpen(Page.MEDIA) })
@@ -413,7 +413,7 @@ fun RecognitionScreen(
         if (!screenAiBuilt) "Not in this build of the app." else modelStatus(screenAi, "Installed") +
             if (screenAi is ModelState.Missing) ". Its files come from the package Google publishes for Chromium." else "",
     ) {
-        if (screenAiBuilt && (screenAi is ModelState.Missing || screenAi is ModelState.Failed)) LfgButton("Download", onDownloadScreenAi)
+        if (screenAiBuilt && (screenAi is ModelState.Missing || screenAi is ModelState.Failed)) LfgButton(if (screenAi is ModelState.Failed) "Try again" else "Download", onDownloadScreenAi)
     }
     Text("VOCR watches every picture for new text; ScreenAI then reads it once it has stopped moving.", color = Lfg.Dim, fontSize = 14.sp)
 }
@@ -446,9 +446,9 @@ fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit,
                 Text(game.packageName, color = Lfg.Dim, fontSize = 13.sp)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Column(Modifier.weight(1f)) {
-                        Text(if (game.app) "Read this app · an app" else "Read this app", color = Lfg.Text, fontSize = 15.sp)
+                        Text(if (game.app) "Read this app (not a game)" else "Read this app", color = Lfg.Text, fontSize = 15.sp)
                         Text(
-                            "Automatic reads it while it is fullscreen, and otherwise when you ask. On demand only when you ask.",
+                            "Automatic reads it while it is fullscreen, and otherwise when you ask. On demand only when you ask. Always reads it whenever it is in front; Never leaves it alone.",
                             color = Lfg.Dim, fontSize = 13.sp,
                         )
                     }
@@ -547,7 +547,7 @@ fun MediaScreen(prefs: Prefs, recording: Boolean, onChange: ((Prefs) -> Prefs) -
 fun AppsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Other apps", onBack) {
     Text(
         "LFG leaves an app alone while its status bar shows, so its scrolling and taps stay its own. Ask, and it reads what is on " +
-            "screen: the app's own text where it shares it, which is exact and instant, and OCR for pictures, video and anything drawn.",
+            "screen: the app's own text where it shares it, which is exact and instant, and text recognition for pictures, video and anything drawn.",
         color = Lfg.Dim, fontSize = 14.sp,
     )
     Text("Ways to ask", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
@@ -590,7 +590,7 @@ private fun goalTime(minutes: Int) = when {
 /** The daily goals the stats screen measures against. */
 @Composable
 fun GoalsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Reading goals", onBack) {
-    Card("Hours per day", "Reading time, as Stats counts it.") {
+    Card("Time per day", "Reading time, as Stats counts it.") {
         Stepper(if (prefs.goalMinutes == 0) "Off" else goalTime(prefs.goalMinutes), prefs.goalMinutes, ReadingGoals.MINUTE_STEPS) { v ->
             onChange { it.copy(goalMinutes = v) }
         }
@@ -744,7 +744,7 @@ private fun Goals(goals: ReadingGoals, progress: ReadingGoals.Progress?, dayCoun
         if (goals.minutes > 0) {
             val parts = durationParts(t.seconds)
             Tile(
-                "Hours per day", parts.dropLast(1) + parts.last().let { (n, unit) -> n to "$unit of ${goalTime(goals.minutes)}" },
+                "Time per day", parts.dropLast(1) + parts.last().let { (n, unit) -> n to "$unit of ${goalTime(goals.minutes)}" },
                 met(progress.timeDays), (t.seconds / (goals.minutes * 60)).toFloat(), goals.timeMet(t),
             )
         }

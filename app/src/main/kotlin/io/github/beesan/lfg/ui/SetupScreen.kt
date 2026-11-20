@@ -108,7 +108,7 @@ fun SetupScreen(
             reader is ModelState.Missing -> SetupRow(
                 name,
                 if (ScreenAi.available()) "Dictionaries installed. Text recognition: ${waiting.replaceFirstChar { it.lowercase() }}"
-                else "This build has no text recognition (tools/build_screenai.sh).",
+                else "This build of LFG cannot read the screen. Install a release from GitHub.",
                 error = !ScreenAi.available(),
             )
             else -> SetupRow(

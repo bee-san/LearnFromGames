@@ -47,7 +47,7 @@ flowchart LR
     F --> J[Stats]
 ```
 
-Everything runs on the device. The only network use is fetching the readers' model files and the starter dictionaries at first run, from their publishers (GitHub, jitendex.org's releases and api.jiten.moe).
+Reading and lookup run on the device. The network is used for the first-run downloads (the starter dictionaries from GitHub, jitendex.org's releases and api.jiten.moe; ScreenAI's files from Chromium's package store) and, only when you turn them on, for translation and recaps through OpenRouter and for game names from Steam's Web API.
 
 ## Where it stands
 
@@ -162,7 +162,7 @@ x86_64 emulator, 931 screens:
 
 | Reader | Character errors | Lines exactly right | Time per screen (median) |
 | --- | --- | --- | --- |
-| ScreenAI (the default) | 3.6% | 88% | 240–500 ms |
+| ScreenAI (the reader) | 3.6% | 88% | 240–500 ms |
 | VOCR (the change probe) | 4.4% | 86% | 100 ms |
 
 VOCR6 was fine-tuned on these games; on the two held out from it, it misses
@@ -196,14 +196,14 @@ screens, not real games.
 | --- | --- | --- | --- |
 | ScreenAI, rows as read | 11 of 20 | 0.875 | 11 |
 | ScreenAI, grouped | 18 of 20 | 0.995 | 0 |
-| meikiocr, rows as read | 10 of 20 | 0.873 | 10 |
-| meikiocr, grouped | 17 of 20 | 0.992 | 0 |
+| meikiocr (since removed), rows as read | 10 of 20 | 0.873 | 10 |
+| meikiocr (since removed), grouped | 17 of 20 | 0.992 | 0 |
 
 "Grouped" is what the app does with a reading (`core/Blocks.kt`): rows that
 sit like the lines of one text box become one piece, so a wrapped sentence is
 one line in the store and on a card, and a word cut by the line break can be
 tapped and is marked on both rows; furigana is dropped. What is still wrong:
-ScreenAI took 頷 for 領; meikiocr dropped a digit and a comma in status text;
+ScreenAI took 頷 for 領; meikiocr, the reader before it, dropped a digit and a comma in status text;
 and one case is the corpus's own fault (its vertical punctuation is drawn where
 no game puts it). A small kana-only name plate set as close to its line as
 furigana, over a kanji, is taken for furigana.
@@ -217,7 +217,7 @@ furigana, over a kanji, is taken for furigana.
   testing that put tap strips over Android's file picker and swallowed taps on
   its labels. An app is now read automatically only while it is fullscreen (no
   status or navigation bar on its screen), or if it declares itself a game or
-  is a known emulator. Settings › Games has Automatic, Always and Never for each.
+  is a known emulator. Settings › Games and apps has Automatic, On demand, Always and Never for each.
 - **Pictures of the game.** From Android 14 the service pictures the game's
   own window, so the app's mark and popup are never in a frame. On Android 13
   it pictures the whole screen: reading pauses while a word is marked on the
@@ -253,7 +253,7 @@ furigana, over a kanji, is taken for furigana.
 
 ## Install
 
-There are no releases yet. Once a tag is pushed, the release workflow attaches an arm64 APK to a GitHub release, which [Obtainium](https://github.com/ImranR98/Obtainium) can follow. Until then, build it:
+Releases are on GitHub, one APK for each kind of device (arm64 for handhelds, x86_64 for emulators), and [Obtainium](https://github.com/ImranR98/Obtainium) can follow them. To build it yourself:
 
 ## Build
 
@@ -293,7 +293,7 @@ printf 'storeFile=release.jks\nstorePassword=…\nkeyAlias=lfg\nkeyPassword=…\
 `.github/workflows/release.yml` does the same on GitHub when a tag like
 `v0.2.0` is pushed, and attaches the APKs to a release for Obtainium; its
 header lists the four secrets it needs. `check.yml` runs the tests and lint on
-every push. **Neither workflow has run yet.**
+every push.
 
 ScreenAI's library is built separately, once, and is not kept in git. Without
 it the app still builds, but nothing reads the screen.
@@ -350,7 +350,7 @@ accessibility services while it runs.
 
 ## Layout
 
-- `app/src/main/cpp` — `lfg_dict` (hoshidicts to JSON), `lfg_vocr`, `lfg_screenai`, `lfg_webp`, `lfg_jni`, and host tests
+- `app/src/main/cpp` — `lfg_dict` (hoshidicts to JSON), `lfg_vocr`, `lfg_screenai`, `lfg_webp`, `lfg_pixels` (frame fingerprints, quick WebP), `lfg_jni`, and host tests
 - `app/src/main/kotlin/io/github/beesan/lfg`
   - `core` — the line record, grouping rows into text blocks, tap hit-testing, settle detection, the text cursor, reading-time rules
   - `ocr` — VOCR, ScreenAI, its download, and TextClean
@@ -362,9 +362,13 @@ accessibility services while it runs.
   - `overlay` — tap strips, mark, popup, panel, controller input
   - `ui` — set-up, lines, settings, stats
   - `widget` — the home screen widgets
+  - `ask` — translation and recaps through OpenRouter
+  - `backup` — backup and restore, by hand and on a schedule
+  - `games` — naming the game inside an emulator, and covers
+  - `Diagnostics.kt` — the report in Settings › Help and diagnostics
 - `fakegame` — the stand-in game
 - `third_party/hoshidicts`, `third_party/libwebp` — submodules; `third_party/vocr` — VOCR's runtime, copied
-- `tools` — `build_screenai.sh`, `make_test_screens.py`, `make_ocr_corpus.py`, `score_ocr.py`, `bench.sh`, `virtual_pad.py`
+- `tools` — `build_screenai.sh`, `make_test_screens.py`, `make_ocr_corpus.py`, `score_ocr.py`, `ocr_bench.py`, `bench.sh`, `check.sh`, `export_silero.py`, `virtual_pad.py`
 
 ## Licences
 

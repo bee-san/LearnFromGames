@@ -3,14 +3,17 @@ package io.github.beesan.lfg.data
 
 import io.github.beesan.lfg.ask.Recap
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 
 /**
  * The screens saved with each line, kept for a while and then let go, so a
  * handheld does not fill up over months of play. The line itself, its crop
  * (the line alone, a few KB) and its text are never deleted. A screen is kept
- * for good when a card was made from its line or a recap chose the line as a
- * moment to look back at: those are the pictures worth having later.
+ * for good when a card was made from its line, a card waiting for AnkiDroid
+ * still needs it, or a recap chose the line as a moment to look back at.
  */
 class PictureKeeper(private val db: LfgDatabase, private val files: File) {
     val frames = File(files, "frames")
@@ -21,7 +24,11 @@ class PictureKeeper(private val db: LfgDatabase, private val files: File) {
         val moments = db.recaps().all().flatMap { row ->
             runCatching { JSON.decodeFromString<Recap>(row.json).moments.map { it.lineId } }.getOrDefault(emptyList())
         }.filter { it.isNotEmpty() }.distinct()
-        return lines.keptPictures().toSet() + moments.chunked(500).flatMap { lines.picturesOf(it) }
+        // A card still waiting for AnkiDroid is sent later with the picture it was made with.
+        val waiting = db.cards().pending().mapNotNull { card ->
+            runCatching { JSON.parseToJsonElement(card.payload).jsonObject["picturePath"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+        }
+        return lines.keptPictures().toSet() + moments.chunked(500).flatMap { lines.picturesOf(it) } + waiting
     }
 
     /**

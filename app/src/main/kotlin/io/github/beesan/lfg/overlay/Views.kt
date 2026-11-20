@@ -126,8 +126,9 @@ internal class LinesView(context: Context, private val onTap: (line: Int, index:
 }
 
 /** `A Add card · B Close · ◀ ▶ Word · ▲ ▼ Line`: what replaces the button while the controller drives. */
-internal fun Context.keyHints(confirm: String, close: String): TextView = label(12.5f, Ink.DIM).apply {
-    text = "$confirm Add card    $close Close    Y Listen    ◀ ▶ Word    ▲ ▼ Line    L1 R1 Entry"
+internal fun Context.keyHints(confirm: String, close: String, listen: Boolean = true): TextView = label(12.5f, Ink.DIM).apply {
+    // Y says the word only with word audio installed (Settings › Dictionaries); without it, it is not offered.
+    text = "$confirm Add card    $close Close    " + (if (listen) "Y Listen    " else "") + "◀ ▶ Word    ▲ ▼ Line    L1 R1 Entry"
     setPadding(0, dp(6f), 0, 0)
 }
 

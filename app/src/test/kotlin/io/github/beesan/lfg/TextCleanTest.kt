@@ -82,6 +82,20 @@ class TextCleanTest {
         assertEquals("J…………", clean("J…………"))
     }
 
+    /** ScreenAI can give one box to several dots, or to a whole word with no symbols of its own. */
+    @Test(timeout = 2000)
+    fun aBoxHoldingSeveralDotsEnds() {
+        fun line(vararg pieces: String): TextLine {
+            var at = 0
+            val chars = pieces.mapIndexed { i, p -> CharBox(at, at + p.length, Box(i * 40, 0, i * 40 + 40, 40)).also { at += p.length } }
+            return TextLine(pieces.joinToString(""), Box(0, 0, pieces.size * 40, 40), chars)
+        }
+        assertEquals("あ..い", TextClean.line(line("あ", "..", "い"))!!.text)
+        assertEquals("あ・・・", TextClean.line(line("あ", "・・", "・"))!!.text)
+        assertEquals("ン・・ス", TextClean.line(line("ン", "・", "・ス"))!!.text)
+        assertEquals("あ…い", TextClean.line(line("あ", "・", "・", "・", "い"))!!.text)
+    }
+
     @Test
     fun aLineWithoutCharacterBoxesIsCleanedToo() {
         assertEquals("コーヒー…", TextClean.line(TextLine("コ一ヒ一...", Box(0, 0, 100, 40), emptyList()))!!.text)

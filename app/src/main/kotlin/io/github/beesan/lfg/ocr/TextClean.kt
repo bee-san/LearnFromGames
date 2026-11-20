@@ -121,17 +121,20 @@ object TextClean {
         i = 0
         while (i < pieces.size) {
             val c = cp(pieces[i])
-            val dot = c == '.'.code || (c == '・'.code && cp(pieces.getOrNull(i + 1)) == '・'.code)
-            if (!dot) {
-                i++
-                continue
-            }
+            // A run is of single dots only: a box ScreenAI gave to several ("..", or a word with no
+            // symbols of its own) is left as it is, and stepping past it always moves on.
+            fun single(k: Int) = pieces.getOrNull(k)?.let { cp(it) == c && it.text.length == 1 } == true
             var j = i
-            while (j < pieces.size && cp(pieces[j]) == c && pieces[j].text.length == 1) j++
+            if (c == '.'.code || c == '・'.code) while (single(j)) j++
             val run = j - i
-            val ellipses = if (c == '.'.code || run >= 3) run / 3 else 1
+            // Periods three to an ellipsis; middle dots two or more, so a lone one in a name stays.
+            val ellipses = when {
+                c == '.'.code -> run / 3
+                c == '・'.code && run >= 2 -> if (run >= 3) run / 3 else 1
+                else -> 0
+            }
             if (ellipses == 0) {
-                i = j
+                i = maxOf(j, i + 1)
                 continue
             }
             fun span(from: Int, to: Int) = pieces.subList(from, to).fold(null as Box?) { box, p -> union(box, p.box) }

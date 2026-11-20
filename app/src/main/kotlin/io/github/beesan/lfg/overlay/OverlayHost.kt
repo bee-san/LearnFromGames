@@ -467,7 +467,8 @@ class OverlayHost(
 
     fun destroy() {
         input.release()
-        handler.removeCallbacks(hideNotice)
+        // Everything posted, the popup's prewarm and the checks among it, would run on windows that are gone.
+        handler.removeCallbacksAndMessages(null)
         notice?.remove()
         picker?.remove()
         readButton?.remove()
@@ -613,7 +614,7 @@ class OverlayHost(
 
     private fun hints(context: Context): TextView {
         val swap = prefs().swapConfirm
-        return context.keyHints(if (swap) "B" else "A", if (swap) "A" else "B")
+        return context.keyHints(if (swap) "B" else "A", if (swap) "A" else "B", listen = (context.applicationContext as? io.github.beesan.lfg.App)?.wordAudio?.info?.value != null)
     }
 
     /**
@@ -760,7 +761,7 @@ class OverlayHost(
             sessionLine.visibility = View.GONE
             addView(sessionLine, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
             addView(top, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-            empty.text = "Waiting for text in the game. In an ordinary app, ask with the LFG tile, the LFG button or the lookup shortcut."
+            empty.text = "Waiting for text in the game. In an ordinary app, ask with the Read screen tile, the LFG button or the lookup shortcut."
             empty.setPadding(pad, 0, pad, context.dp(10f))
             addView(empty)
             addView(divider(context))
@@ -813,7 +814,7 @@ class OverlayHost(
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.GONE
             message.text = state.message.takeIf { state.entry != null } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
-            stripsToggle.text = if (stripsOn) "Tap on game: on" else "Tap on game: off"
+            stripsToggle.text = if (stripsOn) "Tap strips: on" else "Tap strips: off"
         }
 
         fun showNote(word: String) {

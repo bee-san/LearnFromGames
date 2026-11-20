@@ -62,6 +62,8 @@ fun LinesScreen(
     onSettings: () -> Unit,
     onNotes: () -> Unit,
     onRecap: () -> Unit,
+    shortcut: String = "L3 + R3",
+    loaded: Boolean = true,
 ) {
     val time = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val zone = remember { ZoneId.systemDefault() }
@@ -71,7 +73,7 @@ fun LinesScreen(
             LfgButton("Notes", onNotes)
             LfgButton("Recap", onRecap)
             LfgButton("Stats", onStats)
-            LfgButton("Open settings", onSettings)
+            LfgButton("Settings", onSettings)
         }
         if (problem != null) {
             Row(
@@ -84,7 +86,8 @@ fun LinesScreen(
         }
         HorizontalDivider(color = Lfg.Border)
         if (lines.isEmpty()) {
-            Text("No lines yet. Open a game. Tap a word, or press L3 + R3.", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 16.dp))
+            // Before the store has answered, an empty list says nothing yet.
+            if (loaded) Text("No lines yet. Open a game. Tap a word, or press $shortcut.", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 16.dp))
             return
         }
         LazyColumn {
