@@ -58,12 +58,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             val setup by model.setup.collectAsStateWithLifecycle()
             val dictionary by model.dictionary.collectAsStateWithLifecycle()
+            val fetchingDictionary by model.fetchingDictionary.collectAsStateWithLifecycle()
             val reader by model.reader.collectAsStateWithLifecycle()
-            val screenAi by model.screenAi.collectAsStateWithLifecycle()
             val prefs by model.prefs.collectAsStateWithLifecycle()
             val practice by model.practice.collectAsStateWithLifecycle()
             val practiceDone by model.practiceDone.collectAsStateWithLifecycle()
             val lines by model.lines.collectAsStateWithLifecycle()
+            val linesLoaded by model.linesLoaded.collectAsStateWithLifecycle()
             val games by model.games.collectAsStateWithLifecycle()
             val stats by model.stats.collectAsStateWithLifecycle()
             val lookup by model.lineLookup.state.collectAsStateWithLifecycle()
@@ -161,6 +162,8 @@ class MainActivity : ComponentActivity() {
                                 onConnectAnki = { ankiPermission.launch(AnkiBridge.PERMISSION) },
                                 onInstallAnki = ::openAnkiDroidListing,
                                 onRetryDownloads = model::retryDownloads,
+                                wifiOnly = prefs.wifiOnly,
+                                onWifiOnly = model::setWifiOnly,
                             )
                         }
                         showPractice -> Box(Modifier.verticalScroll(rememberScrollState())) {
@@ -179,6 +182,8 @@ class MainActivity : ComponentActivity() {
                         }
                         page == Page.HOME -> LinesScreen(
                             lines = lines,
+                            shortcut = shortcutLabel(prefs),
+                            loaded = linesLoaded,
                             problem = null,
                             onProblem = {},
                             onOpenLine = {
@@ -260,6 +265,7 @@ class MainActivity : ComponentActivity() {
                         page == Page.SETTINGS -> SettingsScreen(onOpen = { page = it }, onBack = ::back)
                         page == Page.DICTIONARIES -> DictionariesScreen(
                             state = dictionary,
+                            fetching = fetchingDictionary,
                             busy = dictionaries,
                             onAdd = { pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
                             onMove = { title, up -> model.moveDictionary(title, up) },
@@ -288,9 +294,22 @@ class MainActivity : ComponentActivity() {
                         )
                         page == Page.TRANSLATION -> TranslationScreen(prefs, model::updatePrefs, keyTest, model::testKey, ::back)
                         page == Page.CONTROLS -> ControlsScreen(prefs, model::updatePrefs, ::back)
-                        page == Page.RECOGNITION -> RecognitionScreen(
-                            prefs, reader, screenAi, ScreenAi.available(), model::updatePrefs, { model.downloadScreenAi() }, ::back,
-                        )
+                        page == Page.RECOGNITION -> RecognitionScreen(reader, ScreenAi.available(), { model.downloadScreenAi() }, ::back)
+                        page == Page.STORAGE -> {
+                            val storage by model.storage.collectAsStateWithLifecycle()
+                            LaunchedEffect(Unit) { model.measureStorage() }
+                            StorageScreen(
+                                storage.usage, prefs.keepScreensDays, storage.message,
+                                onKeepDays = { days -> model.updatePrefs { it.copy(keepScreensDays = days) } },
+                                onCleanUp = model::cleanUpStorage,
+                                onBack = ::back,
+                            )
+                        }
+                        page == Page.HELP -> {
+                            val report by model.diagnostics.collectAsStateWithLifecycle()
+                            LaunchedEffect(Unit) { model.gatherDiagnostics() }
+                            HelpScreen(report, onCopy = { report?.let(::copyReport) }, onShare = { report?.let(::shareReport) }, onBack = ::back)
+                        }
                         page == Page.GAMES -> GamesScreen(games, packageName, { model.updateGame(it) }, ::back)
                         page == Page.GAME_NAMES -> GameNamesScreen(
                             prefs = prefs,
@@ -306,6 +325,7 @@ class MainActivity : ComponentActivity() {
                             onTestSteam = model::testSteam,
                             onBack = ::back,
                         )
+                        page == Page.APPS -> AppsScreen(prefs, model::updatePrefs, onBack = ::back)
                         page == Page.MEDIA -> MediaScreen(
                             prefs, recording, model::updatePrefs,
                             onStartRecording = { microphone.launch(android.Manifest.permission.RECORD_AUDIO) },
@@ -349,6 +369,20 @@ class MainActivity : ComponentActivity() {
         if (!open(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${AnkiBridge.ANKIDROID_PACKAGE}")))) {
             open(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ankidroid/Anki-Android/releases/latest")))
         }
+    }
+
+    private fun copyReport(report: String) {
+        val clipboard = getSystemService(android.content.ClipboardManager::class.java)
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("LFG diagnostics", report))
+        // Android 13 and later show their own notice of what was copied.
+        if (android.os.Build.VERSION.SDK_INT < 33) android.widget.Toast.makeText(this, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun shareReport(report: String) {
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, "LFG diagnostics")
+            .putExtra(Intent.EXTRA_TEXT, report)
+        open(Intent.createChooser(send, "Send the report"))
     }
 
     private fun open(intent: Intent): Boolean = try {

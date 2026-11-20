@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // ScreenAI through screenai_ocr's libchromescreenai.so (tools/build_screenai.sh).
-// The library is optional: it is opened at run time, so an app built without
-// it still works and reads with meikiocr.
+// The library is optional: it is opened at run time, so the app builds without
+// it, though nothing then reads the screen.
 #include <dlfcn.h>
 #include <jni.h>
 

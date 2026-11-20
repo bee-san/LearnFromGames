@@ -14,6 +14,8 @@ import io.github.beesan.lfg.dict.DictionaryRepository
 import io.github.beesan.lfg.dict.WordAudio
 import io.github.beesan.lfg.dict.DictionaryWorker
 import io.github.beesan.lfg.ocr.ModelStore
+import io.github.beesan.lfg.ocr.ScreenAi
+import io.github.beesan.lfg.data.PictureKeeper
 import io.github.beesan.lfg.widget.StatsWidgets
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,13 +61,16 @@ class App : Application() {
     val media by lazy { MediaAttacher(this, scope, anki, database, { settings.prefs.value }, Speech(this)) }
     val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media"), wordAudio) { StatsWidgets.requestUpdate(this) } }
     val models by lazy { ModelStore(this) }
+    val pictures by lazy { PictureKeeper(database, filesDir) }
     val notes by lazy { Notes(database, File(filesDir, "notes")) }
     val gameFinder by lazy { GameFinder(this, scope) { settings.prefs.value } }
 
     override fun onCreate() {
         super.onCreate()
-        // The dictionary is already downloading when the set-up screen first shows.
-        if (dictionaries.state.value is DictState.Missing || models.meikiFiles() == null || models.screenAiDir() == null) DictionaryWorker.start(this)
+        // The dictionaries are already downloading when the set-up screen first shows; any that failed are tried again.
+        val readerMissing = models.screenAiDir() == null && ScreenAi.available()
+        if (dictionaries.state.value is DictState.Missing || dictionaries.defaultsPending() || readerMissing) DictionaryWorker.start(this, wifiOnly = settings.prefs.value.wifiOnly)
+        scope.launch(Dispatchers.IO) { models.forgetMeiki() }
         // The widgets measure against the goals and draw in the chosen colours, so they redraw as soon as one changes.
         scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
         // WorkManager keeps the automatic backup across restarts; it changes only when the setting does.

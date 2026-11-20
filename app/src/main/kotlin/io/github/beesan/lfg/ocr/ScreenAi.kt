@@ -80,7 +80,73 @@ class ScreenAi private constructor() {
             if (content.isBlank()) return null
             // A space after the last word is the recogniser's, not the line's.
             val trimmed = content.trimEnd()
-            return TextLine(trimmed, bounds, chars.filter { it.start < trimmed.length }, vertical = direction == 3L)
+            val vertical = direction == 3L
+            val (fixed, boxes) = ellipses(trimmed, chars.filter { it.start < trimmed.length }, vertical, bounds)
+            return TextLine(fixed, bounds, boxes, vertical = vertical)
+        }
+
+        private const val DOTS = "…・.‥･·⋯"
+
+        /**
+         * How a run of dots `w` wide, in a line whose characters are `h` tall,
+         * becomes a count of ellipses: round(w / (CELL * h) + LEAN). Fitted on
+         * 356 runs of the OCR bench (tools/ocr_bench.py), where it gives the
+         * game's own count for 343; one `…` spans about 0.94 h, two about 2.2 h.
+         */
+        private const val CELL = 1.4
+        private const val LEAN = 0.3
+
+        /**
+         * ScreenAI reads an ellipsis as a smear of dots of any number: `……`
+         * comes out as `……………` or `・…・・`. Each run of dots is read again
+         * from how much of the line it covers, so
+         * the text says what the game drew. A lone `・` is a middle dot, as in
+         * a name, and stays.
+         */
+        internal fun ellipses(text: String, chars: List<CharBox>, vertical: Boolean, line: Box): Pair<String, List<CharBox>> {
+            fun symbol(c: CharBox) = text.substring(c.start, c.end)
+            fun dot(c: CharBox) = symbol(c).let { it.length == 1 && it[0] in DOTS }
+            if (chars.none(::dot)) return text to chars
+            fun across(b: Box) = if (vertical) b.width else b.height
+            fun lo(b: Box) = if (vertical) b.top else b.left
+            fun hi(b: Box) = if (vertical) b.bottom else b.right
+            val solid = chars.filterNot(::dot).map { across(it.box) }.sorted()
+            val cell = CELL * (if (solid.isEmpty()) across(line) else solid[solid.size / 2]).coerceAtLeast(1)
+
+            val out = StringBuilder(text.substring(0, chars.first().start))
+            val boxes = ArrayList<CharBox>(chars.size)
+            var i = 0
+            while (i < chars.size) {
+                if (!dot(chars[i])) {
+                    boxes += CharBox(out.length, out.length + chars[i].end - chars[i].start, chars[i].box)
+                    out.append(text, chars[i].start, chars.getOrNull(i + 1)?.start ?: text.length)
+                    i++
+                    continue
+                }
+                var j = i
+                while (j < chars.size && dot(chars[j])) j++
+                val run = chars.subList(i, j)
+                val start = run.minOf { lo(it.box) }
+                val end = run.maxOf { hi(it.box) }
+                if (run.size == 1 && symbol(run[0]) != "…") {
+                    boxes += CharBox(out.length, out.length + 1, run[0].box)
+                    out.append(symbol(run[0]))
+                } else {
+                    val count = Math.round((end - start) / cell + LEAN).toInt().coerceAtLeast(1)
+                    val first = run.minOf { if (vertical) it.box.left else it.box.top }
+                    val last = run.maxOf { if (vertical) it.box.right else it.box.bottom }
+                    for (k in 0 until count) {
+                        val a = start + (end - start) * k / count
+                        val b = start + (end - start) * (k + 1) / count
+                        boxes += CharBox(out.length, out.length + 1, if (vertical) Box(first, a, last, b) else Box(a, first, b, last))
+                        out.append('…')
+                    }
+                }
+                // Whatever followed the run in the text, such as a space.
+                out.append(text, run.last().end, chars.getOrNull(j)?.start ?: text.length)
+                i = j
+            }
+            return out.toString() to boxes
         }
 
         private fun word(bytes: ByteArray, text: StringBuilder, chars: MutableList<CharBox>) {

@@ -1,6 +1,5 @@
 package io.github.beesan.lfg
 
-import ai.onnxruntime.OrtEnvironment
 import io.github.beesan.lfg.capture.VoiceFinder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -21,10 +20,7 @@ import kotlin.math.sin
 class VoiceFinderTest {
     private val rate = 44_100
 
-    private fun finder(): VoiceFinder {
-        val env = OrtEnvironment.getEnvironment()
-        return VoiceFinder(env, env.createSession(File("src/main/assets/vad/silero_vad.onnx").path))
-    }
+    private fun finder(): VoiceFinder = File("src/main/assets/${VoiceFinder.ASSET}").inputStream().use { VoiceFinder.load(it) }
 
     /** The voice at 44.1 kHz, as the game's sound is kept. */
     private fun voice(): ShortArray {
@@ -57,7 +53,7 @@ class VoiceFinderTest {
         val start = lead + spoken.first()
         val end = lead + spoken.last()
 
-        val trimmed = finder().use { it.trim(clip, rate, marginMs = 0) }
+        val trimmed = finder().trim(clip, rate, marginMs = 0)
         val from = (0..clip.size - trimmed.size).first { clip.copyOfRange(it, it + trimmed.size).contentEquals(trimmed) }
         val to = from + trimmed.size
         val tolerance = rate * 3 / 10
@@ -67,7 +63,7 @@ class VoiceFinderTest {
 
     @Test
     fun `finds no voice in music alone`() {
-        assertEquals(0, finder().use { it.trim(music(4.0), rate) }.size)
+        assertEquals(0, finder().trim(music(4.0), rate).size)
     }
 
     @Test

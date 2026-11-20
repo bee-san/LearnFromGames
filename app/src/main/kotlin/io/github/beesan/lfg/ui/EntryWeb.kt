@@ -13,10 +13,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.beesan.lfg.App
 import io.github.beesan.lfg.core.Palette
+import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.lookup.CardButton
 import io.github.beesan.lfg.lookup.LookupState
+import kotlinx.serialization.json.JsonPrimitive
 import java.io.ByteArrayInputStream
 
 /** What a button in the list of entries asks for, with the entry's place in the list. */
@@ -91,8 +93,9 @@ class EntryWebView(
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
+                if (!loaded && loadStarted != 0L) Perf.add("entry.load", System.nanoTime() - loadStarted)
                 loaded = true
-                pending?.let { evaluateJavascript(it, null) }
+                pending?.let { run(it) }
                 pending = null
             }
         }
@@ -100,6 +103,7 @@ class EntryWebView(
 
     fun show(entry: Entry?, styles: List<EntryHtml.Style>, message: String?, palette: Palette) {
         this.entry = entry
+        listHead = null
         setBackgroundColor(palette.bg)
         val html = EntryHtml.page(entry, styles, message, audio = entry != null && audio?.has(entry) == true, palette = palette)
         load(html)
@@ -112,25 +116,87 @@ class EntryWebView(
      * put when a button changes; when L1 or R1 moves the controller to
      * another entry, the list scrolls to it.
      */
-    fun showList(entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, message: String?, palette: Palette) {
+    fun showList(
+        entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, message: String?, palette: Palette,
+        notes: Boolean = true,
+    ) {
         setBackgroundColor(palette.bg)
         val scroll = entries === listed && current != listedCurrent
         listed = entries
         listedCurrent = current
         if (entries.isEmpty()) {
+            listHead = null
             load(EntryHtml.page(null, styles, message, palette = palette))
             return
         }
-        load(EntryHtml.list(entries, styles, palette) { audio?.has(it) == true })
-        val script = "lfgState([" + states.joinToString(",") { "'$it'" } + "],$current,$scroll)"
-        if (loaded) evaluateJavascript(script, null) else pending = script
+        val head = Perf.measure("entry.head") { EntryHtml.listHead(styles, palette) }
+        val body = Perf.measure("entry.html") { EntryHtml.listBody(entries, notes) { audio?.has(it) == true } }
+        val state = "lfgState([" + states.joinToString(",") { "'$it'" } + "],$current,$scroll)"
+        val script = when {
+            head != listHead -> {
+                // New styles or colours: the whole page, once.
+                listHead = head
+                listBody = body
+                pageBody = body
+                load(head + body + EntryHtml.LIST_END)
+                state
+            }
+            // The page is already there: only the entries change.
+            body != listBody -> {
+                listBody = body
+                swapStarted = System.nanoTime()
+                Perf.add("entry.kchars", body.length * 1000L)
+                "lfgShow(" + JsonPrimitive(body) + ");" + state
+            }
+            else -> state
+        }
+        if (loaded) {
+            run(script)
+            pageBody = listBody
+        } else {
+            // Still loading: whatever comes next replaces what was waiting, so it must carry the
+            // entries too, or a change of buttons alone would leave the page as it loaded.
+            pending = if (listBody != pageBody) "lfgShow(" + JsonPrimitive(listBody) + ");" + state else state
+        }
     }
+
+    /**
+     * Loads the list's page with no entries yet, so the first lookup only
+     * swaps its entries in (about 30 ms) instead of starting the page from
+     * nothing (200-570 ms on the emulator). Does nothing once a page is up.
+     */
+    fun prewarm(styles: List<EntryHtml.Style>, palette: Palette) {
+        if (shown != null) return
+        setBackgroundColor(palette.bg)
+        val head = Perf.measure("entry.head") { EntryHtml.listHead(styles, palette) }
+        listHead = head
+        listBody = ""
+        pageBody = ""
+        load(head + EntryHtml.LIST_END)
+    }
+
+    private var listHead: String? = null
+    private var listBody: String? = null
+
+    /** The entries the page holds, or will once it has loaded and run what is waiting. */
+    private var pageBody: String? = null
+    private var swapStarted = 0L
+
+    private fun run(script: String) {
+        val started = swapStarted
+        swapStarted = 0L
+        evaluateJavascript(script) { if (started != 0L) Perf.add("entry.swap", System.nanoTime() - started) }
+    }
+
+    private var loadStarted = 0L
 
     private fun load(html: String) {
         if (html == shown) return
         shown = html
         loaded = false
         pending = null
+        loadStarted = System.nanoTime()
+        Perf.add("entry.kchars", html.length * 1000L)  // shows as "ms": thousands of characters
         loadDataWithBaseURL("${EntryHtml.MEDIA_SCHEME}://entry/", html, "text/html", "utf-8", null)
     }
 
@@ -153,10 +219,11 @@ fun EntryList(
     media: (String, String) -> ByteArray?,
     onLink: (EntryLink, Int) -> Unit,
     modifier: Modifier = Modifier,
+    notes: Boolean = true,
 ) {
     AndroidView(
         factory = { EntryWebView(it, media, onLink) },
-        update = { it.showList(state.entries, styles, state.buttons.map { b -> b.htmlState() }, state.entryIndex, state.message, Lfg.palette) },
+        update = { it.showList(state.entries, styles, state.buttons.map { b -> b.htmlState() }, state.entryIndex, state.message, Lfg.palette, notes) },
         modifier = modifier,
     )
 }

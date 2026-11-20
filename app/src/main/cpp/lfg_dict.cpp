@@ -188,6 +188,24 @@ std::string Session::lookup(const std::string& text, int max_results, size_t sca
   return out;
 }
 
+int Session::match_length(const std::string& text, size_t scan_length) const {
+  if (lookup_ == nullptr || text.empty()) return 0;
+  const hd_lookup_result* results = nullptr;
+  size_t count = 0;
+  hd_lookup_results* handle = hd_lookup_run(lookup_, text.c_str(), 1, scan_length, &results, &count);
+  if (handle == nullptr) return 0;
+  int units = 0;
+  if (count > 0) {
+    // UTF-8 to UTF-16 units: a four-byte character is a surrogate pair, every other is one unit.
+    for (unsigned char c : view(results[0].matched)) {
+      if ((c & 0xC0) == 0x80) continue;
+      units += (c >= 0xF0) ? 2 : 1;
+    }
+  }
+  hd_lookup_results_free(handle);
+  return units;
+}
+
 std::string Session::styles() const {
   std::string out = "[";
   if (query_ != nullptr) {

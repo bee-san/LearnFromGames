@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: the OCR benchmark (tools/ocr_bench.py) and the picture-writing one. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <instrumentation
+        android:name="io.github.beesan.lfg.OcrBench"
+        android:label="LFG OCR bench"
+        android:targetPackage="io.github.beesan.lfg" />
+    <instrumentation
+        android:name="io.github.beesan.lfg.PixelsBench"
+        android:label="LFG pixels bench"
+        android:targetPackage="io.github.beesan.lfg" />
+</manifest>

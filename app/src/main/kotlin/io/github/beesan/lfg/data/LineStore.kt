@@ -9,9 +9,10 @@ class LineStore(private val db: LfgDatabase, private val onSaved: (GameLine) -> 
 
     suspend fun gameOrNull(packageName: String): Game? = db.games().byPackage(packageName)
 
-    suspend fun gameFor(packageName: String, title: String): Game {
+    /** The app's row, made the first time; [app] marks a row first made by a reading asked for over an ordinary app. */
+    suspend fun gameFor(packageName: String, title: String, app: Boolean = false): Game {
         db.games().byPackage(packageName)?.let { return it }
-        db.games().insert(Game(id = UUID.randomUUID().toString(), packageName = packageName, title = title))
+        db.games().insert(Game(id = UUID.randomUUID().toString(), packageName = packageName, title = title, app = app))
         // Re-read: a concurrent insert of the same package is ignored, and its row wins.
         return db.games().byPackage(packageName)!!
     }
@@ -78,6 +79,12 @@ class LineStore(private val db: LfgDatabase, private val onSaved: (GameLine) -> 
 
     companion object {
         const val SOURCE_OCR = "ocr"
+
+        /** Text an app gave through accessibility: exact, with no reader involved. */
+        const val SOURCE_TREE = "tree"
+
+        /** Text selected in an app and sent to LFG from Android's text-selection menu. */
+        const val SOURCE_SELECTION = "selection"
         const val SOURCE_PRACTICE = "practice"
     }
 }

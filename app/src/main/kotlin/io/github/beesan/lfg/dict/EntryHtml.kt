@@ -48,7 +48,7 @@ object EntryHtml {
     fun page(entry: Entry?, styles: List<Style>, message: String? = null, audio: Boolean = false, palette: Palette = DEFAULT_PALETTE): String = buildString {
         append("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>")
         append(colours(palette)).append(BASE_CSS)
-        for (style in styles) append(scope(style.css, style.dictionary))
+        for (style in styles) append(scoped(style))
         append("</style></head><body>")
         if (entry == null) {
             append("<p class=\"lfg-message\">").append(escape(message ?: "")).append("</p>")
@@ -67,17 +67,41 @@ object EntryHtml {
      * `lfgState`, so pressing a button does not reload the page and lose the
      * scroll.
      */
-    fun list(entries: List<Entry>, styles: List<Style>, palette: Palette, audio: (Entry) -> Boolean): String = buildString {
+    /** [notes] off leaves out each entry's note button, where there is no game's line to hang a note on. */
+    fun list(entries: List<Entry>, styles: List<Style>, palette: Palette, notes: Boolean = true, audio: (Entry) -> Boolean): String =
+        listHead(styles, palette) + listBody(entries, notes, audio) + LIST_END
+
+    /**
+     * The list's page up to its body: the styles and the script. It changes only
+     * with the dictionaries or the colours, so a WebView keeps it loaded and
+     * swaps in each lookup's [listBody] with `lfgShow`, rather than parsing the
+     * page and every dictionary's stylesheet again on each tap.
+     */
+    fun listHead(styles: List<Style>, palette: Palette): String = buildString {
         append("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>")
         append(colours(palette)).append(BASE_CSS)
-        for (style in styles) append(scope(style.css, style.dictionary))
+        for (style in styles) append(scoped(style))
         append("</style><script>").append(STATE_SCRIPT).append("</script></head><body>")
+    }
+
+    /** The entries of a lookup, the inside of the list's body. */
+    fun listBody(entries: List<Entry>, notes: Boolean = true, audio: (Entry) -> Boolean): String = buildString {
         entries.forEachIndexed { i, entry ->
             append("<section class=\"lfg-entry\" id=\"e").append(i).append("\">")
-            append(body(entry, audio(entry), index = i))
+            append(body(entry, audio(entry), index = i, notes = notes))
             append("</section>")
         }
-        append("</body></html>")
+    }
+
+    const val LIST_END = "</body></html>"
+
+    // Scoping a stylesheet is most of the time a page takes to build (a grammar dictionary's is 48 KB), and the stylesheets rarely change.
+    private val scopedCache = object : LinkedHashMap<Style, String>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Style, String>?) = size > 16
+    }
+
+    private fun scoped(style: Style): String = synchronized(scopedCache) {
+        scopedCache.getOrPut(style) { scope(style.css, style.dictionary) }
     }
 
     /**
@@ -87,7 +111,7 @@ object EntryHtml {
      * [index] is the entry's place in the popup's list, or null in a page of
      * one entry.
      */
-    fun body(entry: Entry, audio: Boolean = false, index: Int? = null): String = buildString {
+    fun body(entry: Entry, audio: Boolean = false, index: Int? = null, notes: Boolean = true): String = buildString {
         val accents = Pronunciation.accents(entry)
         append("<div class=\"lfg-head\"><span class=\"lfg-term\" lang=\"ja\">").append(furigana(entry.expression, entry.reading)).append("</span>")
         accents.firstOrNull()?.let { append(graph(it)) }
@@ -96,9 +120,11 @@ object EntryHtml {
             append("<a class=\"lfg-button lfg-audio\" href=\"").append(AUDIO_URL).append(if (index != null) "/$index" else "")
             append("\" aria-label=\"Listen\" title=\"Listen\">").append(SPEAKER).append("</a>")
         }
-        if (index != null) {
+        if (index != null && notes) {
             append("<a class=\"lfg-button lfg-note\" href=\"").append(NOTE_URL).append('/').append(index)
             append("\" aria-label=\"Note\" title=\"Note\">").append(PENCIL).append("</a>")
+        }
+        if (index != null) {
             append("<a class=\"lfg-button lfg-card\" id=\"c").append(index).append("\" href=\"").append(CARD_URL).append('/').append(index)
             append("\" data-state=\"add\" aria-label=\"Add card\" title=\"Add card\">").append(CARD_ICONS).append("</a>")
         }
@@ -358,7 +384,8 @@ object EntryHtml {
         "function lfgState(s,c,go){for(var i=0;i<s.length;i++){var b=document.getElementById('c'+i);" +
         "if(b){b.dataset.state=s[i];b.setAttribute('aria-label',LFG_NAMES[s[i]]);b.title=LFG_NAMES[s[i]];}" +
         "var e=document.getElementById('e'+i);if(e){if(i==c)e.setAttribute('data-current','');else e.removeAttribute('data-current');}}" +
-        "if(go){var t=document.getElementById('e'+c);if(t)t.scrollIntoView();}}"
+        "if(go){var t=document.getElementById('e'+c);if(t)t.scrollIntoView();}}" +
+        "function lfgShow(h){document.body.innerHTML=h;window.scrollTo(0,0);}"
 
     private val DEFAULT_PALETTE = Palette.of(Palette.PINK, Palette.THEME_DARK, systemDark = true)
 

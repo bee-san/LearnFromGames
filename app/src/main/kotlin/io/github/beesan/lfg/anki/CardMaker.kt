@@ -8,6 +8,8 @@ import io.github.beesan.lfg.data.LfgDatabase
 import io.github.beesan.lfg.data.LineStore
 import io.github.beesan.lfg.dict.WordAudio
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -51,19 +53,30 @@ class CardMaker(
                 if (anki.status() == AnkiStatus.NOT_INSTALLED) "AnkiDroid is not installed." else "AnkiDroid is not connected.",
             )
         }
+        var id = 0L
         try {
             if (anki.target?.let { anki.isDuplicate(it, content.expression) } == true) return@withContext CardResult.Duplicate
-            val id = db.cards().insert(row)
+            id = db.cards().insert(row)
             onCard()
             send(row.copy(id = id), content)
         } catch (e: Exception) {
-            CardResult.Failed(e.message ?: "AnkiDroid did not answer.")
+            android.util.Log.w("LfgCards", "making a card failed", e)
+            // Shown as failed, so it is added again by hand: left pending, a later flush would send it a second time.
+            if (id != 0L) runCatching { db.cards().update(row.copy(id = id, state = Card.STATE_FAILED)) }
+            CardResult.Failed("AnkiDroid did not answer. Open AnkiDroid once, then try again.")
         }
     }
 
     /** Sends cards that were made while AnkiDroid was missing. Returns how many were added. */
     suspend fun flushPending(): Int = withContext(Dispatchers.IO) {
-        if (anki.status() != AnkiStatus.READY) return@withContext 0
+        // One at a time: the service's start and the app's return to the front can both ask at once.
+        flushing.withLock { flushNow() }
+    }
+
+    private val flushing = Mutex()
+
+    private suspend fun flushNow(): Int {
+        if (anki.status() != AnkiStatus.READY) return 0
         var added = 0
         for (card in db.cards().pending()) {
             val content = try {
@@ -79,7 +92,7 @@ class CardMaker(
                 break
             }
         }
-        added
+        return added
     }
 
     private suspend fun send(card: Card, content: CardContent): CardResult {
@@ -90,7 +103,7 @@ class CardMaker(
 
         val pictureName = "lfg_${card.createdAt}"
         // A short moving picture of the line appearing, when that is switched on and the frames are there; else the still.
-        val moving = if (prefs().animatedPicture) FrameRing.animation(content.lineStartMs, mediaDir, pictureName) else null
+        val moving = if (prefs().animatedPicture && !content.fromApp) FrameRing.animation(content.lineStartMs, mediaDir, pictureName) else null
         val picture = moving ?: content.picturePath?.let(::File)?.takeIf { it.isFile }
         val pictureHtml = picture?.let { anki.addPicture(it, pictureName) } ?: ""
         moving?.delete()
@@ -112,7 +125,7 @@ class CardMaker(
         val added = card.copy(noteId = noteId, state = Card.STATE_ADDED, pictureName = pictureName.takeIf { pictureHtml.isNotEmpty() })
         db.cards().update(added)
         store.attachNote(card.lineId, noteId)
-        media.audioFor(added, target, content.lineStartMs)
+        media.audioFor(added, target, content.lineStartMs, content.fromApp)
         return CardResult.Added(noteId)
     }
 }

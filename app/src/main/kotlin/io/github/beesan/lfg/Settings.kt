@@ -13,8 +13,10 @@ data class Prefs(
     val shortcut: String = SHORTCUT_L3_R3,
     /** Swap which face button adds a card and which closes, for pads printed the other way round. */
     val swapConfirm: Boolean = false,
-    /** [ENGINE_AUTO], [ENGINE_SCREENAI] or [ENGINE_MEIKI]. */
-    val engine: String = ENGINE_AUTO,
+    /** Days a line's screen is kept, unless a card or a recap took it; 0 keeps every one. */
+    val keepScreensDays: Int = 14,
+    /** The first run's downloads wait for an unmetered network. */
+    val wifiOnly: Boolean = false,
     /** On a two-screen handheld, show the entry on the screen the game is not on. */
     val secondScreenPanel: Boolean = true,
     /** Sentence audio from a rolling buffer of game sound. Needs screen recording consent each session. */
@@ -64,15 +66,22 @@ data class Prefs(
     val steamAccount: String = "",
     /** The Steam Web API key. Kept apart from the rest, like the OpenRouter key. */
     val steamKey: String = "",
+    /**
+     * Keep the lines read from ordinary apps, as a game's are. Off: chats and
+     * mail can be private, so a lookup there leaves nothing behind but the
+     * line a card is made from.
+     */
+    val keepAppLines: Boolean = false,
+    /** A small LFG button over ordinary apps: a tap reads the screen, a long press reads a region. */
+    val readButton: Boolean = false,
+    /** Kept lines from apps count towards reading time and the goals, beside games. */
+    val appsInReadingTime: Boolean = true,
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
     companion object {
         const val SHORTCUT_L3_R3 = "l3r3"
         const val SHORTCUT_L1_R1 = "l1r1"
-        const val ENGINE_AUTO = "auto"
-        const val ENGINE_SCREENAI = "screenai"
-        const val ENGINE_MEIKI = "meiki"
         const val TRANSLATE_OFF = "off"
         const val TRANSLATE_ASK = "ask"
         const val TRANSLATE_EVERY = "every"
@@ -95,7 +104,8 @@ class Settings(context: Context) {
         Prefs(
             shortcut = store.getString("shortcut", d.shortcut) ?: d.shortcut,
             swapConfirm = store.getBoolean("swapConfirm", d.swapConfirm),
-            engine = store.getString("engine", d.engine) ?: d.engine,
+            keepScreensDays = store.getInt("keepScreensDays", d.keepScreensDays),
+            wifiOnly = store.getBoolean("wifiOnly", d.wifiOnly),
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
             sentenceAudio = store.getBoolean("sentenceAudio", d.sentenceAudio),
             spokenLines = store.getBoolean("spokenLines", d.spokenLines),
@@ -123,6 +133,9 @@ class Settings(context: Context) {
             edenFolder = store.getString("edenFolder", d.edenFolder) ?: d.edenFolder,
             steamAccount = store.getString("steamAccount", d.steamAccount) ?: d.steamAccount,
             steamKey = secrets.getString("steamKey", d.steamKey) ?: d.steamKey,
+            keepAppLines = store.getBoolean("keepAppLines", d.keepAppLines),
+            readButton = store.getBoolean("readButton", d.readButton),
+            appsInReadingTime = store.getBoolean("appsInReadingTime", d.appsInReadingTime),
         )
     }
 
@@ -131,7 +144,8 @@ class Settings(context: Context) {
         store.edit()
             .putString("shortcut", next.shortcut)
             .putBoolean("swapConfirm", next.swapConfirm)
-            .putString("engine", next.engine)
+            .putInt("keepScreensDays", next.keepScreensDays)
+            .putBoolean("wifiOnly", next.wifiOnly)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)
             .putBoolean("sentenceAudio", next.sentenceAudio)
             .putBoolean("spokenLines", next.spokenLines)
@@ -157,6 +171,9 @@ class Settings(context: Context) {
             .putString("retroArchFolder", next.retroArchFolder)
             .putString("edenFolder", next.edenFolder)
             .putString("steamAccount", next.steamAccount)
+            .putBoolean("keepAppLines", next.keepAppLines)
+            .putBoolean("readButton", next.readButton)
+            .putBoolean("appsInReadingTime", next.appsInReadingTime)
             .apply()
         secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
         _prefs.value = next

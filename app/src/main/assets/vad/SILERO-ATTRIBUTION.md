@@ -1,8 +1,12 @@
 # Silero VAD
 
-`silero_vad.onnx` is the voice activity detector of Silero VAD v6.2.3
-(https://github.com/snakers4/silero-vad, `src/silero_vad/data/silero_vad.onnx`),
-unchanged. SHA-256 `1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3`.
+`silero_vad_16k.bin` is derived from the voice activity detector of Silero VAD
+v6.2.3 (https://github.com/snakers4/silero-vad, `src/silero_vad/data/silero_vad.onnx`,
+SHA-256 `1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3`):
+it is that model's 16 kHz weights, unchanged, written out as float32 by
+`tools/export_silero.py` so the app can run the model without ONNX Runtime.
+It is under the same MIT licence. The .onnx itself is kept, unchanged, in
+`app/src/test/resources/vad`, where the tests check the app's port against it.
 
 MIT License
 

@@ -56,6 +56,8 @@ fun RecapScreen(
             Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (games.isEmpty()) Text("Nothing has been read yet. Play a game, then come back for its recap.", color = Lfg.Dim, fontSize = 15.sp)
+            if (games.size == 1) Text(games.single().title, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             if (games.size > 1) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     games.forEach { game -> LfgButton(game.title, { onGame(game.id) }, primary = game.id == state.gameId) }

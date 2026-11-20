@@ -1,23 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.capture
 
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
 import android.content.Context
-import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.ocr.Frame
-import io.github.beesan.lfg.ocr.MeikiOcr
 import io.github.beesan.lfg.ocr.ModelStore
 import io.github.beesan.lfg.ocr.ScreenAi
 import io.github.beesan.lfg.ocr.Vocr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /**
  * The second pass: turns a settled frame into lines with a box per character.
- * ScreenAI and meikiocr each sit behind this one interface.
+ * ScreenAI sits behind it.
  */
 interface TextReader {
     /** Stored in `game_lines.engine`, e.g. `screenai`. */
@@ -68,28 +63,6 @@ class PixelProbe : ChangeProbe {
     }
 }
 
-class MeikiReader(private val ocr: MeikiOcr) : TextReader {
-    override val name = "meikiocr"
-    override suspend fun read(frame: Frame): List<TextLine> = withContext(Dispatchers.Default) {
-        synchronized(ocr) { ocr.read(frame) }
-    }
-
-    companion object {
-        fun open(files: ModelStore.MeikiFiles): MeikiReader {
-            val env = OrtEnvironment.getEnvironment()
-            fun session(file: File) = env.createSession(
-                file.path,
-                OrtSession.SessionOptions().apply {
-                    // A game is running beside this: leave it most of the cores.
-                    setIntraOpNumThreads(2)
-                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-                },
-            )
-            return MeikiReader(MeikiOcr(env, session(files.detector), session(files.recogniser), session(files.vertical)))
-        }
-    }
-}
-
 class ScreenAiReader(private val engine: ScreenAi) : TextReader {
     override val name = "screenai"
     override suspend fun read(frame: Frame): List<TextLine> = withContext(Dispatchers.Default) { engine.read(frame) }
@@ -109,32 +82,22 @@ object Readers {
     private var opened = ""
 
     /**
-     * Opens whatever the settings ask for and the device has. ScreenAI is the
-     * default once its library and files are there; meikiocr reads until then,
-     * and whenever ScreenAI cannot start.
+     * Opens ScreenAI once its library and files are there. Until then there
+     * is no reader, and the service takes no pictures.
      */
     @Synchronized
-    fun refresh(context: Context, models: ModelStore, prefs: Prefs) {
+    fun refresh(context: Context, models: ModelStore) {
         if (vocr == null) {
             vocr = Vocr.open(context)
             vocr?.let { probe = VocrProbe(it) }
         }
-        val screenAi = models.screenAiDir()
-        val meiki = models.meikiFiles()
-        val wanted = when {
-            prefs.engine != Prefs.ENGINE_MEIKI && screenAi != null && ScreenAi.available() -> "screenai"
-            meiki != null -> "meiki"
-            else -> ""
-        }
+        val dir = models.screenAiDir()
+        val wanted = if (dir != null && ScreenAi.available()) "screenai" else ""
         if (wanted == opened) return
         reader = try {
-            when (wanted) {
-                "screenai" -> ScreenAi.open(screenAi!!)?.let(::ScreenAiReader) ?: meiki?.let(MeikiReader::open)
-                "meiki" -> MeikiReader.open(meiki!!)
-                else -> null
-            }
+            if (wanted.isEmpty()) null else ScreenAi.open(dir!!)?.let(::ScreenAiReader)
         } catch (e: Throwable) {
-            android.util.Log.w("LfgReaders", "could not open $wanted", e)
+            android.util.Log.w("LfgReaders", "could not open ScreenAI", e)
             null
         }
         opened = if (reader != null) wanted else ""

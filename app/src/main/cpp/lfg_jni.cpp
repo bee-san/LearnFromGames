@@ -60,6 +60,12 @@ JNIEXPORT jbyteArray JNICALL Java_io_github_beesan_lfg_dict_Hoshidicts_nativeLoo
   return to_bytes(env, session(handle)->lookup(to_string(env, text), max_results, static_cast<size_t>(scan_length)));
 }
 
+JNIEXPORT jint JNICALL Java_io_github_beesan_lfg_dict_Hoshidicts_nativeMatchLength(JNIEnv* env, jobject, jlong handle,
+                                                                                    jbyteArray text, jint scan_length) {
+  if (handle == 0) return 0;
+  return session(handle)->match_length(to_string(env, text), static_cast<size_t>(scan_length));
+}
+
 JNIEXPORT jbyteArray JNICALL Java_io_github_beesan_lfg_dict_Hoshidicts_nativeStyles(JNIEnv* env, jobject, jlong handle) {
   if (handle == 0) return to_bytes(env, "[]");
   return to_bytes(env, session(handle)->styles());

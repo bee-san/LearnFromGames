@@ -36,6 +36,11 @@ class Session {
   // `glossary` is the raw Yomitan glossary JSON, carried as a string.
   std::string lookup(const std::string& text, int max_results, size_t scan_length) const;
 
+  // How long, in UTF-16 units, the best match at the start of `text` is; 0
+  // when nothing matches. What the controller's word steps need, without
+  // building and parsing every entry's JSON as `lookup` would.
+  int match_length(const std::string& text, size_t scan_length) const;
+
   // Each dictionary's own stylesheet: [{"dictionary","css"}].
   std::string styles() const;
 

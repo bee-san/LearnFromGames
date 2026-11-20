@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
@@ -70,6 +71,7 @@ import io.github.beesan.lfg.games.Eden
 import io.github.beesan.lfg.games.EsdeLog
 import io.github.beesan.lfg.games.GameNameSources
 import io.github.beesan.lfg.games.RetroArchHistory
+import io.github.beesan.lfg.data.PictureKeeper
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
 import io.github.beesan.lfg.dict.WordAudio
@@ -133,16 +135,20 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Card("Dictionaries", "Add, order and remove dictionaries", { onOpen(Page.DICTIONARIES) })
     Card("Anki", "The note type and deck cards go to", { onOpen(Page.ANKI) })
     Card("Controls", "The lookup shortcut", { onOpen(Page.CONTROLS) })
-    Card("Text recognition", "The engine that reads the game", { onOpen(Page.RECOGNITION) })
-    Card("Games", "Rename a game, turn tap strips off for it", { onOpen(Page.GAMES) })
+    Card("Text recognition", "ScreenAI, which reads the screen", { onOpen(Page.RECOGNITION) })
+    Card("Games and apps", "Rename one, choose when it is read, turn tap strips off", { onOpen(Page.GAMES) })
     Card("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", { onOpen(Page.GAME_NAMES) })
     Card("Sound and pictures", "Sentence audio, spoken lines and animated pictures", { onOpen(Page.MEDIA) })
+    Card("Other apps", "Read browsers, chat and ebooks when you ask", { onOpen(Page.APPS) })
     Card("Practice line", "Try a lookup and a card without a game", { onOpen(Page.PRACTICE) })
+    Card("Storage", "What LFG keeps, and how long screens are kept", { onOpen(Page.STORAGE) })
+    Card("Help and diagnostics", "A report to send with a bug, or after a first run on a new device", { onOpen(Page.HELP) })
 }
 
 @Composable
 fun DictionariesScreen(
     state: DictState,
+    fetching: DictState?,
     busy: DictionariesState,
     onAdd: () -> Unit,
     onMove: (String, Boolean) -> Unit,
@@ -156,6 +162,15 @@ fun DictionariesScreen(
     val date = remember { SimpleDateFormat("d MMMM yyyy", Locale.getDefault()) }
     busy.error?.let { Text(it, color = Lfg.Error, fontSize = 14.sp) }
     busy.progress?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
+    // The rest of the starter set, arriving after the first.
+    when (fetching) {
+        is DictState.Downloading -> Text(
+            "Downloading ${fetching.name}… " + if (fetching.total > 0) "${fetching.bytes * 100 / fetching.total}%" else "${fetching.bytes / (1024 * 1024)} MB",
+            color = Lfg.Dim, fontSize = 14.sp,
+        )
+        is DictState.Installing -> Text("Installing ${fetching.name}…", color = Lfg.Dim, fontSize = 14.sp)
+        else -> {}
+    }
     val list = (state as? DictState.Ready)?.dictionaries ?: emptyList()
     if (list.isEmpty()) Text("No dictionary is installed.", color = Lfg.Dim, fontSize = 15.sp)
     list.forEachIndexed { i, d ->
@@ -201,8 +216,7 @@ fun SourcesScreen(sources: List<DictionarySource>, onBack: () -> Unit) = Page("S
     Text("Text recognition", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
     Text(
         "VOCR (bee-san/vita-vn-ocr) notices new text. Its code is GPL-3.0-or-later; its weights ship with this app for " +
-            "non-commercial use only. meikiocr (rtr46) reads the text: code Apache-2.0, weights LGPL-3.0. ScreenAI, when " +
-            "installed, is screenai_ocr (AuroraWright, MPL-2.0) running the model files Google publishes for Chromium, " +
+            "non-commercial use only. ScreenAI reads the text: screenai_ocr (AuroraWright, MPL-2.0) running the model files Google publishes for Chromium, " +
             "which are downloaded to this device and are not part of this app.",
         color = Lfg.Text, fontSize = 14.sp, lineHeight = 20.sp,
     )
@@ -389,35 +403,25 @@ private fun modelStatus(state: ModelState, ready: String) = when (state) {
 
 @Composable
 fun RecognitionScreen(
-    prefs: Prefs,
-    meiki: ModelState,
     screenAi: ModelState,
     screenAiBuilt: Boolean,
-    onChange: ((Prefs) -> Prefs) -> Unit,
     onDownloadScreenAi: () -> Unit,
     onBack: () -> Unit,
 ) = Page("Text recognition", onBack) {
-    Card("Engine", "Automatic uses ScreenAI when it is installed and meikiocr until then.") {
-        Choice(
-            listOf(Prefs.ENGINE_AUTO to "Automatic", Prefs.ENGINE_SCREENAI to "ScreenAI", Prefs.ENGINE_MEIKI to "meikiocr"),
-            prefs.engine,
-        ) { v -> onChange { it.copy(engine = v) } }
-    }
-    Card("meikiocr", modelStatus(meiki, "Installed"))
     Card(
         "ScreenAI",
         if (!screenAiBuilt) "Not in this build of the app." else modelStatus(screenAi, "Installed") +
             if (screenAi is ModelState.Missing) ". Its files come from the package Google publishes for Chromium." else "",
     ) {
-        if (screenAiBuilt && (screenAi is ModelState.Missing || screenAi is ModelState.Failed)) LfgButton("Download", onDownloadScreenAi)
+        if (screenAiBuilt && (screenAi is ModelState.Missing || screenAi is ModelState.Failed)) LfgButton(if (screenAi is ModelState.Failed) "Try again" else "Download", onDownloadScreenAi)
     }
-    Text("VOCR watches every picture for new text; the engine above then reads it once it has stopped moving.", color = Lfg.Dim, fontSize = 14.sp)
+    Text("VOCR watches every picture for new text; ScreenAI then reads it once it has stopped moving.", color = Lfg.Dim, fontSize = 14.sp)
 }
 
 @Composable
-fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit, onBack: () -> Unit) = Page("Games", onBack) {
+fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit, onBack: () -> Unit) = Page("Games and apps", onBack) {
     val list = games.filter { it.packageName != ownPackage }
-    if (list.isEmpty()) Text("No game has been read yet. A game is the app in front when it is fullscreen.", color = Lfg.Dim, fontSize = 15.sp)
+    if (list.isEmpty()) Text("Nothing has been read yet. A game is the app in front when it is fullscreen; other apps are listed once you ask for one to be read.", color = Lfg.Dim, fontSize = 15.sp)
     val apps = list.filter { it.detected.isEmpty() }.associate { it.packageName to it.title }
     for (game in list) {
         var title by remember(game.id) { mutableStateOf(game.title) }
@@ -442,14 +446,20 @@ fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit,
                 Text(game.packageName, color = Lfg.Dim, fontSize = 13.sp)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Column(Modifier.weight(1f)) {
-                        Text("Read this app", color = Lfg.Text, fontSize = 15.sp)
-                        Text("Automatic reads it while it is fullscreen.", color = Lfg.Dim, fontSize = 13.sp)
+                        Text(if (game.app) "Read this app (not a game)" else "Read this app", color = Lfg.Text, fontSize = 15.sp)
+                        Text(
+                            "Automatic reads it while it is fullscreen, and otherwise when you ask. On demand only when you ask. Always reads it whenever it is in front; Never leaves it alone.",
+                            color = Lfg.Dim, fontSize = 13.sp,
+                        )
                     }
-                    Choice(
-                        listOf("${Game.READ_AUTO}" to "Automatic", "${Game.READ_ON}" to "Always", "${Game.READ_OFF}" to "Never"),
-                        "${game.reading}",
-                    ) { onUpdate(game.copy(reading = it.toInt())) }
                 }
+                Choice(
+                    listOf(
+                        "${Game.READ_AUTO}" to "Automatic", "${Game.READ_ON_DEMAND}" to "On demand",
+                        "${Game.READ_ON}" to "Always", "${Game.READ_OFF}" to "Never",
+                    ),
+                    "${game.reading}",
+                ) { onUpdate(game.copy(reading = it.toInt())) }
             } else {
                 Text("In ${apps[game.packageName] ?: game.packageName}, named by ${game.namedBy}", color = Lfg.Dim, fontSize = 13.sp)
             }
@@ -532,6 +542,39 @@ fun MediaScreen(prefs: Prefs, recording: Boolean, onChange: ((Prefs) -> Prefs) -
     }
 }
 
+/** Ordinary apps: how a reading is asked for, and what is kept from it. */
+@Composable
+fun AppsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Other apps", onBack) {
+    Text(
+        "LFG leaves an app alone while its status bar shows, so its scrolling and taps stay its own. Ask, and it reads what is on " +
+            "screen: the app's own text where it shares it, which is exact and instant, and text recognition for pictures, video and anything drawn.",
+        color = Lfg.Dim, fontSize = 14.sp,
+    )
+    Text("Ways to ask", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+    Text(
+        "• Select text in any app and choose LFG in the menu.\n" +
+            "• Add the Read screen and Read region tiles to quick settings. Read region can keep reading a box, for subtitles.\n" +
+            "• Press the lookup shortcut on the controller.\n" +
+            "• Turn on the LFG button below.\n" +
+            "Then tap a word. A tap anywhere else, or Back, takes the strips away.",
+        color = Lfg.Text, fontSize = 14.sp,
+    )
+    Card("LFG button", "A small button over other apps. Tap to read the screen, hold to drag out a region, drag to move it.") {
+        OnOff(prefs.readButton) { v -> onChange { it.copy(readButton = v) } }
+    }
+    Card(
+        "Keep lines from apps",
+        "Off: chats and mail can be private, so a lookup leaves nothing behind but the line a card is made from. " +
+            "A region kept reading is always stored, as a game's lines are. Password fields are never read.",
+    ) {
+        OnOff(prefs.keepAppLines) { v -> onChange { it.copy(keepAppLines = v) } }
+    }
+    Card("Apps in reading time", "Lines kept from apps count towards reading time, the goals and the widgets, beside games.") {
+        OnOff(prefs.appsInReadingTime) { v -> onChange { it.copy(appsInReadingTime = v) } }
+    }
+    Text("Cards from apps get no sentence audio and no moving picture: an app's sound is not its text's voice.", color = Lfg.Dim, fontSize = 14.sp)
+}
+
 internal fun duration(seconds: Double): String {
     val minutes = (seconds / 60).toLong()
     return if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
@@ -547,7 +590,7 @@ private fun goalTime(minutes: Int) = when {
 /** The daily goals the stats screen measures against. */
 @Composable
 fun GoalsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Reading goals", onBack) {
-    Card("Hours per day", "Reading time, as Stats counts it.") {
+    Card("Time per day", "Reading time, as Stats counts it.") {
         Stepper(if (prefs.goalMinutes == 0) "Off" else goalTime(prefs.goalMinutes), prefs.goalMinutes, ReadingGoals.MINUTE_STEPS) { v ->
             onChange { it.copy(goalMinutes = v) }
         }
@@ -701,7 +744,7 @@ private fun Goals(goals: ReadingGoals, progress: ReadingGoals.Progress?, dayCoun
         if (goals.minutes > 0) {
             val parts = durationParts(t.seconds)
             Tile(
-                "Hours per day", parts.dropLast(1) + parts.last().let { (n, unit) -> n to "$unit of ${goalTime(goals.minutes)}" },
+                "Time per day", parts.dropLast(1) + parts.last().let { (n, unit) -> n to "$unit of ${goalTime(goals.minutes)}" },
                 met(progress.timeDays), (t.seconds / (goals.minutes * 60)).toFloat(), goals.timeMet(t),
             )
         }
@@ -849,4 +892,60 @@ internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, MEDIA, PRACTICE }
+enum class Page { STORAGE, HELP, HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, MEDIA, APPS, PRACTICE }
+
+@Composable
+fun StorageScreen(
+    usage: PictureKeeper.Usage?,
+    keepDays: Int,
+    message: String?,
+    onKeepDays: (Int) -> Unit,
+    onCleanUp: () -> Unit,
+    onBack: () -> Unit,
+) = Page("Storage", onBack) {
+    fun mb(bytes: Long) = if (bytes < 1_048_576) "${(bytes + 1023) / 1024} KB" else "${(bytes + 524_288) / 1_048_576} MB"
+    if (usage == null) {
+        Text("Measuring…", color = Lfg.Dim, fontSize = 15.sp)
+    } else {
+        Card("Screens", "${mb(usage.screens)} · ${usage.screenCount} pictures, ${usage.keptScreens} kept for good")
+        Card("Line pictures", "${mb(usage.crops)} · each line cut from its screen, kept for good")
+        Card("Cards and notes", "${mb(usage.cards + usage.notes)} · pictures and sound made for cards, and notes' own copies")
+        Card("Dictionaries", mb(usage.dictionaries))
+        Card("Text recognition", mb(usage.reader))
+        Card("Lines and stats", mb(usage.database))
+        Text("${mb(usage.total)} in all", color = Lfg.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    }
+    HorizontalDivider(color = Lfg.Border)
+    Card(
+        "Keep screens",
+        "The whole screen saved with each line. A line, its text and its own picture are never deleted, and neither is " +
+            "a screen a card was made from or a recap chose as a moment.",
+    ) {
+        Choice(listOf("7" to "A week", "14" to "Two weeks", "30" to "A month", "90" to "Three months", "0" to "Always"), keepDays.toString()) {
+            onKeepDays(it.toInt())
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        LfgButton("Clean up now", onCleanUp)
+        message?.let { Text("  $it", color = Lfg.Dim, fontSize = 14.sp) }
+    }
+}
+
+@Composable
+fun HelpScreen(report: String?, onCopy: () -> Unit, onShare: () -> Unit, onBack: () -> Unit) = Page("Help and diagnostics", onBack) {
+    Text(
+        "If something goes wrong, or after a first run on a new handheld, send this report with what happened " +
+            "(github.com/bee-san/LearnFromGames/issues). It has the device, what LFG has installed, how much it keeps, and " +
+            "LFG's own recent log with its timings. It has no key and none of the text LFG read. Read it before you send it.",
+        color = Lfg.Text, fontSize = 15.sp, lineHeight = 22.sp,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LfgButton("Copy", onCopy, primary = true, enabled = report != null)
+        LfgButton("Share…", onShare, enabled = report != null)
+    }
+    Text(
+        report ?: "Gathering…",
+        color = Lfg.Dim, fontSize = 12.sp, lineHeight = 16.sp, fontFamily = FontFamily.Monospace,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Lfg.Surface).padding(10.dp),
+    )
+}

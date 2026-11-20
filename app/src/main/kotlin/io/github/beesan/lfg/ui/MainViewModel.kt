@@ -29,6 +29,8 @@ import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LineStore
 import io.github.beesan.lfg.data.Note
+import io.github.beesan.lfg.data.PictureKeeper
+import io.github.beesan.lfg.Diagnostics
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
 import io.github.beesan.lfg.dict.DictionaryWorker
@@ -42,6 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -101,8 +104,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val setup: StateFlow<SetupState> = _setup
 
     val dictionary: StateFlow<DictState> = app.dictionaries.state
-    val reader: StateFlow<ModelState> = app.models.meiki
-    val screenAi: StateFlow<ModelState> = app.models.screenAi
+    val fetchingDictionary: StateFlow<DictState?> = app.dictionaries.fetching
+    val reader: StateFlow<ModelState> = app.models.screenAi
     val prefs: StateFlow<Prefs> = app.settings.prefs
 
     private val _practice = MutableStateFlow(PracticeState())
@@ -112,16 +115,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _practiceDone = MutableStateFlow(ui.getBoolean("practiceDone", false))
     val practiceDone: StateFlow<Boolean> = _practiceDone
 
-    val lines: StateFlow<List<GameLine>> =
-        app.database.lines().recent(300).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** The newest lines; null until the store has answered, so an empty list really is empty. */
+    private val recentLines: StateFlow<List<GameLine>?> =
+        app.database.lines().recent(300).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val lines: StateFlow<List<GameLine>> = recentLines.map { it.orEmpty() }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val linesLoaded: StateFlow<Boolean> = recentLines.map { it != null }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val games: StateFlow<List<Game>> =
         app.database.games().all().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val stats: StateFlow<StatsState> = combine(app.database.lines().stamps(), app.database.cards().madeByGame()) { stamps, cards ->
+    val stats: StateFlow<StatsState> = combine(
+        app.database.lines().stamps(), app.database.cards().madeByGame(), app.database.games().appIds(),
+        app.settings.prefs.map { it.appsInReadingTime }.distinctUntilChanged(),
+    ) { stamps, cards, apps, appsCount ->
         withContext(Dispatchers.Default) {
             val zone = ZoneId.systemDefault()
-            val all = stamps.map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }
+            val left = if (appsCount) emptySet() else apps.toSet()
+            val all = stamps.filter { it.gameId !in left }.map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.text), it.gameId) }
             val summary = ReadingStats.summarise(all, zone)
             val days = summary.days
             StatsState(
@@ -135,7 +145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsState())
 
     /** Lookup in a stored line, for a card made after the session. */
-    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio) { app.notes.withNotes(it) }
+    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) }, matchLength = { app.dictionaries.matchLength(it) })
 
     private val _styles = MutableStateFlow<List<EntryHtml.Style>>(emptyList())
     val styles: StateFlow<List<EntryHtml.Style>> = _styles
@@ -173,6 +183,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         if (status == AnkiStatus.READY && app.anki.target == null) connectAnki()
+        // AnkiDroid back (installed again, or its permission given again): cards made meanwhile go now.
+        if (status == AnkiStatus.READY && app.anki.target != null) viewModelScope.launch { runCatching { app.cards.flushPending() } }
         if (status == AnkiStatus.READY) {
             viewModelScope.launch {
                 val never = withContext(Dispatchers.IO) { runCatching { app.anki.neverSynced() }.getOrDefault(false) }
@@ -210,7 +222,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun retryDownloads() = DictionaryWorker.start(app, replace = true)
+    fun retryDownloads() = DictionaryWorker.start(app, replace = true, wifiOnly = app.settings.prefs.value.wifiOnly)
+
+    /** Waits for Wi-Fi, or not, from now on; downloads still to do start again under the new rule. */
+    fun setWifiOnly(on: Boolean) {
+        app.settings.update { it.copy(wifiOnly = on) }
+        if (app.dictionaries.defaultsPending() || app.dictionaries.state.value !is DictState.Ready || app.models.screenAiDir() == null) {
+            DictionaryWorker.start(app, replace = true, wifiOnly = on)
+        }
+    }
 
     fun finishPractice() {
         ui.edit().putBoolean("practiceDone", true).apply()
@@ -598,6 +618,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updatePrefs(change: (Prefs) -> Prefs) = app.settings.update(change)
 
     fun downloadScreenAi() = viewModelScope.launch { app.models.ensureScreenAi() }
+
+    /** What each kind of thing LFG keeps takes on this device, and the last clean-up's result. */
+    data class StorageState(val usage: PictureKeeper.Usage? = null, val message: String? = null)
+
+    private val _storage = MutableStateFlow(StorageState())
+    val storage: StateFlow<StorageState> = _storage
+
+    fun measureStorage() = viewModelScope.launch(Dispatchers.IO) {
+        _storage.value = _storage.value.copy(usage = app.pictures.usage(app.getDatabasePath("lfg.db")))
+    }
+
+    fun cleanUpStorage() = viewModelScope.launch(Dispatchers.IO) {
+        val before = _storage.value.usage?.screens
+        val gone = app.pictures.sweep(app.settings.prefs.value.keepScreensDays)
+        val usage = app.pictures.usage(app.getDatabasePath("lfg.db"))
+        val freed = before?.let { (it - usage.screens).coerceAtLeast(0) }
+        val size = freed?.let { if (it < 1_048_576) ", ${(it + 1023) / 1024} KB" else ", ${(it + 524_288) / 1_048_576} MB" } ?: ""
+        _storage.value = StorageState(usage, if (gone == 0) "Nothing to clear." else "Cleared $gone screen${if (gone == 1) "" else "s"}$size.")
+    }
+
+    private val _diagnostics = MutableStateFlow<String?>(null)
+    val diagnostics: StateFlow<String?> = _diagnostics
+
+    fun gatherDiagnostics() = viewModelScope.launch(Dispatchers.IO) {
+        _diagnostics.value = null
+        _diagnostics.value = Diagnostics.report(app)
+    }
 
     fun updateGame(game: Game) = viewModelScope.launch {
         withContext(Dispatchers.IO) {

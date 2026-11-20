@@ -14,5 +14,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- An ordinary app beside the game, for reading on demand: status bar showing, real TextViews. -->
+        <activity
+            android:name=".AppActivity"
+            android:exported="true"
+            android:label="Fake Reader"
+            android:taskAffinity=".reader"
+            android:theme="@android:style/Theme.Material.Light">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
