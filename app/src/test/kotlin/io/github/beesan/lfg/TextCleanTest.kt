@@ -9,7 +9,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class TextCleanTest {
-    /** A line with one 40 px box per character, as ScreenAI and meikiocr give. */
+    /** A line with one 40 px box per character, as ScreenAI gives. */
     private fun boxed(text: String): TextLine {
         val chars = text.indices.map { CharBox(it, it + 1, Box(it * 40, 0, it * 40 + 40, 40)) }
         return TextLine(text, Box(0, 0, text.length * 40, 40), chars)

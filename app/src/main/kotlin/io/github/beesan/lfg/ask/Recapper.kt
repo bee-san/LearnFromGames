@@ -117,9 +117,12 @@ class Recapper(private val db: LfgDatabase, private val prefs: () -> Prefs, priv
             return Recap(arcs, json.text("last"), moments)
         }
 
-        /** The line's own picture, or the screen's while it is kept. */
+        /**
+         * The screen while it is kept, which then stays for good (data/PictureKeeper.kt), so a
+         * moment is the scene as it was; else the line's own picture, which is never cleared.
+         */
         private fun picture(line: GameLine): String? =
-            line.cropPath?.takeIf { File(it).isFile } ?: line.screenshotPath?.takeIf { File(it).isFile }
+            line.screenshotPath?.takeIf { File(it).isFile } ?: line.cropPath?.takeIf { File(it).isFile }
 
         const val SYSTEM =
             "You write recaps of Japanese games for someone learning Japanese who is coming back to one: the story so far, " +

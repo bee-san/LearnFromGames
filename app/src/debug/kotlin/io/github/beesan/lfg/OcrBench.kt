@@ -4,14 +4,12 @@ package io.github.beesan.lfg
 import android.app.Instrumentation
 import android.graphics.BitmapFactory
 import android.os.Bundle
-import io.github.beesan.lfg.capture.MeikiReader
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.ocr.Frame
 import io.github.beesan.lfg.ocr.ModelStore
 import io.github.beesan.lfg.ocr.ScreenAi
 import io.github.beesan.lfg.ocr.TextClean
 import io.github.beesan.lfg.ocr.Vocr
-import kotlinx.coroutines.runBlocking
 import java.io.File
 
 /**
@@ -20,7 +18,7 @@ import java.io.File
  * `ocrbench/results.jsonl` for tools/ocr_bench.py to score. Each read goes
  * through TextClean, as in the app, and its time counts.
  *
- *     adb shell am instrument -w -e engines screenai,meiki,vocr io.github.beesan.lfg/.OcrBench
+ *     adb shell am instrument -w -e engines screenai,vocr io.github.beesan.lfg/.OcrBench
  */
 class OcrBench : Instrumentation() {
     private var arguments: Bundle? = null
@@ -45,16 +43,12 @@ class OcrBench : Instrumentation() {
     private fun run(): String {
         val context = targetContext
         val dir = File(context.getExternalFilesDir(null), "ocrbench")
-        val wanted = (arguments?.getString("engines") ?: "screenai,meiki,vocr").split(',').map { it.trim() }
+        val wanted = (arguments?.getString("engines") ?: "screenai,vocr").split(',').map { it.trim() }
         val models = ModelStore(context)
         val engines = LinkedHashMap<String, (Frame) -> List<TextLine>>()
         if ("screenai" in wanted) {
             val engine = models.screenAiDir()?.let { ScreenAi.open(it) } ?: error("ScreenAI is not installed")
             engines["screenai"] = engine::read
-        }
-        if ("meiki" in wanted) {
-            val reader = MeikiReader.open(models.meikiFiles() ?: error("meikiocr is not installed"))
-            engines["meiki"] = { frame -> runBlocking { reader.read(frame) } }
         }
         if ("vocr" in wanted) {
             val vocr = Vocr.open(context) ?: error("VOCR could not open")

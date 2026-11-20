@@ -26,6 +26,9 @@ import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.anki.AnkiStatus
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.ocr.ModelState
+import io.github.beesan.lfg.ocr.ScreenAi
+import io.github.beesan.lfg.ocr.ModelStore
+import io.github.beesan.lfg.dict.DefaultDictionaries
 
 @Composable
 fun SetupScreen(
@@ -37,6 +40,8 @@ fun SetupScreen(
     onConnectAnki: () -> Unit,
     onInstallAnki: () -> Unit,
     onRetryDownloads: () -> Unit,
+    wifiOnly: Boolean = false,
+    onWifiOnly: (Boolean) -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Set up", color = Lfg.Text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
@@ -82,8 +87,9 @@ fun SetupScreen(
             )
         }
 
-        // One row for both first-run downloads: the dictionary, then the reader's files.
-        val name = "Dictionary and text recognition"
+        // One row for both first-run downloads: the dictionaries, then the reader's files.
+        val name = "Dictionaries and text recognition"
+        val waiting = if (wifiOnly) "Waiting for Wi-Fi…" else "Waiting for a connection…"
         when {
             dictionary is DictState.Failed -> SetupRow(name, dictionary.reason, error = true, action = "Try again", onAction = onRetryDownloads)
             reader is ModelState.Failed -> SetupRow(name, reader.reason, error = true, action = "Try again", onAction = onRetryDownloads)
@@ -93,18 +99,27 @@ fun SetupScreen(
                 progress = fraction(dictionary.bytes, dictionary.total),
             )
             dictionary is DictState.Installing -> SetupRow(name, "Installing ${dictionary.name}…", progress = 1f)
-            dictionary is DictState.Missing -> SetupRow(name, "Waiting for a connection…")
+            dictionary is DictState.Missing -> SetupRow(name, waiting)
             reader is ModelState.Downloading -> SetupRow(
                 name = name,
                 status = "Downloading text recognition… ${mb(reader.bytes)} MB of ${mb(reader.total)} MB (${percent(reader.bytes, reader.total)}%)",
                 progress = fraction(reader.bytes, reader.total),
             )
-            reader is ModelState.Missing -> SetupRow(name, "Waiting for text recognition…")
+            reader is ModelState.Missing -> SetupRow(name, if (ScreenAi.available()) waiting else "This build has no text recognition (tools/build_screenai.sh).", error = !ScreenAi.available())
             else -> SetupRow(
                 name = name,
                 status = (dictionary as DictState.Ready).dictionaries.joinToString { it.title } + " and text recognition installed",
                 done = true,
             )
+        }
+        if (dictionary !is DictState.Ready || reader !is ModelState.Ready) {
+            val total = (DefaultDictionaries.BYTES + ModelStore.SCREENAI_BYTES) / 1_000_000
+            Text(
+                "About $total MB to download once: the dictionaries (${DefaultDictionaries.BYTES / 1_000_000} MB), then " +
+                    "ScreenAI's text recognition (${ModelStore.SCREENAI_BYTES / 1_000_000} MB, of which 14 MB is kept).",
+                color = Lfg.Dim, fontSize = 14.sp,
+            )
+            Choice(listOf("any" to "Any network", "wifi" to "Only on Wi-Fi"), if (wifiOnly) "wifi" else "any") { onWifiOnly(it == "wifi") }
         }
     }
 }

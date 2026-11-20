@@ -37,7 +37,7 @@ LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSent
 ```mermaid
 flowchart LR
     A[Game on screen] --> B[VOCR<br/>has the text changed<br/>and stopped moving?]
-    B --> C[ScreenAI or meikiocr<br/>read it, with a box<br/>for every character]
+    B --> C[ScreenAI<br/>reads it, with a box<br/>for every character]
     C --> D[Rows grouped into<br/>sentences, furigana dropped]
     D --> E[Tap strips on the game<br/>Controller cursor]
     D --> F[(Lines saved)]
@@ -76,8 +76,7 @@ Everything runs on the device. The only network use is fetching the readers' mod
   While cards are going to the app's own note type it looks again each time,
   so one of the three installed later is picked up without "Find again".
 - **The release build** on the Android 15 emulator: reading with ScreenAI,
-  lookup, the styled entry and a card all work after shrinking. meikiocr was
-  seen to load there, not to read.
+  lookup, the styled entry and a card all work after shrinking.
 
 ### Not done, or not known
 
@@ -86,7 +85,7 @@ Everything runs on the device. The only network use is fetching the readers' mod
   bottom screen, AYN firmware and quickly changing overlay windows, AnkiDroid
   answering after a cold start there, and what background reading costs in
   battery and heat. The emulator answered the others (see below).
-- No speed figures for ScreenAI or meikiocr on a handheld: the OCR bench below
+- No speed figures for ScreenAI on a handheld: the OCR bench below
   ran on the x86_64 emulator.
 - A text hook as a second source of lines (the plan's "after that, if wanted")
   is not built. The intent is for the app to be the texthooker itself, not to
@@ -139,12 +138,13 @@ x86_64 emulator, 931 screens:
 | Reader | Character errors | Lines exactly right | Time per screen (median) |
 | --- | --- | --- | --- |
 | ScreenAI (the default) | 3.6% | 88% | 240–500 ms |
-| meikiocr | 5.1% | 75% | 545 ms |
 | VOCR (the change probe) | 4.4% | 86% | 100 ms |
 
 VOCR6 was fine-tuned on these games; on the two held out from it, it misses
-5.5% of characters, ScreenAI 6.7%. VOCR reads no vertical text, and meikiocr
-does not find a line that is only "……". ScreenAI read ellipses as any number
+5.5% of characters, ScreenAI 6.7%. VOCR reads no vertical text, which is why
+it only watches for changes. meikiocr, LFG's first reader, scored 5.1% (75%
+exact, 545 ms) and missed lines that are only "……"; ScreenAI replaced it, and
+its 45 MB download and ONNX models are gone. ScreenAI read ellipses as any number
 of dots; it now counts them by the room they take, which halved its errors.
 Every reader's text then goes through `ocr/TextClean.kt`, Rubi's rules for
 OCR text (one form of each mark, ー or 一 and ッ or ヶ by context, a text box's
@@ -271,7 +271,7 @@ header lists the four secrets it needs. `check.yml` runs the tests and lint on
 every push. **Neither workflow has run yet.**
 
 ScreenAI's library is built separately, once, and is not kept in git. Without
-it the app still builds and reads with meikiocr.
+it the app still builds, but nothing reads the screen.
 
 ```sh
 ANDROID_NDK=/path/to/ndk/29.0.14206865 tools/build_screenai.sh   # about 8 minutes; fills app/src/main/jniLibs
@@ -298,10 +298,6 @@ cmake --build arm64-tests
 qemu-aarch64 arm64-tests/lfg_dict_host lookup "dicts/JMdict [2026-11-17]" 見たんだ
 ```
 
-The meikiocr unit tests run the real models when they are in the Hugging Face
-cache (`rtr46/meiki.text.detect.v0`, `rtr46/meiki.txt.recognition.v0`) and are
-skipped otherwise.
-
 ## Trying it without a handheld
 
 ```sh
@@ -310,8 +306,8 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 adb install fakegame/build/outputs/apk/debug/fakegame-debug.apk
 ```
 
-To score the readers on the corpus (ScreenAI through the host `run_ocr` that
-`tools/build_screenai.sh`'s sources also build; meikiocr through the app's own port):
+To score ScreenAI on the corpus (through the host `run_ocr` that
+`tools/build_screenai.sh`'s sources also build):
 
 ```sh
 python3 tools/make_ocr_corpus.py corpus
@@ -332,7 +328,7 @@ accessibility services while it runs.
 - `app/src/main/cpp` — `lfg_dict` (hoshidicts to JSON), `lfg_vocr`, `lfg_screenai`, `lfg_webp`, `lfg_jni`, and host tests
 - `app/src/main/kotlin/io/github/beesan/lfg`
   - `core` — the line record, grouping rows into text blocks, tap hit-testing, settle detection, the text cursor, reading-time rules
-  - `ocr` — VOCR, meikiocr, ScreenAI, and their model downloads
+  - `ocr` — VOCR, ScreenAI, its download, and TextClean
   - `dict` — the engine's JNI face, entries as text and as HTML, dictionary management
   - `lookup` — lookup from a character, by touch or controller
   - `anki` — note type detection and field filling, AnkiDroid calls, cards, sentence audio
@@ -352,8 +348,6 @@ The app is GPL-3.0-or-later, as hoshidicts is.
 - VOCR's runtime (bee-san/vita-vn-ocr) is GPL-3.0-or-later. **Its weights, in
   `app/src/main/assets/vocr`, are for non-commercial use only**; the attribution
   files beside them say why.
-- meikiocr (rtr46): code Apache-2.0, weights LGPL-3.0. The weights are
-  downloaded at first run.
 - screenai_ocr (AuroraWright) is MPL-2.0. The model files it runs are Google's,
   published for Chromium; no licence for them was found, so the app downloads
   them from Chromium's package store and never ships them.
@@ -362,6 +356,6 @@ The app is GPL-3.0-or-later, as hoshidicts is.
 
 ## Thanks
 
-LFG stands on [GameSentenceMiner](https://github.com/bpwhelan/GameSentenceMiner), [hoshidicts](https://github.com/bee-san/hoshidicts), [VOCR](https://github.com/bee-san/vita-vn-ocr), [meikiocr](https://github.com/rtr46/meikiocr), [screenai_ocr](https://github.com/AuroraWright/screenai_ocr), [AnkiDroid](https://github.com/ankidroid/Anki-Android), [Silero VAD](https://github.com/snakers4/silero-vad), [Jitendex](https://jitendex.org), JMdict, JMnedict, [Jiten](https://jiten.moe), [Bee's Ultimate Kanji Dictionary](https://github.com/bee-san/bees-ultimate-kanji-dictionary), [Bee's Ultimate Grammar Dictionary](https://github.com/bee-san/bees-ultimate-grammar-dictionary) and [Hachidori](https://github.com/bee-san/hachidori), and on the Kiku, Lapis and Senren note types.
+LFG stands on [GameSentenceMiner](https://github.com/bpwhelan/GameSentenceMiner), [hoshidicts](https://github.com/bee-san/hoshidicts), [VOCR](https://github.com/bee-san/vita-vn-ocr), [screenai_ocr](https://github.com/AuroraWright/screenai_ocr), [AnkiDroid](https://github.com/ankidroid/Anki-Android), [Silero VAD](https://github.com/snakers4/silero-vad), [Jitendex](https://jitendex.org), JMdict, JMnedict, [Jiten](https://jiten.moe), [Bee's Ultimate Kanji Dictionary](https://github.com/bee-san/bees-ultimate-kanji-dictionary), [Bee's Ultimate Grammar Dictionary](https://github.com/bee-san/bees-ultimate-grammar-dictionary) and [Hachidori](https://github.com/bee-san/hachidori), and on the Kiku, Lapis and Senren note types.
 
 The plan and screen designs this was built from: <https://claude.ai/artifact/PahaxprErjPmLGocbz6pPW>

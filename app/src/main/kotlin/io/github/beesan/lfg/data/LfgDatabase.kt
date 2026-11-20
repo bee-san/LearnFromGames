@@ -47,6 +47,14 @@ interface LineDao {
     @Query("SELECT DISTINCT screenshot_path FROM game_lines WHERE screenshot_path IS NOT NULL AND note_ids != ''")
     suspend fun keptPictures(): List<String>
 
+    /** The screens of these lines that are still kept. */
+    @Query("SELECT DISTINCT screenshot_path FROM game_lines WHERE id IN (:ids) AND screenshot_path IS NOT NULL")
+    suspend fun picturesOf(ids: List<String>): List<String>
+
+    /** Every screen a line still points to. */
+    @Query("SELECT DISTINCT screenshot_path FROM game_lines WHERE screenshot_path IS NOT NULL")
+    suspend fun allPictures(): List<String>
+
     @Query("UPDATE game_lines SET screenshot_path = NULL WHERE screenshot_path = :path")
     suspend fun forgetPicture(path: String)
 
@@ -167,6 +175,9 @@ interface RecapDao {
 
     @Query("SELECT * FROM recaps WHERE game_id = :gameId ORDER BY created_at DESC LIMIT 1")
     suspend fun latest(gameId: String): RecapRow?
+
+    @Query("SELECT * FROM recaps")
+    suspend fun all(): List<RecapRow>
 
     @Query("SELECT * FROM recaps WHERE game_id = :gameId ORDER BY created_at DESC LIMIT 1")
     fun latestFlow(gameId: String): Flow<RecapRow?>

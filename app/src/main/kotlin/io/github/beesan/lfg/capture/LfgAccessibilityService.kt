@@ -140,9 +140,9 @@ class LfgAccessibilityService : AccessibilityService() {
         }
         // Whatever the settings ask for and the device has, as soon as it changes.
         scope.launch {
-            combine(app.settings.prefs, app.models.meiki, app.models.screenAi) { prefs, _, _ -> prefs }.collect { prefs ->
+            combine(app.settings.prefs, app.models.screenAi) { prefs, _ -> prefs }.collect { prefs ->
                 FrameRing.enabled = prefs.animatedPicture
-                withContext(Dispatchers.Default) { Readers.refresh(this@LfgAccessibilityService, app.models, prefs) }
+                withContext(Dispatchers.Default) { Readers.refresh(this@LfgAccessibilityService, app.models) }
             }
         }
         scope.launch {
@@ -861,16 +861,10 @@ class LfgAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** Old pictures go; the lines they came from never do. A picture a card was made from is kept. */
+    /** Old screens go (data/PictureKeeper.kt); the lines they came from never do. */
     private suspend fun clearOldPictures() {
         try {
-            val dao = app.database.lines()
-            val kept = dao.keptPictures().toSet()
-            for (path in dao.stalePictures(System.currentTimeMillis() - PICTURE_DAYS * 24 * 3600 * 1000L)) {
-                if (path in kept) continue
-                File(path).delete()
-                dao.forgetPicture(path)
-            }
+            app.pictures.sweep(app.settings.prefs.value.keepScreensDays)
         } catch (e: Exception) {
             Log.w(TAG, "clearing old pictures failed", e)
         }
@@ -890,7 +884,6 @@ class LfgAccessibilityService : AccessibilityService() {
 
         /** Looks at an unchanged screen (about ten seconds of them) before the pace halves. */
         private const val RESTING_AFTER = 28
-        private const val PICTURE_DAYS = 14
         private const val BARS_GRACE_MS = 8_000L
 
         private val DPAD = setOf(

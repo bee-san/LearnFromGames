@@ -29,6 +29,8 @@ import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LineStore
 import io.github.beesan.lfg.data.Note
+import io.github.beesan.lfg.data.PictureKeeper
+import io.github.beesan.lfg.Diagnostics
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
 import io.github.beesan.lfg.dict.DictionaryWorker
@@ -103,8 +105,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val dictionary: StateFlow<DictState> = app.dictionaries.state
     val fetchingDictionary: StateFlow<DictState?> = app.dictionaries.fetching
-    val reader: StateFlow<ModelState> = app.models.meiki
-    val screenAi: StateFlow<ModelState> = app.models.screenAi
+    val reader: StateFlow<ModelState> = app.models.screenAi
     val prefs: StateFlow<Prefs> = app.settings.prefs
 
     private val _practice = MutableStateFlow(PracticeState())
@@ -216,7 +217,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun retryDownloads() = DictionaryWorker.start(app, replace = true)
+    fun retryDownloads() = DictionaryWorker.start(app, replace = true, wifiOnly = app.settings.prefs.value.wifiOnly)
+
+    /** Waits for Wi-Fi, or not, from now on; downloads still to do start again under the new rule. */
+    fun setWifiOnly(on: Boolean) {
+        app.settings.update { it.copy(wifiOnly = on) }
+        if (app.dictionaries.defaultsPending() || app.dictionaries.state.value !is DictState.Ready || app.models.screenAiDir() == null) {
+            DictionaryWorker.start(app, replace = true, wifiOnly = on)
+        }
+    }
 
     fun finishPractice() {
         ui.edit().putBoolean("practiceDone", true).apply()
@@ -604,6 +613,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updatePrefs(change: (Prefs) -> Prefs) = app.settings.update(change)
 
     fun downloadScreenAi() = viewModelScope.launch { app.models.ensureScreenAi() }
+
+    /** What each kind of thing LFG keeps takes on this device, and the last clean-up's result. */
+    data class StorageState(val usage: PictureKeeper.Usage? = null, val message: String? = null)
+
+    private val _storage = MutableStateFlow(StorageState())
+    val storage: StateFlow<StorageState> = _storage
+
+    fun measureStorage() = viewModelScope.launch(Dispatchers.IO) {
+        _storage.value = _storage.value.copy(usage = app.pictures.usage(app.getDatabasePath("lfg.db")))
+    }
+
+    fun cleanUpStorage() = viewModelScope.launch(Dispatchers.IO) {
+        val before = _storage.value.usage?.screens
+        val gone = app.pictures.sweep(app.settings.prefs.value.keepScreensDays)
+        val usage = app.pictures.usage(app.getDatabasePath("lfg.db"))
+        val freed = before?.let { (it - usage.screens).coerceAtLeast(0) }
+        val size = freed?.let { if (it < 1_048_576) ", ${(it + 1023) / 1024} KB" else ", ${(it + 524_288) / 1_048_576} MB" } ?: ""
+        _storage.value = StorageState(usage, if (gone == 0) "Nothing to clear." else "Cleared $gone screen${if (gone == 1) "" else "s"}$size.")
+    }
+
+    private val _diagnostics = MutableStateFlow<String?>(null)
+    val diagnostics: StateFlow<String?> = _diagnostics
+
+    fun gatherDiagnostics() = viewModelScope.launch(Dispatchers.IO) {
+        _diagnostics.value = null
+        _diagnostics.value = Diagnostics.report(app)
+    }
 
     fun updateGame(game: Game) = viewModelScope.launch {
         withContext(Dispatchers.IO) {

@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
@@ -70,6 +71,7 @@ import io.github.beesan.lfg.games.Eden
 import io.github.beesan.lfg.games.EsdeLog
 import io.github.beesan.lfg.games.GameNameSources
 import io.github.beesan.lfg.games.RetroArchHistory
+import io.github.beesan.lfg.data.PictureKeeper
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
 import io.github.beesan.lfg.dict.WordAudio
@@ -133,12 +135,14 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Card("Dictionaries", "Add, order and remove dictionaries", { onOpen(Page.DICTIONARIES) })
     Card("Anki", "The note type and deck cards go to", { onOpen(Page.ANKI) })
     Card("Controls", "The lookup shortcut", { onOpen(Page.CONTROLS) })
-    Card("Text recognition", "The engine that reads the game", { onOpen(Page.RECOGNITION) })
+    Card("Text recognition", "ScreenAI, which reads the game", { onOpen(Page.RECOGNITION) })
     Card("Games and apps", "Rename one, choose when it is read, turn tap strips off", { onOpen(Page.GAMES) })
     Card("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", { onOpen(Page.GAME_NAMES) })
     Card("Sound and pictures", "Sentence audio, spoken lines and animated pictures", { onOpen(Page.MEDIA) })
     Card("Other apps", "Read browsers, chat and ebooks when you ask", { onOpen(Page.APPS) })
     Card("Practice line", "Try a lookup and a card without a game", { onOpen(Page.PRACTICE) })
+    Card("Storage", "What LFG keeps, and how long screens are kept", { onOpen(Page.STORAGE) })
+    Card("Help and diagnostics", "A report to send with a bug, or after a first run on a new device", { onOpen(Page.HELP) })
 }
 
 @Composable
@@ -212,8 +216,7 @@ fun SourcesScreen(sources: List<DictionarySource>, onBack: () -> Unit) = Page("S
     Text("Text recognition", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
     Text(
         "VOCR (bee-san/vita-vn-ocr) notices new text. Its code is GPL-3.0-or-later; its weights ship with this app for " +
-            "non-commercial use only. meikiocr (rtr46) reads the text: code Apache-2.0, weights LGPL-3.0. ScreenAI, when " +
-            "installed, is screenai_ocr (AuroraWright, MPL-2.0) running the model files Google publishes for Chromium, " +
+            "non-commercial use only. ScreenAI reads the text: screenai_ocr (AuroraWright, MPL-2.0) running the model files Google publishes for Chromium, " +
             "which are downloaded to this device and are not part of this app.",
         color = Lfg.Text, fontSize = 14.sp, lineHeight = 20.sp,
     )
@@ -400,21 +403,11 @@ private fun modelStatus(state: ModelState, ready: String) = when (state) {
 
 @Composable
 fun RecognitionScreen(
-    prefs: Prefs,
-    meiki: ModelState,
     screenAi: ModelState,
     screenAiBuilt: Boolean,
-    onChange: ((Prefs) -> Prefs) -> Unit,
     onDownloadScreenAi: () -> Unit,
     onBack: () -> Unit,
 ) = Page("Text recognition", onBack) {
-    Card("Engine", "Automatic uses ScreenAI when it is installed and meikiocr until then.") {
-        Choice(
-            listOf(Prefs.ENGINE_AUTO to "Automatic", Prefs.ENGINE_SCREENAI to "ScreenAI", Prefs.ENGINE_MEIKI to "meikiocr"),
-            prefs.engine,
-        ) { v -> onChange { it.copy(engine = v) } }
-    }
-    Card("meikiocr", modelStatus(meiki, "Installed"))
     Card(
         "ScreenAI",
         if (!screenAiBuilt) "Not in this build of the app." else modelStatus(screenAi, "Installed") +
@@ -422,7 +415,7 @@ fun RecognitionScreen(
     ) {
         if (screenAiBuilt && (screenAi is ModelState.Missing || screenAi is ModelState.Failed)) LfgButton("Download", onDownloadScreenAi)
     }
-    Text("VOCR watches every picture for new text; the engine above then reads it once it has stopped moving.", color = Lfg.Dim, fontSize = 14.sp)
+    Text("VOCR watches every picture for new text; ScreenAI then reads it once it has stopped moving.", color = Lfg.Dim, fontSize = 14.sp)
 }
 
 @Composable
@@ -899,4 +892,60 @@ internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, MEDIA, APPS, PRACTICE }
+enum class Page { STORAGE, HELP, HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, MEDIA, APPS, PRACTICE }
+
+@Composable
+fun StorageScreen(
+    usage: PictureKeeper.Usage?,
+    keepDays: Int,
+    message: String?,
+    onKeepDays: (Int) -> Unit,
+    onCleanUp: () -> Unit,
+    onBack: () -> Unit,
+) = Page("Storage", onBack) {
+    fun mb(bytes: Long) = if (bytes < 1_048_576) "${(bytes + 1023) / 1024} KB" else "${(bytes + 524_288) / 1_048_576} MB"
+    if (usage == null) {
+        Text("Measuring…", color = Lfg.Dim, fontSize = 15.sp)
+    } else {
+        Card("Screens", "${mb(usage.screens)} · ${usage.screenCount} pictures, ${usage.keptScreens} kept for good")
+        Card("Line pictures", "${mb(usage.crops)} · each line cut from its screen, kept for good")
+        Card("Cards and notes", "${mb(usage.cards + usage.notes)} · pictures and sound made for cards, and notes' own copies")
+        Card("Dictionaries", mb(usage.dictionaries))
+        Card("Text recognition", mb(usage.reader))
+        Card("Lines and stats", mb(usage.database))
+        Text("${mb(usage.total)} in all", color = Lfg.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    }
+    HorizontalDivider(color = Lfg.Border)
+    Card(
+        "Keep screens",
+        "The whole screen saved with each line. A line, its text and its own picture are never deleted, and neither is " +
+            "a screen a card was made from or a recap chose as a moment.",
+    ) {
+        Choice(listOf("7" to "A week", "14" to "Two weeks", "30" to "A month", "90" to "Three months", "0" to "Always"), keepDays.toString()) {
+            onKeepDays(it.toInt())
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        LfgButton("Clean up now", onCleanUp)
+        message?.let { Text("  $it", color = Lfg.Dim, fontSize = 14.sp) }
+    }
+}
+
+@Composable
+fun HelpScreen(report: String?, onCopy: () -> Unit, onShare: () -> Unit, onBack: () -> Unit) = Page("Help and diagnostics", onBack) {
+    Text(
+        "If something goes wrong, or after a first run on a new handheld, send this report with what happened " +
+            "(github.com/bee-san/LearnFromGames/issues). It has the device, what LFG has installed, how much it keeps, and " +
+            "LFG's own recent log with its timings. It has no key and none of the text LFG read. Read it before you send it.",
+        color = Lfg.Text, fontSize = 15.sp, lineHeight = 22.sp,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LfgButton("Copy", onCopy, primary = true, enabled = report != null)
+        LfgButton("Share…", onShare, enabled = report != null)
+    }
+    Text(
+        report ?: "Gathering…",
+        color = Lfg.Dim, fontSize = 12.sp, lineHeight = 16.sp, fontFamily = FontFamily.Monospace,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Lfg.Surface).padding(10.dp),
+    )
+}

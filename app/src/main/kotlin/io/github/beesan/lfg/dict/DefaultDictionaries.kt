@@ -59,5 +59,8 @@ object DefaultDictionaries {
         ) { it.terms >= 1_000 },
     )
 
+    /** All five downloads together, as noted beside each: about 105 MB. */
+    const val BYTES = 104_600_000L
+
     fun byId(id: String) = ALL.firstOrNull { it.id == id }
 }
