@@ -7,7 +7,9 @@
 <meta name="description" content="Learn Japanese from the games you are already playing. Tap a word in a game on your Android handheld, read the entry, and make an Anki card with one press.">
 <meta property="og:title" content="LearnFromGames — instruction manual">
 <meta property="og:description" content="Tap a word in a game, read the entry, one press for an Anki card. For Android handhelds.">
-<meta property="og:image" content="https://bee-san.github.io/LearnFromGames/screens.png">
+<meta property="og:image" content="https://bee-san.github.io/LearnFromGames/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#ece5d6">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='6' fill='%23c8382c'/%3E%3Ctext x='32' y='45' font-family='serif' font-size='36' font-weight='700' text-anchor='middle' fill='%23f3eee2'%3E%E8%AA%AD%3C/text%3E%3C/svg%3E">
@@ -294,6 +296,32 @@ h1 em { font-style: normal; color: var(--red); }
 @keyframes bump { 40% { transform: scale(1.12); } }
 
 /* ── Manual pages ───────────────────────────────────── */
+.entry-fig { max-width: 440px; justify-self: center; width: 100%; }
+.mini-entry {
+  background: var(--panel); color: var(--panel-text); border: 2px solid var(--ink); border-radius: 8px; padding: 18px 20px 14px;
+  font: 15px/1.6 var(--sans); box-shadow: 0 18px 30px -18px rgba(40, 25, 5, 0.5);
+}
+.me-line { font: 500 15px/1.7 var(--mincho); color: #cfcde0; padding-bottom: 10px; border-bottom: 1px solid #2f303d; margin-bottom: 12px; }
+.me-line mark { background: rgba(177, 165, 238, 0.28); color: #fff; border-radius: 2px; }
+.me-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.me-term { font: 700 34px/1.1 var(--sans); }
+.me-read { font-size: 17px; color: var(--panel-dim); letter-spacing: 0.04em; }
+.me-read .hi { position: relative; display: inline-block; }
+.me-read .hi::after { content: ""; position: absolute; left: 0; right: -1px; top: 0; height: 9px; border-top: 2px solid var(--lav); border-right: 2px solid var(--lav); }
+.me-acc { font-size: 11px; font-weight: 700; color: #1b1830; background: var(--lav); border-radius: 4px; padding: 0 5px; }
+.me-chip { font-size: 12px; font-weight: 700; color: var(--green); border: 1px solid rgba(143, 197, 160, 0.5); border-radius: 99px; padding: 0 8px; margin-left: auto; }
+.me-tag { display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 700; background: #4a4a5a; border-radius: 4px; padding: 0 7px; }
+.me-gloss { margin: 4px 0 10px; }
+.me-ex { border-left: 3px solid #3c3d4c; padding: 4px 0 4px 12px; font: 500 15px/1.6 var(--mincho); }
+.me-ex small { display: block; font: 13px var(--sans); color: var(--panel-dim); }
+.me-gram { margin-top: 12px; padding: 8px 12px; background: #282936; border-radius: 6px; font-size: 14px; display: flex; gap: 10px; align-items: baseline; }
+.me-gram b { font: 700 16px var(--mincho); color: var(--lav); }
+.me-gram span { color: #d6d5e2; }
+.me-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 10px; border-top: 1px solid #2f303d; font-size: 12px; color: var(--panel-dim); }
+.me-add { background: var(--lav); color: #1b1830; font-weight: 700; font-size: 13px; border-radius: 8px; padding: 4px 12px; }
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+.reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
 main > .page:nth-of-type(odd) { background-color: rgba(140, 105, 50, 0.055); }
 .contents { display: grid; grid-template-columns: 1fr auto; gap: 60px; align-items: start; }
 @media (max-width: 760px) { .contents { grid-template-columns: 1fr; } .motto { display: none; } }
@@ -708,6 +736,7 @@ cd LearnFromGames
     <div class="wrap">
       <div class="page-head"><span class="num">7</span><h2>Dictionaries <span class="jp" lang="ja">辞書</span></h2></div>
       <div class="two">
+        <div>
         <p style="margin-top:0">A new install fetches Hachidori's starter set. After that, add any Yomitan dictionary zip, and it's shown with its own styling. Pitch accent dictionaries draw the accent over the reading. Frequency dictionaries show their ranks. local-audio-yomichan's <b>android.db</b> lets you hear the word.</p>
         <ul class="dicts">
           <li>Jitendex <span>definitions</span></li>
@@ -716,6 +745,19 @@ cd LearnFromGames
           <li>Jiten <span>frequencies</span></li>
           <li>Bee's Ultimate Grammar Dictionary <span>grammar</span></li>
         </ul>
+        </div>
+        <figure class="fig entry-fig">
+          <div class="mini-entry" lang="ja">
+            <div class="me-line">その<mark>景色</mark>は言葉では表現できないほどだった。</div>
+            <div class="me-head"><span class="me-term">景色</span><span class="me-read"><span class="hi">け</span>しき</span><span class="me-acc">1</span><span class="me-chip" lang="en">★ common</span></div>
+            <div class="me-tag" lang="en">noun</div>
+            <div class="me-gloss" lang="en">scenery; scene; landscape</div>
+            <div class="me-ex">その景色は言葉では表現できないほどだった。<small lang="en">The scenery was beyond description.</small></div>
+            <div class="me-gram"><b>ほど</b><span lang="en">to the extent that…; so much that…</span></div>
+            <div class="me-foot" lang="en"><span class="me-add">Add card</span><span>Jitendex · Bee's Grammar</span></div>
+          </div>
+          <figcaption><b>Fig. 4</b> One entry, several dictionaries: the accent drawn over the reading, how common the word is, and the grammar in the line.</figcaption>
+        </figure>
       </div>
     </div>
     <div class="folio">— 7 —</div>
@@ -1005,6 +1047,14 @@ cd LearnFromGames
   }
   shellBtns.forEach(function (b) { b.addEventListener("click", function () { shell(b.getAttribute("data-s")); }); });
   try { var saved = localStorage.getItem("lfg-shell"); if (saved && /^(black|white|rainbow|purple)$/.test(saved)) shell(saved); } catch (e) {}
+
+  // Each page settles in as it scrolls into view, as Yui's lines do.
+  if ("IntersectionObserver" in window && !reduce) {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, { threshold: 0.12 });
+    document.querySelectorAll("main .page > .wrap").forEach(function (el) { el.classList.add("reveal"); io.observe(el); });
+  }
 
   show(0);
 })();
