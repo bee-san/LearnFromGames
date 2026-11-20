@@ -98,7 +98,7 @@ class LfgAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         app = application as App
-        pipeline = ReadingPipeline(app.lines, File(filesDir, "frames"))
+        pipeline = ReadingPipeline(app.lines, File(filesDir, "frames"), apart = { app.settings.prefs.value.interfaceApart })
         controller = LookupController(
             scope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) }, ::prepareLine,
             matchLength = { app.dictionaries.matchLength(it) },

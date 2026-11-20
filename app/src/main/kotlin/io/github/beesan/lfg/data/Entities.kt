@@ -12,7 +12,7 @@ import androidx.room.PrimaryKey
  * are what the desktop app does not keep. Rows are never deleted when old
  * pictures are cleared.
  */
-@Entity(tableName = "game_lines", indices = [Index("timestamp"), Index("game_id")])
+@Entity(tableName = "game_lines", indices = [Index("timestamp"), Index("game_id"), Index("game_id", "line_text")])
 data class GameLine(
     /** A UUID, as on desktop. */
     @PrimaryKey val id: String,
@@ -40,6 +40,12 @@ data class GameLine(
     @ColumnInfo(name = "crop_path") val cropPath: String? = null,
     /** The line's translation, once asked for. */
     val translation: String? = null,
+    /**
+     * A menu label, a HUD's words or a name plate rather than a line
+     * ([io.github.beesan.lfg.core.InterfaceText]): kept, but out of the lines
+     * list, the stats, recaps and the lines file.
+     */
+    @ColumnInfo(name = "interface_text", defaultValue = "0") val interfaceText: Boolean = false,
 )
 
 /**

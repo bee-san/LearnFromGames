@@ -41,6 +41,7 @@ class LineStore(private val db: LfgDatabase, private val onSaved: (GameLine) -> 
         displayId: Int = 0,
         box: Box? = null,
         nowMs: Long = System.currentTimeMillis(),
+        interfaceText: Boolean = false,
     ): GameLine {
         val line = GameLine(
             id = UUID.randomUUID().toString(),
@@ -56,11 +57,19 @@ class LineStore(private val db: LfgDatabase, private val onSaved: (GameLine) -> 
             charCount = text.codePointCount(0, text.length),
             displayId = displayId,
             box = box?.encode() ?: "",
+            interfaceText = interfaceText,
         )
         db.lines().insert(line)
         onSaved(line)
         return line
     }
+
+    /** Every line of [text] in [game] is interface text from now on, and those saved before it. */
+    suspend fun markInterface(game: Game, text: String, nowMs: Long = System.currentTimeMillis()) = db.lines().markInterface(game.id, text, nowMs)
+
+    suspend fun interfaceTexts(game: Game): Set<String> = db.lines().interfaceTexts(game.id).toSet()
+
+    suspend fun savedTimes(game: Game, text: String): List<Long> = db.lines().savedTimes(game.id, text)
 
     suspend fun setCrop(lineId: String, path: String) = db.lines().setCrop(lineId, path)
 

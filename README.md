@@ -69,7 +69,9 @@ Reading and lookup run on the device. The network is used for the first-run down
   anyway after six seconds of never holding still); and with dozens of pieces
   of text on screen the panel listed them all and pushed the entry off it.
   Still wrong there: icons beside labels are read as stray characters
-  ("[1) オーディオ"), and every menu label is saved as a line.
+  ("[1) オーディオ"). Every menu label was saved as a line; menus and labels
+  are now told apart (`core/InterfaceText.kt`) and kept out of Lines and the
+  stats, but this has not been run against PPSSPP again.
 - **Lapis 1.7.0 and Senren 5.1.0**, imported into AnkiDroid from their release
   decks: a card made from the game lands in the right fields of each. Kiku
   2.1.0's fields are checked against the mapping but no card was made in it.

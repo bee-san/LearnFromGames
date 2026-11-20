@@ -294,7 +294,9 @@ class MainActivity : ComponentActivity() {
                         )
                         page == Page.TRANSLATION -> TranslationScreen(prefs, model::updatePrefs, keyTest, model::testKey, ::back)
                         page == Page.CONTROLS -> ControlsScreen(prefs, model::updatePrefs, ::back)
-                        page == Page.RECOGNITION -> RecognitionScreen(reader, ScreenAi.available(), { model.downloadScreenAi() }, ::back)
+                        page == Page.RECOGNITION -> RecognitionScreen(
+                            reader, ScreenAi.available(), { model.downloadScreenAi() }, prefs.interfaceApart, model::setInterfaceApart, ::back,
+                        )
                         page == Page.STORAGE -> {
                             val storage by model.storage.collectAsStateWithLifecycle()
                             LaunchedEffect(Unit) { model.measureStorage() }

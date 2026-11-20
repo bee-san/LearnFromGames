@@ -76,6 +76,12 @@ data class Prefs(
     val readButton: Boolean = false,
     /** Kept lines from apps count towards reading time and the goals, beside games. */
     val appsInReadingTime: Boolean = true,
+    /**
+     * Menu labels, a HUD's words and name plates are told apart from lines
+     * ([io.github.beesan.lfg.core.InterfaceText]) and left out of the lines
+     * list, the stats and the lines file. Turned off, every line is back.
+     */
+    val interfaceApart: Boolean = true,
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
@@ -136,6 +142,7 @@ class Settings(context: Context) {
             keepAppLines = store.getBoolean("keepAppLines", d.keepAppLines),
             readButton = store.getBoolean("readButton", d.readButton),
             appsInReadingTime = store.getBoolean("appsInReadingTime", d.appsInReadingTime),
+            interfaceApart = store.getBoolean("interfaceApart", d.interfaceApart),
         )
     }
 
@@ -174,6 +181,7 @@ class Settings(context: Context) {
             .putBoolean("keepAppLines", next.keepAppLines)
             .putBoolean("readButton", next.readButton)
             .putBoolean("appsInReadingTime", next.appsInReadingTime)
+            .putBoolean("interfaceApart", next.interfaceApart)
             .apply()
         secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
         _prefs.value = next

@@ -39,9 +39,9 @@ class App : Application() {
     val lines by lazy {
         LineStore(database) { line ->
             StatsWidgets.requestUpdate(this)
-            // "Every line": each new line is translated as it is read, behind the reading.
+            // "Every line": each new line is translated as it is read, behind the reading. A menu label is not a line.
             val prefs = settings.prefs.value
-            if (prefs.translate == Prefs.TRANSLATE_EVERY && prefs.openRouterKey.isNotBlank()) {
+            if (!line.interfaceText && prefs.translate == Prefs.TRANSLATE_EVERY && prefs.openRouterKey.isNotBlank()) {
                 scope.launch {
                     try {
                         translator.translate(line)

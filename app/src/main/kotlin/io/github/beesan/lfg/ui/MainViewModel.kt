@@ -617,6 +617,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updatePrefs(change: (Prefs) -> Prefs) = app.settings.update(change)
 
+    /** Off puts every line found to be interface text back in Lines and the stats; on finds them afresh. */
+    fun setInterfaceApart(on: Boolean) {
+        app.settings.update { it.copy(interfaceApart = on) }
+        if (!on) viewModelScope.launch(Dispatchers.IO) { app.database.lines().forgetInterface() }
+    }
+
     fun downloadScreenAi() = viewModelScope.launch { app.models.ensureScreenAi() }
 
     /** What each kind of thing LFG keeps takes on this device, and the last clean-up's result. */

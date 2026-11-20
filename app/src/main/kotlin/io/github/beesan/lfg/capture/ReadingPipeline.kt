@@ -4,6 +4,7 @@ package io.github.beesan.lfg.capture
 import android.graphics.Bitmap
 import io.github.beesan.lfg.core.Blocks
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.core.InterfaceText
 import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.core.SettleDetector
 import io.github.beesan.lfg.core.TextLine
@@ -46,11 +47,19 @@ class ReadingPipeline(
     private val reader: () -> TextReader? = { Readers.reader },
     private val probe: () -> ChangeProbe = { Readers.probe },
     private val detector: SettleDetector = SettleDetector(),
+    /** Whether menu labels, a HUD's words and name plates are told apart from lines ([InterfaceText]). */
+    private val apart: () -> Boolean = { false },
 ) {
     private val _latest = MutableStateFlow<Reading?>(null)
     val latest: StateFlow<Reading?> = _latest
 
     private var lastGame = ""
+
+    private val interfaceText = InterfaceText()
+
+    /** The texts found to be interface text in [knownFor]'s game, loaded the first time it is read. */
+    private val interfaceKnown = HashSet<String>()
+    private var knownFor = ""
 
     /** Reused between frames: eight megabytes three times a second is too much to hand the collector. */
     private var buffer: IntArray? = null
@@ -82,6 +91,7 @@ class ReadingPipeline(
     /** Forget what was on screen, so the next settled frame is read even if it is the same text. */
     fun forget() {
         detector.reset()
+        interfaceText.reset()
         lastSignature = null
         _latest.value = null
     }
@@ -99,6 +109,7 @@ class ReadingPipeline(
         if (game.id != lastGame) {
             // A different app in front: whatever settled before is not on this screen.
             detector.reset()
+            interfaceText.reset()
             lastSignature = null
             lastGame = game.id
         }
@@ -120,6 +131,7 @@ class ReadingPipeline(
             if (signature.isEmpty()) {
                 // The text has gone (a scene change, a menu): nothing is on screen to tap.
                 detector.offer(signature, nowMs)
+                interfaceText.onReading(emptyList())
                 if (_latest.value?.lines?.isNotEmpty() == true) _latest.value = Reading(game, displayId, emptyList(), emptyList(), null, nowMs)
                 return false
             }
@@ -133,7 +145,17 @@ class ReadingPipeline(
             .filter { line -> covered.none { it.intersects(line.box) } }
         // A reader returns rows; the game shows sentences. From here on a line is a whole piece of text.
         val lines = Perf.measure("group") { Blocks.group(rows) }
+        val found = interfaceText.onReading(lines.map { it.text })
         if (lines.isEmpty()) return still
+        val telling = apart()
+        if (!telling) {
+            interfaceKnown.clear()
+            knownFor = ""
+        } else if (knownFor != game.id) {
+            interfaceKnown.clear()
+            interfaceKnown += store.interfaceTexts(game)
+            knownFor = game.id
+        }
         // A line still on screen from the last reading keeps its row; only new text is saved.
         val carried = _latest.value?.takeIf { it.game.id == game.id }
             ?.let { old -> old.lines.map { it.text }.zip(old.saved).toMap() }
@@ -146,11 +168,25 @@ class ReadingPipeline(
         val carriedTimes = _latest.value?.takeIf { it.game.id == game.id }
             ?.let { old -> old.lines.map { it.text }.zip(old.appearedAtMs).toMap() } ?: emptyMap()
         val fresh = ArrayList<Pair<GameLine, Box>>()
+        // Interface text found on this reading: on screen as a menu, a label that stayed, or one come back again.
+        val newly = if (telling) found.filterTo(LinkedHashSet()) { it !in interfaceKnown } else LinkedHashSet()
         val saved = lines.map { line ->
-            carried[line.text] ?: store.saveLine(
-                game = game, text = line.text, source = LineStore.SOURCE_OCR, engine = engine.name,
-                screenshotPath = framePath, displayId = displayId, box = line.box, nowMs = nowMs,
-            ).also { fresh += it to line.box }
+            carried[line.text] ?: run {
+                val isInterface = telling && (
+                    line.text in interfaceKnown || line.text in found ||
+                        (InterfaceText.short(line.text) && InterfaceText.comesBack(line.text, store.savedTimes(game, line.text), nowMs))
+                            .also { if (it) newly += line.text }
+                    )
+                store.saveLine(
+                    game = game, text = line.text, source = LineStore.SOURCE_OCR, engine = engine.name,
+                    screenshotPath = framePath, displayId = displayId, box = line.box, nowMs = nowMs, interfaceText = isInterface,
+                ).also { fresh += it to line.box }
+            }
+        }
+        // Found once, it is interface text in this game before and after: the lines saved of it already go too.
+        for (text in newly) {
+            store.markInterface(game, text, nowMs)
+            interfaceKnown += text
         }
         Perf.measure("save.crops") { saveCrops(bitmap, fresh, offsetX, offsetY) }
         _latest.value = Reading(game, displayId, lines, saved, framePath, nowMs, lines.map { carriedTimes[it.text] ?: appearedNow })

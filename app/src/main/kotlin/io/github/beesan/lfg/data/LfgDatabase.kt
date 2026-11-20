@@ -22,7 +22,7 @@ interface LineDao {
     @Query("SELECT * FROM game_lines WHERE id = :id")
     suspend fun byId(id: String): GameLine?
 
-    @Query("SELECT * FROM game_lines WHERE source != 'practice' ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC LIMIT :limit")
     fun recent(limit: Int): Flow<List<GameLine>>
 
     @Query("SELECT * FROM game_lines WHERE game_id = :gameId ORDER BY created_at DESC LIMIT :limit")
@@ -33,11 +33,11 @@ interface LineDao {
     suspend fun nextAfter(gameId: String, afterMs: Long): GameLine?
 
     /** The text too: stats count its letters, not every code point as `char_count` does. */
-    @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' ORDER BY timestamp")
+    @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp")
     fun stamps(): Flow<List<LineStamp>>
 
     /** The same, from [since] on: the lines a session still going can be made of. */
-    @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' AND timestamp >= :since ORDER BY timestamp")
+    @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' AND interface_text = 0 AND timestamp >= :since ORDER BY timestamp")
     suspend fun stampsSince(since: Double): List<LineStamp>
 
     /** Pictures no card was made from, older than [before] (milliseconds). */
@@ -68,19 +68,35 @@ interface LineDao {
     suspend fun setTranslation(id: String, text: String)
 
     /** The lines of a game read before [before], newest first: what a translation is given as context. */
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp < :before AND source != 'practice' ORDER BY timestamp DESC LIMIT :count")
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp < :before AND source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC LIMIT :count")
     suspend fun before(gameId: String, before: Double, count: Int): List<GameLine>
 
     /** A game's lines in the order they were read. */
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND source != 'practice' ORDER BY timestamp")
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND source != 'practice' AND interface_text = 0 ORDER BY timestamp")
     suspend fun ofGame(gameId: String): List<GameLine>
 
     /** Every line in the order it was read: for a lines file. */
-    @Query("SELECT * FROM game_lines WHERE source != 'practice' ORDER BY timestamp")
+    @Query("SELECT * FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp")
     suspend fun all(): List<GameLine>
 
     @Query("UPDATE game_lines SET note_ids = :noteIds, last_modified = :now WHERE id = :id")
     suspend fun setNoteIds(id: String, noteIds: String, now: Long)
+
+    /** Every line of [text] in a game, before and after, is interface text: all but one a card was made from. */
+    @Query("UPDATE game_lines SET interface_text = 1, last_modified = :now WHERE game_id = :gameId AND line_text = :text AND interface_text = 0 AND note_ids = ''")
+    suspend fun markInterface(gameId: String, text: String, now: Long)
+
+    /** The texts already found to be interface text in a game. */
+    @Query("SELECT DISTINCT line_text FROM game_lines WHERE game_id = :gameId AND interface_text = 1")
+    suspend fun interfaceTexts(gameId: String): List<String>
+
+    /** When each line of [text] in a game was saved, in milliseconds. */
+    @Query("SELECT created_at FROM game_lines WHERE game_id = :gameId AND line_text = :text")
+    suspend fun savedTimes(gameId: String, text: String): List<Long>
+
+    /** Every line back in the lines list and the stats: telling interface text apart was turned off. */
+    @Query("UPDATE game_lines SET interface_text = 0 WHERE interface_text = 1")
+    suspend fun forgetInterface()
 }
 
 data class LineStamp(val timestamp: Double, val text: String, val gameId: String)
@@ -186,12 +202,15 @@ interface RecapDao {
 /** Schema changes add a numbered migration; nothing here is ever rebuilt destructively. */
 @Database(
     entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
     // 2: a crop and a translation for each line, notes, and recaps. Room writes it from the exported schemas.
     // 3: a row for each game named inside an emulator.
     // 4: whether a row is an ordinary app, read on demand.
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
+    // 5: whether a line is interface text (a menu label, a name plate), and an index to find a line's text in a game.
+    autoMigrations = [
+        AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5),
+    ],
 )
 abstract class LfgDatabase : RoomDatabase() {
     abstract fun lines(): LineDao

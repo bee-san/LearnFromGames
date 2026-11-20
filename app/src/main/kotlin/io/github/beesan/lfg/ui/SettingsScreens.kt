@@ -406,6 +406,8 @@ fun RecognitionScreen(
     screenAi: ModelState,
     screenAiBuilt: Boolean,
     onDownloadScreenAi: () -> Unit,
+    interfaceApart: Boolean,
+    onInterfaceApart: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) = Page("Text recognition", onBack) {
     Card(
@@ -416,6 +418,13 @@ fun RecognitionScreen(
         if (screenAiBuilt && (screenAi is ModelState.Missing || screenAi is ModelState.Failed)) LfgButton(if (screenAi is ModelState.Failed) "Try again" else "Download", onDownloadScreenAi)
     }
     Text("VOCR watches every picture for new text; ScreenAI then reads it once it has stopped moving.", color = Lfg.Dim, fontSize = 14.sp)
+    Card(
+        "Leave out menus and labels",
+        "Short text that comes as a menu, stays put while the lines change, or keeps coming back is still tappable, " +
+            "but stays out of Lines, the stats, recaps and the lines file. Off puts every line back.",
+    ) {
+        OnOff(interfaceApart, onInterfaceApart)
+    }
 }
 
 @Composable
