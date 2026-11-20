@@ -131,8 +131,6 @@ dependencies {
     implementation(libs.serialization.json)
     implementation(libs.ankidroid.api)
 
-    implementation(libs.onnxruntime.android)
-
     testImplementation(libs.junit)
     // The same reader runs on the build machine against the real models.
     testImplementation(libs.onnxruntime.jvm)

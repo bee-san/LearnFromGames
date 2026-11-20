@@ -249,8 +249,8 @@ both APKs. To run it before every push:
 git config core.hooksPath .githooks   # once per clone; skip a push's check with --no-verify
 ```
 
-A release is one shrunk APK per kind of device (about 50 MB for arm64, against
-172 MB for the debug build, most of it ONNX Runtime):
+A release is one shrunk APK per kind of device (about 15 MB for arm64, 17 MB
+for x86_64):
 
 ```sh
 ./gradlew :app:assembleRelease      # app/build/outputs/apk/release/app-arm64-v8a-release.apk, app-x86_64-release.apk
@@ -351,7 +351,7 @@ The app is GPL-3.0-or-later, as hoshidicts is.
 - screenai_ocr (AuroraWright) is MPL-2.0. The model files it runs are Google's,
   published for Chromium; no licence for them was found, so the app downloads
   them from Chromium's package store and never ships them.
-- libwebp is BSD-3-Clause. AnkiDroid's API is LGPL-3.0. ONNX Runtime is MIT.
+- libwebp is BSD-3-Clause. AnkiDroid's API is LGPL-3.0.
 - Silero VAD is MIT. Its model's weights ship in `app/src/main/assets/vad`, run by the app's own port of it.
 
 ## Thanks
