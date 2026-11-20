@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.anki
 
-import ai.onnxruntime.OrtEnvironment
 import android.content.Context
 import android.util.Log
 import io.github.beesan.lfg.Prefs
@@ -35,10 +34,7 @@ class MediaAttacher(
 
     private val waiting = ArrayList<Waiting>()
 
-    private val voice by lazy {
-        val env = OrtEnvironment.getEnvironment()
-        VoiceFinder(env, env.createSession(context.assets.open("vad/silero_vad.onnx").use { it.readBytes() }))
-    }
+    private val voice by lazy { context.assets.open(VoiceFinder.ASSET).use { VoiceFinder.load(it) } }
 
     /** Called when a card has been added. */
     fun audioFor(card: Card, target: AnkiTarget, lineStartMs: Long?, fromApp: Boolean = false) {

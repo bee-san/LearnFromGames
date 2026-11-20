@@ -352,7 +352,7 @@ The app is GPL-3.0-or-later, as hoshidicts is.
   published for Chromium; no licence for them was found, so the app downloads
   them from Chromium's package store and never ships them.
 - libwebp is BSD-3-Clause. AnkiDroid's API is LGPL-3.0. ONNX Runtime is MIT.
-- Silero VAD is MIT. Its model ships in `app/src/main/assets/vad`.
+- Silero VAD is MIT. Its model's weights ship in `app/src/main/assets/vad`, run by the app's own port of it.
 
 ## Thanks
 

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.capture
 
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
+import java.io.InputStream
 
 /**
  * Finds the voice in a clip of game sound with Silero VAD, so the music and
@@ -14,31 +12,20 @@ import ai.onnxruntime.OrtSession
  * The model is called as Silero's own Java example calls it: 512 samples at
  * 16 kHz a step, after the last 64 of the step before, with its state carried.
  */
-class VoiceFinder(private val env: OrtEnvironment, private val session: OrtSession) : AutoCloseable {
+class VoiceFinder(private val vad: SileroVad) {
 
     /** The chance of speech in each 32 ms step of a 16 kHz clip. */
     @Synchronized
     fun probabilities(clip: FloatArray): FloatArray {
-        var state = Array(2) { Array(1) { FloatArray(128) } }
-        val input = Array(1) { FloatArray(CONTEXT + CHUNK) }
+        val state = FloatArray(SileroVad.STATE)
+        val input = FloatArray(CONTEXT + CHUNK)
         val steps = clip.size / CHUNK
         val out = FloatArray(steps)
-        OnnxTensor.createTensor(env, longArrayOf(RATE.toLong())).use { sr ->
-            for (step in 0 until steps) {
-                // The context is the previous step's last 64 samples; silence before the first.
-                System.arraycopy(input[0], CHUNK, input[0], 0, CONTEXT)
-                System.arraycopy(clip, step * CHUNK, input[0], CONTEXT, CHUNK)
-                OnnxTensor.createTensor(env, input).use { x ->
-                    OnnxTensor.createTensor(env, state).use { s ->
-                        session.run(mapOf("input" to x, "state" to s, "sr" to sr)).use { result ->
-                            @Suppress("UNCHECKED_CAST")
-                            out[step] = (result[0].value as Array<FloatArray>)[0][0]
-                            @Suppress("UNCHECKED_CAST")
-                            state = result[1].value as Array<Array<FloatArray>>
-                        }
-                    }
-                }
-            }
+        for (step in 0 until steps) {
+            // The context is the previous step's last 64 samples; silence before the first.
+            System.arraycopy(input, CHUNK, input, 0, CONTEXT)
+            System.arraycopy(clip, step * CHUNK, input, CONTEXT, CHUNK)
+            out[step] = vad.run(input, state)
         }
         return out
     }
@@ -56,12 +43,16 @@ class VoiceFinder(private val env: OrtEnvironment, private val session: OrtSessi
         return if (to > from) samples.copyOfRange(from, to) else ShortArray(0)
     }
 
-    override fun close() = session.close()
-
     companion object {
         const val RATE = 16_000
-        const val CHUNK = 512
-        const val CONTEXT = 64
+        const val CHUNK = SileroVad.CHUNK
+        const val CONTEXT = SileroVad.CONTEXT
+
+        /** Where the model's weights are kept among the app's assets. */
+        const val ASSET = "vad/silero_vad_16k.bin"
+
+        /** A finder with the model's weights read from [weights]. */
+        fun load(weights: InputStream) = VoiceFinder(SileroVad.load(weights))
         const val STEP_MS = CHUNK * 1000 / RATE
 
         /** Silero's own defaults (get_speech_timestamps). */
