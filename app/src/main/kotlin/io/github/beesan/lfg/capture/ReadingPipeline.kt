@@ -10,6 +10,7 @@ import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LineStore
+import io.github.beesan.lfg.ocr.TextClean
 import io.github.beesan.lfg.ocr.Frame
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -130,7 +131,9 @@ class ReadingPipeline(
             if (!detector.offer(signature, nowMs)) return false
         }
 
-        val rows = Perf.measure("read") { engine.read(frame) }.filter { it.text.isNotBlank() }.map { it.moved(offsetX, offsetY) }
+        val rows = Perf.measure("read") { engine.read(frame) }
+            // The reader's forms made the game's own (TextClean), and what is not the game's text dropped.
+            .mapNotNull(TextClean::line).filter { it.text.isNotBlank() }.map { it.moved(offsetX, offsetY) }
             // Text under another window (a system dialog on a whole-screen picture) is not the game's.
             .filter { line -> covered.none { it.intersects(line.box) } }
         // A reader returns rows; the game shows sentences. From here on a line is a whole piece of text.

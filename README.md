@@ -86,7 +86,8 @@ Everything runs on the device. The only network use is fetching the readers' mod
   bottom screen, AYN firmware and quickly changing overlay windows, AnkiDroid
   answering after a cold start there, and what background reading costs in
   battery and heat. The emulator answered the others (see below).
-- No speed or accuracy figures for ScreenAI against meikiocr on a handheld.
+- No speed figures for ScreenAI or meikiocr on a handheld: the OCR bench below
+  ran on the x86_64 emulator.
 - A text hook as a second source of lines (the plan's "after that, if wanted")
   is not built. The intent is for the app to be the texthooker itself, not to
   listen to another one.
@@ -124,6 +125,38 @@ hoshidicts only how long each word is (`match_length`), not for its entries.
 `host-build/lfg_dict_host bench <directory of imported dictionaries>` times
 lookups on the desktop over every dictionary there: with the five, 0.3–0.8 ms
 a lookup and about 6 ms for the word steps of a whole line.
+
+<details>
+<summary><b>How well it reads real games</b> (1,570 hooked lines from 167 Vita and PSP games)</summary>
+
+`tools/ocr_bench.py` scores the readers on real game screens whose text is
+known: Vita and PSP pages captured with the game's own text hooked
+(psandvita's paired data, Rubi's training data), each page letterboxed to
+1920x1080 as a handheld shows it. The readers run on the device through the
+debug-only `OcrBench` instrumentation, with the app's own clean-up. On the
+x86_64 emulator, 931 screens:
+
+| Reader | Character errors | Lines exactly right | Time per screen (median) |
+| --- | --- | --- | --- |
+| ScreenAI (the default) | 3.6% | 88% | 240–500 ms |
+| meikiocr | 5.1% | 75% | 545 ms |
+| VOCR (the change probe) | 4.4% | 86% | 100 ms |
+
+VOCR6 was fine-tuned on these games; on the two held out from it, it misses
+5.5% of characters, ScreenAI 6.7%. VOCR reads no vertical text, and meikiocr
+does not find a line that is only "……". ScreenAI read ellipses as any number
+of dots; it now counts them by the room they take, which halved its errors.
+Every reader's text then goes through `ocr/TextClean.kt`, Rubi's rules for
+OCR text (one form of each mark, ー or 一 and ッ or ヶ by context, a text box's
+border read as text dropped) and two from the bench (a 「 or 」 read as a
+letter; a line of English or numbers with nothing Japanese dropped), which
+removes 43% of what ScreenAI read off the dialogue (menus, scene art).
+
+```sh
+tools/ocr_bench.py prepare ~/path/to/paired-data OUT     # then push, run and score: see the script's header
+```
+
+</details>
 
 <details>
 <summary><b>How well it reads</b> (scores on a drawn test set)</summary>

@@ -9,6 +9,7 @@ import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.ocr.Frame
 import io.github.beesan.lfg.ocr.ModelStore
 import io.github.beesan.lfg.ocr.ScreenAi
+import io.github.beesan.lfg.ocr.TextClean
 import io.github.beesan.lfg.ocr.Vocr
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -16,7 +17,8 @@ import java.io.File
 /**
  * Debug builds only: runs every reader over the PNGs in the app's external
  * `ocrbench/` folder and writes what each read, with its time, to
- * `ocrbench/results.jsonl` for tools/ocr_bench.py to score.
+ * `ocrbench/results.jsonl` for tools/ocr_bench.py to score. Each read goes
+ * through TextClean, as in the app, and its time counts.
  *
  *     adb shell am instrument -w -e engines screenai,meiki,vocr io.github.beesan.lfg/.OcrBench
  */
@@ -66,7 +68,7 @@ class OcrBench : Instrumentation() {
             val frame = frame(file)
             for ((name, read) in engines) {
                 val start = System.nanoTime()
-                val lines = read(frame)
+                val lines = read(frame).mapNotNull(TextClean::line)
                 val ms = (System.nanoTime() - start) / 1e6
                 out.write("{\"file\":${json(file.name)},\"engine\":\"$name\",\"ms\":${"%.2f".format(ms)},\"lines\":${dump(lines)}}\n")
             }
