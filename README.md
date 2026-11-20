@@ -218,8 +218,9 @@ furigana, over a kanji, is taken for furigana.
 - **What counts as a game.** The plan reads whatever app is in front. In
   testing that put tap strips over Android's file picker and swallowed taps on
   its labels. An app is now read automatically only while it is fullscreen (no
-  status or navigation bar on its screen), or if it declares itself a game or
-  is a known emulator. Settings › Games and apps has Automatic, On demand, Always and Never for each.
+  status or navigation bar on its screen) and shows few text items of its own
+  (a phone held sideways hides the bars for every app; a game draws its text
+  into one picture), or if it declares itself a game or is a known emulator. Settings › Games and apps has Automatic, On demand, Always and Never for each.
 - **Pictures of the game.** From Android 14 the service pictures the game's
   own window, so the app's mark and popup are never in a frame. On Android 13
   it pictures the whole screen: reading pauses while a word is marked on the

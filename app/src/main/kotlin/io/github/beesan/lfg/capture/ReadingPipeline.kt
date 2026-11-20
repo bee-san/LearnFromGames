@@ -81,8 +81,7 @@ class ReadingPipeline(
      * where Android keeps the pixels (about 1 ms against 15 for copying the rows out). Text is
      * taller than four rows, so no change to it can hide between them.
      */
-    private fun unchanged(bitmap: Bitmap): Boolean {
-        val hash = Pixels.rowsHash(bitmap, 4)
+    private fun unchanged(hash: Long): Boolean {
         val same = hash != 0L && hash == lastHash
         lastHash = hash
         return same
@@ -104,6 +103,17 @@ class ReadingPipeline(
     suspend fun onFrame(
         bitmap: Bitmap, game: Game, displayId: Int, nowMs: Long, offsetX: Int = 0, offsetY: Int = 0,
         covered: List<Box> = emptyList(),
+    ): Boolean = onFrame(0L, { bitmap }, game, displayId, nowMs, offsetX, offsetY, covered)
+
+    /**
+     * The same, for a picture not yet copied out of graphics memory: [hash] is
+     * its fingerprint (Thumbnails), or 0 for none, and [picture] copies it out,
+     * which is done only when its pixels are needed. A screen found as it was
+     * is never copied.
+     */
+    suspend fun onFrame(
+        hash: Long, picture: () -> Bitmap?, game: Game, displayId: Int, nowMs: Long, offsetX: Int = 0, offsetY: Int = 0,
+        covered: List<Box> = emptyList(),
     ): Boolean {
         val engine = reader() ?: return false
         if (game.id != lastGame) {
@@ -113,15 +123,17 @@ class ReadingPipeline(
             lastSignature = null
             lastGame = game.id
         }
-        val still = Perf.measure("same?") { unchanged(bitmap) }
+        val fingerprint = if (hash != 0L) hash else picture()?.let { Perf.measure("same?") { Pixels.rowsHash(it, 4) } } ?: return false
+        val still = unchanged(fingerprint)
         val known = lastSignature
+        // The same picture has the same text: only the clock has moved. Nothing is copied or probed
+        // unless that text has now been still long enough to read.
+        if (still && known != null && !detector.offer(known, nowMs)) return true
+        val bitmap = picture() ?: return still
         val size = bitmap.width * bitmap.height
         val pixels = buffer?.takeIf { it.size == size } ?: IntArray(size).also { buffer = it }
         val frame = Frame(bitmap.width, bitmap.height, pixels)
         if (still && known != null) {
-            // The same picture has the same text: only the clock has moved. Nothing is copied or probed
-            // unless that text has now been still long enough to read.
-            if (!detector.offer(known, nowMs)) return true
             Perf.measure("pixels") { bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height) }
         } else {
             Perf.measure("pixels") { bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height) }

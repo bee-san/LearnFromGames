@@ -15,6 +15,7 @@ import android.util.Log
 import android.view.Display
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import io.github.beesan.lfg.core.Blocks
 import io.github.beesan.lfg.core.TextLine
@@ -90,6 +91,8 @@ class LfgAccessibilityService : AccessibilityService() {
     private val namedGames = HashMap<String, Game>()
     private val unread = HashSet<String>()
     private val lastFullscreen = HashMap<String, Long>()
+    /** Whether a window shows an ordinary app's text items, by window id, with when it was last looked at. */
+    private val textItems = HashMap<Int, Pair<Long, Boolean>>()
     private var ignored: Set<String> = emptySet()
 
     private var styles: List<EntryHtml.Style> = emptyList()
@@ -246,6 +249,7 @@ class LfgAccessibilityService : AccessibilityService() {
         _pipeline.value = null
         if (::overlays.isInitialized) overlays.destroy()
         scope.cancel()
+        shots.execute { thumbnails.close() }
         shots.shutdown()
     }
 
@@ -666,15 +670,15 @@ class LfgAccessibilityService : AccessibilityService() {
             // A picture of the whole screen would show our own mark and popup; one of the game's window does not.
             if (!windowShot && overlays.drawingOnGame) continue
             val shotAt = System.nanoTime()
-            val bitmap = (if (windowShot) windowScreenshot(now.windowId) else null)
-            val whole = bitmap == null
-            val frame = bitmap ?: (if (overlays.drawingOnGame) null else displayScreenshot(now.displayId)) ?: continue
+            val window = if (windowShot) uncopiedShot(now.windowId, null) else null
+            val whole = window == null
+            val frame = window ?: (if (overlays.drawingOnGame) null else uncopiedShot(null, now.displayId)) ?: continue
             Perf.add("shot", System.nanoTime() - shotAt)
             try {
                 val still = withContext(Dispatchers.Default) {
                     Perf.measure("frame") {
                     pipeline.onFrame(
-                        frame, now.game, now.displayId, System.currentTimeMillis(),
+                        frame.hash, frame::bitmap, now.game, now.displayId, System.currentTimeMillis(),
                         if (whole) 0 else now.bounds.left, if (whole) 0 else now.bounds.top,
                         // A picture of the game's own window has nothing else in it.
                         if (whole) now.covered else emptyList(),
@@ -685,8 +689,53 @@ class LfgAccessibilityService : AccessibilityService() {
             } catch (e: Exception) {
                 Log.w(TAG, "reading a frame failed", e)
             } finally {
-                frame.recycle()
+                frame.close()
             }
+        }
+    }
+
+    /** A screenshot left in graphics memory, with its fingerprint; copied out only when asked for. */
+    private inner class Uncopied(private val result: ScreenshotResult, val hash: Long) : AutoCloseable {
+        private var copied: Bitmap? = null
+        private var closed = false
+
+        @Synchronized
+        fun bitmap(): Bitmap? = if (closed) null else copied ?: copyOut(result)?.also { copied = it }
+
+        @Synchronized
+        override fun close() {
+            closed = true
+            copied?.recycle()
+            copied = null
+            result.hardwareBuffer.close()
+        }
+    }
+
+    /** Only the shots thread draws with it. */
+    private val thumbnails = Thumbnails()
+
+    /** The game's own window ([windowId], from Android 14) or a whole screen ([displayId]), not yet copied. */
+    private suspend fun uncopiedShot(windowId: Int?, displayId: Int?): Uncopied? = suspendCancellableCoroutine { continuation ->
+        val callback = object : TakeScreenshotCallback {
+            override fun onSuccess(result: ScreenshotResult) {
+                val shot = Uncopied(result, Perf.measure("shot.hash") { thumbnails.hash(result.hardwareBuffer, result.colorSpace) })
+                if (continuation.isActive) continuation.resume(shot) else shot.close()
+            }
+
+            override fun onFailure(errorCode: Int) {
+                if (continuation.isActive) continuation.resume(null)
+            }
+        }
+        try {
+            if (windowId != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) takeScreenshotOfWindow(windowId, shots, callback)
+                else continuation.resume(null)
+            } else {
+                takeScreenshot(displayId!!, shots, callback)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "taking a screenshot threw", e)
+            if (continuation.isActive) continuation.resume(null)
         }
     }
 
@@ -717,9 +766,12 @@ class LfgAccessibilityService : AccessibilityService() {
                 alive += top.id
                 val name = packageOfWindow[top.id] ?: top.root?.packageName?.toString()?.also { packageOfWindow[top.id] = it } ?: continue
                 // A status or navigation bar on the screen means an ordinary app; a game hides them.
+                // A phone held sideways hides them for every app, though: an app
+                // whose window holds text items of its own is ordinary, while a
+                // game draws its text into one picture.
                 val bars = windows.any { w ->
                     w.type == AccessibilityWindowInfo.TYPE_SYSTEM && Rect().also(w::getBoundsInScreen).let { !it.isEmpty && it.width() > it.height() * 4 }
-                }
+                } || showsTextItems(top)
                 // Everything in front of the game that is not ours: its text must not be read as the game's.
                 val covered = windows.takeWhile { it.id != top.id }
                     .filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
@@ -729,6 +781,7 @@ class LfgAccessibilityService : AccessibilityService() {
                 candidates += Candidate(top, all.keyAt(i), name, !bars, covered)
             }
             if (packageOfWindow.size > 32) packageOfWindow.keys.retainAll(alive)
+            if (textItems.size > 32) textItems.keys.retainAll(alive)
         } catch (e: Exception) {
             Log.w(TAG, "could not list windows", e)
             ordinaryFront = null
@@ -805,6 +858,23 @@ class LfgAccessibilityService : AccessibilityService() {
     private val declared = HashMap<String, Boolean>()
 
     /** Whether an app says it is a game, or is an emulator known by its package name. */
+    /** Looked at again every few seconds, as an app's screens change. */
+    private fun showsTextItems(window: AccessibilityWindowInfo): Boolean {
+        val now = SystemClock.uptimeMillis()
+        textItems[window.id]?.let { (at, shows) -> if (now - at < TEXT_ITEMS_MS) return shows }
+        var found = 0
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        window.root?.let(queue::add)
+        var seen = 0
+        while (queue.isNotEmpty() && found < TEXT_ITEMS && seen < 400) {
+            val node = queue.removeFirst()
+            seen++
+            if (node.isVisibleToUser && !node.text.isNullOrBlank()) found++
+            for (i in 0 until node.childCount) node.getChild(i)?.let(queue::add)
+        }
+        return (found >= TEXT_ITEMS).also { textItems[window.id] = now to it }
+    }
+
     private fun declaredGame(packageName: String): Boolean = declared.getOrPut(packageName) {
         if (Hosts.isEmulator(packageName)) return@getOrPut true
         try {
@@ -835,16 +905,22 @@ class LfgAccessibilityService : AccessibilityService() {
         packageName
     }
 
-    private fun copy(result: ScreenshotResult): Bitmap? {
-        val buffer = result.hardwareBuffer
-        return try {
-            Perf.measure("shot.copy") { Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false) }
-        } catch (e: Exception) {
-            Log.w(TAG, "could not copy the screenshot", e)
-            null
-        } finally {
-            buffer.close()
+    private fun copy(result: ScreenshotResult): Bitmap? = try {
+        copyOut(result)
+    } finally {
+        result.hardwareBuffer.close()
+    }
+
+    /** A software copy of a screenshot, leaving its buffer open. */
+    private fun copyOut(result: ScreenshotResult): Bitmap? = try {
+        Perf.measure("shot.copy") {
+            Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)?.let { hardware ->
+                hardware.copy(Bitmap.Config.ARGB_8888, false).also { hardware.recycle() }
+            }
         }
+    } catch (e: Exception) {
+        Log.w(TAG, "could not copy the screenshot", e)
+        null
     }
 
     /** A software copy of a screen, or null when Android refuses (it allows about three a second). */
@@ -888,28 +964,6 @@ class LfgAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** From Android 14: the game's own window, without anything drawn over it. */
-    private suspend fun windowScreenshot(windowId: Int): Bitmap? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return null
-        return suspendCancellableCoroutine { continuation ->
-            try {
-                takeScreenshotOfWindow(windowId, shots, object : TakeScreenshotCallback {
-                    override fun onSuccess(result: ScreenshotResult) {
-                        val bitmap = copy(result)
-                        if (continuation.isActive) continuation.resume(bitmap) else bitmap?.recycle()
-                    }
-
-                    override fun onFailure(errorCode: Int) {
-                        if (continuation.isActive) continuation.resume(null)
-                    }
-                })
-            } catch (e: Exception) {
-                Log.w(TAG, "takeScreenshotOfWindow threw", e)
-                if (continuation.isActive) continuation.resume(null)
-            }
-        }
-    }
-
     /** Old screens go (data/PictureKeeper.kt); the lines they came from never do. */
     private suspend fun clearOldPictures() {
         try {
@@ -937,6 +991,10 @@ class LfgAccessibilityService : AccessibilityService() {
         /** Looks at an unchanged screen (about ten seconds of them) before the pace halves. */
         private const val RESTING_AFTER = 28
         private const val BARS_GRACE_MS = 8_000L
+
+        /** Text items that make a window an ordinary app's: a game's own menus seldom show this many as items. */
+        private const val TEXT_ITEMS = 5
+        private const val TEXT_ITEMS_MS = 5_000L
 
         private val DPAD = setOf(
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
