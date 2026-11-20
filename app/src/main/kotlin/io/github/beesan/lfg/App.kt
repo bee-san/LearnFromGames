@@ -64,8 +64,8 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // The dictionary is already downloading when the set-up screen first shows.
-        if (dictionaries.state.value is DictState.Missing || models.meikiFiles() == null || models.screenAiDir() == null) DictionaryWorker.start(this)
+        // The dictionaries are already downloading when the set-up screen first shows; any that failed are tried again.
+        if (dictionaries.state.value is DictState.Missing || dictionaries.defaultsPending() || models.meikiFiles() == null || models.screenAiDir() == null) DictionaryWorker.start(this)
         // The widgets measure against the goals and draw in the chosen colours, so they redraw as soon as one changes.
         scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
         // WorkManager keeps the automatic backup across restarts; it changes only when the setting does.

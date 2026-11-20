@@ -102,6 +102,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val setup: StateFlow<SetupState> = _setup
 
     val dictionary: StateFlow<DictState> = app.dictionaries.state
+    val fetchingDictionary: StateFlow<DictState?> = app.dictionaries.fetching
     val reader: StateFlow<ModelState> = app.models.meiki
     val screenAi: StateFlow<ModelState> = app.models.screenAi
     val prefs: StateFlow<Prefs> = app.settings.prefs
@@ -140,7 +141,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsState())
 
     /** Lookup in a stored line, for a card made after the session. */
-    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) })
+    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) }, matchLength = { app.dictionaries.matchLength(it) })
 
     private val _styles = MutableStateFlow<List<EntryHtml.Style>>(emptyList())
     val styles: StateFlow<List<EntryHtml.Style>> = _styles

@@ -2,6 +2,7 @@
 package io.github.beesan.lfg.dict
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
@@ -36,20 +37,20 @@ data class InstalledDictionary(
         ).joinToString(" · ")
 }
 
-/** What a dictionary says about itself: shown on the sources screen, which JMdict's licence requires. */
+/** What a dictionary says about itself: shown on the sources screen, which JMdict's and Jitendex's licences require. */
 data class DictionarySource(val title: String, val revision: String, val author: String, val url: String, val attribution: String, val description: String)
 
 sealed interface DictState {
     data object Missing : DictState
-    data class Downloading(val bytes: Long, val total: Long) : DictState
-    data object Installing : DictState
+    data class Downloading(val name: String, val bytes: Long, val total: Long) : DictState
+    data class Installing(val name: String) : DictState
     data class Ready(val dictionaries: List<InstalledDictionary>) : DictState
     data class Failed(val reason: String) : DictState
 }
 
 /**
- * The dictionaries on the device and lookups in them. The first one, JMdict,
- * installs itself without being asked. All native calls run one at a time on
+ * The dictionaries on the device and lookups in them. A new install fetches
+ * Hachidori's starter set ([DefaultDictionaries]) without being asked. All native calls run one at a time on
  * one thread: a hoshidicts session is not shared across threads here.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -58,10 +59,19 @@ class DictionaryRepository(private val context: Context) {
     private val root = File(context.filesDir, "dictionaries")
     private val native = Dispatchers.IO.limitedParallelism(1)
     private val installing = Mutex()
+    private val fetchingDefaults = Mutex()
     private var session = 0L
 
     private val _state = MutableStateFlow<DictState>(installed().let { if (it.isEmpty()) DictState.Missing else DictState.Ready(it) })
     val state: StateFlow<DictState> = _state
+
+    /**
+     * A starter dictionary arriving once another is installed, as Downloading
+     * or Installing; null when none is. [state] stays Ready meanwhile, so lookups
+     * and a finished set-up carry on.
+     */
+    private val _fetching = MutableStateFlow<DictState?>(null)
+    val fetching: StateFlow<DictState?> = _fetching
 
     fun installed(): List<InstalledDictionary> = prefs.getString(KEY_INSTALLED, null)?.let {
         try {
@@ -78,7 +88,15 @@ class DictionaryRepository(private val context: Context) {
         if (handle == 0L) return@withContext emptyList()
         // The engine scans at most this many characters ahead; no word is longer.
         val scan = text.take(SCAN_LENGTH)
-        DictJson.decodeFromString<LookupResponse>(Hoshidicts.lookup(handle, scan, maxResults, SCAN_LENGTH)).results
+        val json = io.github.beesan.lfg.core.Perf.measure("lookup.native") { Hoshidicts.lookup(handle, scan, maxResults, SCAN_LENGTH) }
+        io.github.beesan.lfg.core.Perf.measure("lookup.decode") { DictJson.decodeFromString<LookupResponse>(json).results }
+    }
+
+    /** How many characters of [text] its best match covers; 0 when none. For stepping word by word. */
+    suspend fun matchLength(text: String): Int = withContext(native) {
+        if (text.isEmpty()) return@withContext 0
+        val handle = openSession()
+        if (handle == 0L) 0 else io.github.beesan.lfg.core.Perf.measure("match") { Hoshidicts.matchLength(handle, text.take(SCAN_LENGTH), SCAN_LENGTH) }
     }
 
     private fun openSession(): Long {
@@ -214,38 +232,75 @@ class DictionaryRepository(private val context: Context) {
     }
 
     /**
-     * Downloads and imports JMdict unless a dictionary is already there.
-     * Returns true when one is installed at the end. Safe to call again after a
-     * failure; a second caller waits for the first.
+     * The starter dictionaries this install has yet to fetch. They are chosen
+     * once, when the device has no dictionary; a device that already had some
+     * keeps its own set, and one the user removes later does not come back.
      */
-    suspend fun ensureJmdict(): Boolean = installing.withLock {
-        if (installed().isNotEmpty()) return true
-        try {
-            val candidates = withContext(Dispatchers.IO) { JmdictSource.candidates(fetchText(JmdictSource.RELEASES_URL)) }
-            if (candidates.isEmpty()) error("No usable JMdict release was found.")
-            var lastError = "JMdict could not be installed."
-            // The newest plausible release, then the one before it.
-            for (asset in candidates.take(2)) {
-                val zip = File(context.cacheDir, "jmdict-${asset.release}.zip")
-                try {
-                    withContext(Dispatchers.IO) { download(asset, zip) }
-                    _state.value = DictState.Installing
-                    val outcome = importZip(zip)
-                    if (JmdictSource.plausible(outcome)) {
-                        register(outcome)
-                        return true
-                    }
-                    lastError = outcome.error.ifEmpty { "JMdict ${asset.release} has only ${outcome.terms} entries." }
-                    if (outcome.title.isNotEmpty()) File(root, outcome.title).deleteRecursively()
-                } finally {
-                    zip.delete()
+    fun defaultsPending(): Boolean = prefs.getStringSet(KEY_DEFAULTS_PENDING, null)?.isNotEmpty() == true
+
+    /**
+     * Downloads and imports each starter dictionary still to come, Jitendex
+     * first so lookups work as soon as it is in. Returns true when none is left
+     * to fetch. Safe to call again after a failure, which retries only what
+     * failed; a second caller waits for the first. Each import holds the same
+     * lock as "Add dictionary…", but the downloads do not.
+     */
+    suspend fun ensureDefaults(): Boolean = fetchingDefaults.withLock {
+        val chosen = prefs.getStringSet(KEY_DEFAULTS_PENDING, null)
+            ?: if (installed().isEmpty()) DefaultDictionaries.ALL.map { it.id }.toSet() else return true
+        val pending = chosen.toMutableSet()
+        fun remember() = prefs.edit().putStringSet(KEY_DEFAULTS_PENDING, pending.toSet()).apply()
+        remember()
+        var lastError: String? = null
+        for (source in DefaultDictionaries.ALL) {
+            if (source.id !in pending) continue
+            if (installed().none(source::matches)) {
+                val error = try {
+                    install(source)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    e.message ?: "${source.name} could not be downloaded."
+                }
+                if (error != null) {
+                    lastError = error
+                    continue
                 }
             }
-            _state.value = DictState.Failed(lastError)
-            false
-        } catch (e: Exception) {
-            _state.value = DictState.Failed(e.message ?: "The dictionary download failed.")
-            false
+            pending -= source.id
+            remember()
+        }
+        // Unknown ids (a source since dropped) are not waited for.
+        pending.retainAll { DefaultDictionaries.byId(it) != null }
+        remember()
+        val now = installed()
+        _state.value = when {
+            now.isNotEmpty() -> DictState.Ready(now)
+            else -> DictState.Failed(lastError ?: "The dictionary download failed.")
+        }
+        pending.isEmpty()
+    }
+
+    /** Downloads and imports one starter dictionary. Returns null on success, or what went wrong. */
+    private suspend fun install(source: DefaultDictionaries.Source): String? {
+        val zip = File(context.cacheDir, "default-${source.id}.zip")
+        val background = installed().isNotEmpty()
+        val report: (DictState) -> Unit = { if (background) _fetching.value = it else _state.value = it }
+        try {
+            withContext(Dispatchers.IO) { download(source, zip, report) }
+            report(DictState.Installing(source.name))
+            return installing.withLock {
+                val outcome = importZip(zip)
+                if (source.accepts(outcome)) {
+                    register(outcome)
+                    return@withLock null
+                }
+                if (outcome.title.isNotEmpty() && installed().none { it.title == outcome.title }) File(root, outcome.title).deleteRecursively()
+                outcome.error.ifEmpty { "${source.name} looks incomplete: ${outcome.terms} entries, ${outcome.frequencies} frequencies." }
+            }
+        } finally {
+            _fetching.value = null
+            withContext(NonCancellable + Dispatchers.IO) { zip.delete() }
         }
     }
 
@@ -278,22 +333,13 @@ class DictionaryRepository(private val context: Context) {
         save(installed().filter { it.title != added.title } + added)
     }
 
-    private fun fetchText(url: String): String {
-        val connection = open(url)
+    private fun download(source: DefaultDictionaries.Source, to: File, report: (DictState) -> Unit) {
+        val connection = open(source.url)
         try {
-            if (connection.responseCode != 200) error("GitHub answered ${connection.responseCode}.")
-            return connection.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private fun download(asset: JmdictSource.Asset, to: File) {
-        val connection = open(asset.url)
-        try {
-            if (connection.responseCode != 200) error("The download answered ${connection.responseCode}.")
+            if (connection.responseCode != 200) error("${source.name}'s download answered ${connection.responseCode}.")
+            val total = connection.contentLengthLong
             var done = 0L
-            _state.value = DictState.Downloading(0, asset.size)
+            report(DictState.Downloading(source.name, 0, total))
             connection.inputStream.use { input ->
                 to.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
@@ -302,11 +348,11 @@ class DictionaryRepository(private val context: Context) {
                         if (n < 0) break
                         output.write(buffer, 0, n)
                         done += n
-                        _state.value = DictState.Downloading(done, asset.size)
+                        report(DictState.Downloading(source.name, done, total))
                     }
                 }
             }
-            if (done < JmdictSource.MIN_ZIP_BYTES) error("The download was only $done bytes.")
+            if (done < source.minBytes) error("${source.name}'s download was only $done bytes.")
         } finally {
             connection.disconnect()
         }
@@ -316,12 +362,13 @@ class DictionaryRepository(private val context: Context) {
         connectTimeout = 15_000
         readTimeout = 30_000
         instanceFollowRedirects = true
-        setRequestProperty("Accept", "application/vnd.github+json, application/octet-stream")
+        setRequestProperty("Accept", "application/zip, application/octet-stream")
         setRequestProperty("User-Agent", "LearnFromGames")
     }
 
     companion object {
         private const val KEY_INSTALLED = "installed"
+        private const val KEY_DEFAULTS_PENDING = "defaults_pending"
         private const val SCAN_LENGTH = 16
     }
 }

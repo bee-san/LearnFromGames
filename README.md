@@ -29,7 +29,7 @@ LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSent
 - **Uses the second screen.** On a two-screen handheld the entry opens on the screen the game is not on. On one screen it is a popup.
 - **One press to Anki.** Cards go to AnkiDroid with the sentence, the word marked, the definition and a picture of the game. Kiku, Lapis and Senren note types are found by themselves; without one, the app makes its own.
 - **Sentence audio and moving pictures**, if you switch them on: the game's own voice for the line, with the music around it cut away, and an animated picture of it appearing. A line the game does not speak is read by Android's voice instead.
-- **Your dictionaries.** JMdict is fetched at first run; add any Yomitan dictionary zip and it is shown with its own styling. Pitch accent dictionaries draw the accent over the reading, frequency dictionaries show their ranks, and local-audio-yomichan's `android.db` lets you hear the word.
+- **Your dictionaries.** Hachidori's starter set is fetched at first run: Jitendex, JMnedict, Bee's Ultimate Kanji Dictionary, Jiten's frequencies and Bee's Ultimate Grammar Dictionary. Add any Yomitan dictionary zip and it is shown with its own styling. Pitch accent dictionaries draw the accent over the reading, frequency dictionaries show their ranks, and local-audio-yomichan's `android.db` lets you hear the word.
 - **Every line is kept**, so you can mine after the session and see reading time, characters, speed and your streak.
 
 ## How it works
@@ -47,7 +47,7 @@ flowchart LR
     F --> J[Stats]
 ```
 
-Everything runs on the device. The only network use is fetching the readers' model files and JMdict at first run.
+Everything runs on the device. The only network use is fetching the readers' model files and the starter dictionaries at first run, from their publishers (GitHub, jitendex.org's releases and api.jiten.moe).
 
 ## Where it stands
 
@@ -90,8 +90,6 @@ Everything runs on the device. The only network use is fetching the readers' mod
 - A text hook as a second source of lines (the plan's "after that, if wanted")
   is not built. The intent is for the app to be the texthooker itself, not to
   listen to another one.
-- The popup on a one-screen device shows the entry as plain text; full
-  rendering is on the panel and in the app.
 
 ### How fast it is
 
@@ -113,7 +111,19 @@ screen is looked at half as often; the screenshot is copied off the main
 thread; and the card's picture is written behind the reading instead of in
 front of it. What is left, per look: copying the screenshot out of graphics
 memory (40 ms here), the probe on a changing screen (90 ms), and a full
-reading per new line (320 ms with ScreenAI). A lookup is 4–60 ms.
+reading per new line (320 ms with ScreenAI).
+
+A tap, with the five starter dictionaries: the lookup is 2–5 ms (finding it
+and reading its answer), building the entries 3–8 ms, and the popup shows them
+in 28–45 ms. The popup's page and every dictionary's stylesheet (a grammar
+dictionary's alone is 48 KB) load once; each lookup then swaps in only its
+entries, where loading a whole new page took 100–280 ms. Only the first tap
+after the service starts pays for that load. The controller's word steps ask
+hoshidicts only how long each word is (`match_length`), not for its entries.
+
+`host-build/lfg_dict_host bench <directory of imported dictionaries>` times
+lookups on the desktop over every dictionary there: with the five, 0.3–0.8 ms
+a lookup and about 6 ms for the word steps of a whole line.
 
 <details>
 <summary><b>How well it reads</b> (scores on a drawn test set)</summary>
@@ -197,6 +207,13 @@ git submodule update --init --recursive
 echo "sdk.dir=/path/to/android-sdk" > local.properties
 ./gradlew :app:assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:testDebugUnitTest
+```
+
+`tools/check.sh` runs everything the GitHub check does: unit tests, lint and
+both APKs. To run it before every push:
+
+```sh
+git config core.hooksPath .githooks   # once per clone; skip a push's check with --no-verify
 ```
 
 A release is one shrunk APK per kind of device (about 50 MB for arm64, against
@@ -312,6 +329,6 @@ The app is GPL-3.0-or-later, as hoshidicts is.
 
 ## Thanks
 
-LFG stands on [GameSentenceMiner](https://github.com/bpwhelan/GameSentenceMiner), [hoshidicts](https://github.com/bee-san/hoshidicts), [VOCR](https://github.com/bee-san/vita-vn-ocr), [meikiocr](https://github.com/rtr46/meikiocr), [screenai_ocr](https://github.com/AuroraWright/screenai_ocr), [AnkiDroid](https://github.com/ankidroid/Anki-Android), [Silero VAD](https://github.com/snakers4/silero-vad), [Jitendex](https://jitendex.org) and JMdict, and on the Kiku, Lapis and Senren note types.
+LFG stands on [GameSentenceMiner](https://github.com/bpwhelan/GameSentenceMiner), [hoshidicts](https://github.com/bee-san/hoshidicts), [VOCR](https://github.com/bee-san/vita-vn-ocr), [meikiocr](https://github.com/rtr46/meikiocr), [screenai_ocr](https://github.com/AuroraWright/screenai_ocr), [AnkiDroid](https://github.com/ankidroid/Anki-Android), [Silero VAD](https://github.com/snakers4/silero-vad), [Jitendex](https://jitendex.org), JMdict, JMnedict, [Jiten](https://jiten.moe), [Bee's Ultimate Kanji Dictionary](https://github.com/bee-san/bees-ultimate-kanji-dictionary), [Bee's Ultimate Grammar Dictionary](https://github.com/bee-san/bees-ultimate-grammar-dictionary) and [Hachidori](https://github.com/bee-san/hachidori), and on the Kiku, Lapis and Senren note types.
 
 The plan and screen designs this was built from: <https://claude.ai/artifact/PahaxprErjPmLGocbz6pPW>

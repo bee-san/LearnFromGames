@@ -14,12 +14,12 @@ import io.github.beesan.lfg.App
 import io.github.beesan.lfg.ocr.ScreenAi
 import java.util.concurrent.TimeUnit
 
-/** The first run's downloads, the dictionary and the reader's files: started without being asked, and carried on if the app is closed. */
+/** The first run's downloads, the starter dictionaries and the reader's files: started without being asked, and carried on if the app is closed. */
 class DictionaryWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val app = applicationContext as App
-        // The dictionary first: with it the practice lookup works while the reader's files arrive.
-        val installed = app.dictionaries.ensureJmdict() and app.models.ensureMeiki()
+        // The dictionaries first: with Jitendex in, the practice lookup works while the reader's files arrive.
+        val installed = app.dictionaries.ensureDefaults() and app.models.ensureMeiki()
         // ScreenAI's files come last and are never waited for: meikiocr reads until they arrive.
         if (installed && ScreenAi.available()) app.models.ensureScreenAi()
         return when {

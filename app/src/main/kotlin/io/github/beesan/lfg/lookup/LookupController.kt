@@ -85,6 +85,8 @@ class LookupController(
      * card needs the line it quotes.
      */
     private val prepare: suspend (LookupLine) -> LookupLine = { it },
+    /** How many characters the word at the start of a text covers, for the controller's word steps. */
+    private val matchLength: suspend (String) -> Int = { lookup(it).firstOrNull()?.matched?.length ?: 0 },
 ) {
     private val _state = MutableStateFlow(LookupState())
     val state: StateFlow<LookupState> = _state
@@ -252,7 +254,7 @@ class LookupController(
             val lines = _state.value.lines
             val geometry = lines.map { it.geometry ?: TextLine(it.text, io.github.beesan.lfg.core.Box(0, 0, 0, 0), emptyList()) }
             val starts = lines.map { line ->
-                io.github.beesan.lfg.core.Perf.measure("segment") { Segmenter.wordStarts(line.text) { rest -> lookup(rest).firstOrNull()?.matched?.length ?: 0 } }
+                io.github.beesan.lfg.core.Perf.measure("segment") { Segmenter.wordStarts(line.text) { rest -> matchLength(rest) } }
             }
             if (_state.value.lines !== lines || !_state.value.controllerMode) return@launch
             val built = TextCursor(geometry, starts)

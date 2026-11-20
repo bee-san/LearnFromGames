@@ -68,6 +68,7 @@ class SelectionActivity : ComponentActivity() {
         controller = LookupController(
             lifecycleScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) },
             prepare = ::saveLine,
+            matchLength = { app.dictionaries.matchLength(it) },
         )
         val title = titleOf(source)
         controller.setLines(listOf(LookupLine(text, null, null, title, fromApp = true, source = LineStore.SOURCE_SELECTION)))

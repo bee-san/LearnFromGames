@@ -93,6 +93,7 @@ class LfgAccessibilityService : AccessibilityService() {
         pipeline = ReadingPipeline(app.lines, File(filesDir, "frames"))
         controller = LookupController(
             scope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) }, ::prepareLine,
+            matchLength = { app.dictionaries.matchLength(it) },
         )
         overlays = OverlayHost(
             service = this,

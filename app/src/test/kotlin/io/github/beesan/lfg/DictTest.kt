@@ -3,7 +3,8 @@ package io.github.beesan.lfg
 import io.github.beesan.lfg.dict.DictJson
 import io.github.beesan.lfg.dict.GlossaryText
 import io.github.beesan.lfg.dict.ImportOutcome
-import io.github.beesan.lfg.dict.JmdictSource
+import io.github.beesan.lfg.dict.DefaultDictionaries
+import io.github.beesan.lfg.dict.InstalledDictionary
 import io.github.beesan.lfg.dict.LookupResponse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -74,43 +75,35 @@ class DictTest {
 
     private fun quote(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-    // The shape and the sizes GitHub returned for yomidevs/jmdict-yomitan on 17 November 2026.
-    private val releases = """[
-      {"tag_name":"2026-11-17","draft":false,"prerelease":false,"assets":[
-        {"name":"JMnedict.zip","size":11434497,"browser_download_url":"https://github.com/yomidevs/jmdict-yomitan/releases/download/2026-11-17/JMnedict.zip"},
-        {"name":"JMdict_english.zip","size":15637366,"browser_download_url":"https://github.com/yomidevs/jmdict-yomitan/releases/download/2026-11-17/JMdict_english.zip"}]},
-      {"tag_name":"2026-11-16","draft":false,"prerelease":false,"assets":[
-        {"name":"JMdict_english.zip","size":2303,"browser_download_url":"https://github.com/yomidevs/jmdict-yomitan/releases/download/2026-11-16/JMdict_english.zip"}]},
-      {"tag_name":"2026-11-15","draft":false,"prerelease":false,"assets":[
-        {"name":"JMdict_english.zip","size":15631326,"browser_download_url":"https://github.com/yomidevs/jmdict-yomitan/releases/download/2026-11-15/JMdict_english.zip"}]},
-      {"tag_name":"2026-11-14","draft":true,"prerelease":false,"assets":[
-        {"name":"JMdict_english.zip","size":15631326,"browser_download_url":"https://github.com/yomidevs/jmdict-yomitan/releases/download/2026-11-14/JMdict_english.zip"}]}
-    ]"""
+    private fun source(id: String) = DefaultDictionaries.byId(id)!!
+    private fun installed(title: String) = InstalledDictionary(title, "/x", terms = 1, installedAt = 0)
 
     @Test
-    fun stubReleasesAreSkipped() {
-        val picked = JmdictSource.candidates(releases)
-        assertEquals(listOf("2026-11-17", "2026-11-15"), picked.map { it.release })
-        assertEquals(15637366L, picked[0].size)
-        assertTrue(picked[0].url.endsWith("/2026-11-17/JMdict_english.zip"))
+    fun theStarterSetIsHachidorisInItsOrder() {
+        assertEquals(
+            listOf("jitendex", "jmnedict", "bees-ultimate-kanji-dictionary", "jiten", "bees-ultimate-grammar-dictionary"),
+            DefaultDictionaries.ALL.map { it.id },
+        )
+        assertTrue(DefaultDictionaries.ALL.all { it.url.startsWith("https://") })
     }
 
     @Test
-    fun aStubOnTopFallsBackToThePreviousDay() {
-        val stubFirst = releases.replace("\"size\":15637366", "\"size\":2303")
-        assertEquals(listOf("2026-11-15"), JmdictSource.candidates(stubFirst).map { it.release })
+    fun anInstalledDictionaryIsKnownByItsTitle() {
+        assertTrue(source("jitendex").matches(installed("Jitendex.org [2026-08-11]")))
+        assertFalse(source("jitendex").matches(installed("JMdict [2026-11-17]")))
+        assertTrue(source("jmnedict").matches(installed("JMnedict [2026-09-04]")))
+        assertTrue(source("jiten").matches(installed("Jiten")))
+        assertFalse(source("jiten").matches(installed("Jiten Kanji")))
     }
 
     @Test
-    fun unusableReleaseListsGiveNothing() {
-        assertEquals(emptyList<JmdictSource.Asset>(), JmdictSource.candidates("""{"message":"API rate limit exceeded"}"""))
-        assertEquals(emptyList<JmdictSource.Asset>(), JmdictSource.candidates("<html>"))
-    }
-
-    @Test
-    fun anImportIsCheckedByItsEntryCount() {
-        assertTrue(JmdictSource.plausible(ImportOutcome(success = true, title = "JMdict", terms = 527_999)))
-        assertFalse(JmdictSource.plausible(ImportOutcome(success = true, title = "JMdict", terms = 12)))
-        assertFalse(JmdictSource.plausible(ImportOutcome(success = false, terms = 527_999)))
+    fun anImportIsCheckedByWhatItHolds() {
+        assertTrue(source("jitendex").accepts(ImportOutcome(success = true, title = "Jitendex.org [2026-08-11]", terms = 300_000)))
+        assertFalse(source("jitendex").accepts(ImportOutcome(success = true, title = "Jitendex.org [2026-08-11]", terms = 12)))
+        assertFalse(source("jitendex").accepts(ImportOutcome(success = false, terms = 300_000)))
+        // Jiten holds frequencies, not terms.
+        assertTrue(source("jiten").accepts(ImportOutcome(success = true, title = "Jiten", frequencies = 500_000)))
+        assertFalse(source("jiten").accepts(ImportOutcome(success = true, title = "Jiten", terms = 500_000)))
+        assertTrue(source("bees-ultimate-grammar-dictionary").accepts(ImportOutcome(success = true, terms = 6_371)))
     }
 }

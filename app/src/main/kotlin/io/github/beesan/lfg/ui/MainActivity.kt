@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val setup by model.setup.collectAsStateWithLifecycle()
             val dictionary by model.dictionary.collectAsStateWithLifecycle()
+            val fetchingDictionary by model.fetchingDictionary.collectAsStateWithLifecycle()
             val reader by model.reader.collectAsStateWithLifecycle()
             val screenAi by model.screenAi.collectAsStateWithLifecycle()
             val prefs by model.prefs.collectAsStateWithLifecycle()
@@ -260,6 +261,7 @@ class MainActivity : ComponentActivity() {
                         page == Page.SETTINGS -> SettingsScreen(onOpen = { page = it }, onBack = ::back)
                         page == Page.DICTIONARIES -> DictionariesScreen(
                             state = dictionary,
+                            fetching = fetchingDictionary,
                             busy = dictionaries,
                             onAdd = { pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
                             onMove = { title, up -> model.moveDictionary(title, up) },

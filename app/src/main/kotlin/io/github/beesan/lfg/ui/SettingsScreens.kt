@@ -144,6 +144,7 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
 @Composable
 fun DictionariesScreen(
     state: DictState,
+    fetching: DictState?,
     busy: DictionariesState,
     onAdd: () -> Unit,
     onMove: (String, Boolean) -> Unit,
@@ -157,6 +158,15 @@ fun DictionariesScreen(
     val date = remember { SimpleDateFormat("d MMMM yyyy", Locale.getDefault()) }
     busy.error?.let { Text(it, color = Lfg.Error, fontSize = 14.sp) }
     busy.progress?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
+    // The rest of the starter set, arriving after the first.
+    when (fetching) {
+        is DictState.Downloading -> Text(
+            "Downloading ${fetching.name}… " + if (fetching.total > 0) "${fetching.bytes * 100 / fetching.total}%" else "${fetching.bytes / (1024 * 1024)} MB",
+            color = Lfg.Dim, fontSize = 14.sp,
+        )
+        is DictState.Installing -> Text("Installing ${fetching.name}…", color = Lfg.Dim, fontSize = 14.sp)
+        else -> {}
+    }
     val list = (state as? DictState.Ready)?.dictionaries ?: emptyList()
     if (list.isEmpty()) Text("No dictionary is installed.", color = Lfg.Dim, fontSize = 15.sp)
     list.forEachIndexed { i, d ->

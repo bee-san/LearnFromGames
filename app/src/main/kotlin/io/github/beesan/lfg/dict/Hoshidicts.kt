@@ -25,10 +25,13 @@ internal object Hoshidicts {
     fun lookup(handle: Long, text: String, maxResults: Int, scanLength: Int): String =
         nativeLookup(handle, text.toByteArray(), maxResults, scanLength).decodeToString()
 
+    fun matchLength(handle: Long, text: String, scanLength: Int): Int = nativeMatchLength(handle, text.toByteArray(), scanLength)
+
     fun styles(handle: Long): String = nativeStyles(handle).decodeToString()
 
     fun media(handle: Long, dictionary: String, path: String): ByteArray = nativeMedia(handle, dictionary.toByteArray(), path.toByteArray())
 
+    private external fun nativeMatchLength(handle: Long, text: ByteArray, scanLength: Int): Int
     private external fun nativeStyles(handle: Long): ByteArray
     private external fun nativeMedia(handle: Long, dictionary: ByteArray, path: ByteArray): ByteArray
     private external fun nativeImport(zip: ByteArray, outDir: ByteArray, lowRam: Boolean): ByteArray

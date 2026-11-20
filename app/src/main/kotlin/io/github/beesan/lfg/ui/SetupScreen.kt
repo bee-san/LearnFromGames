@@ -89,10 +89,10 @@ fun SetupScreen(
             reader is ModelState.Failed -> SetupRow(name, reader.reason, error = true, action = "Try again", onAction = onRetryDownloads)
             dictionary is DictState.Downloading -> SetupRow(
                 name = name,
-                status = "Downloading the dictionary… ${mb(dictionary.bytes)} MB of ${mb(dictionary.total)} MB (${percent(dictionary.bytes, dictionary.total)}%)",
+                status = "Downloading ${dictionary.name}… ${mb(dictionary.bytes)} MB of ${mb(dictionary.total)} MB (${percent(dictionary.bytes, dictionary.total)}%)",
                 progress = fraction(dictionary.bytes, dictionary.total),
             )
-            dictionary is DictState.Installing -> SetupRow(name, "Installing the dictionary…", progress = 1f)
+            dictionary is DictState.Installing -> SetupRow(name, "Installing ${dictionary.name}…", progress = 1f)
             dictionary is DictState.Missing -> SetupRow(name, "Waiting for a connection…")
             reader is ModelState.Downloading -> SetupRow(
                 name = name,
