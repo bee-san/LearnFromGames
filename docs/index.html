@@ -76,7 +76,7 @@ h1 em { font-style: normal; color: var(--red); }
 .tagline b { color: var(--ink); }
 
 /* ── The handheld: a two-screen clamshell, laid out like the AYN Thor ── */
-.stage { margin: 44px auto 0; max-width: 700px; position: relative; perspective: 1800px; }
+.stage { margin: 84px auto 0; max-width: 700px; position: relative; perspective: 1800px; }
 .stage::before {
   content: ""; position: absolute; left: 6%; right: 6%; top: 34%; bottom: -4%; z-index: -1;
   background: radial-gradient(closest-side, rgba(110, 90, 190, 0.28), transparent); filter: blur(34px);
@@ -171,6 +171,7 @@ h1 em { font-style: normal; color: var(--red); }
 .brand-print { position: absolute; bottom: 9px; left: 0; right: 0; text-align: center; font: 900 10px var(--sans); letter-spacing: 0.4em; color: var(--print); }
 .hud-r { display: flex; gap: 16px; align-items: center; margin-left: auto; }
 .shells { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-2); }
+.shells .lbl { margin-right: 2px; }
 .shells button {
   width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--paper); cursor: pointer; padding: 0;
   box-shadow: 0 0 0 1.5px var(--rule);
@@ -262,13 +263,28 @@ h1 em { font-style: normal; color: var(--red); }
   padding: 4px 12px; border-radius: 8px; transition: transform .7s cubic-bezier(.5, -0.2, .4, 1), opacity .7s;
 }
 .hud {
-  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; margin-top: 22px;
   font-size: 14px; color: var(--ink-2);
 }
+.hud .keys { justify-self: center; white-space: nowrap; }
+.hud .keys i { font-style: normal; color: var(--rule); margin: 0 3px; }
+.hud .deck-btn { justify-self: end; }
 .hud kbd {
   font: 700 12px var(--sans); border: 1.5px solid var(--ink-2); border-bottom-width: 3px; border-radius: 5px;
   padding: 0 6px; margin: 0 1px; color: var(--ink); background: #f5f0e5;
 }
+@media (max-width: 700px) {
+  .hud { grid-template-columns: 1fr auto; }
+  .hud .keys { display: none; }
+}
+.rising {
+  position: absolute; z-index: -1; left: 50%; top: -6%; width: 118%; aspect-ratio: 1; transform: translateX(-50%);
+  border-radius: 50%; background: radial-gradient(circle at 50% 40%, #dd5a43, #c8382c 70%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0 52%, transparent 52% 54%, #000 54% 60%, transparent 60% 63%, #000 63% 68%, transparent 68% 72%, #000 72% 76%, transparent 76% 81%, #000 81% 84%, transparent 84%);
+          mask-image: linear-gradient(180deg, #000 0 52%, transparent 52% 54%, #000 54% 60%, transparent 60% 63%, #000 63% 68%, transparent 68% 72%, #000 72% 76%, transparent 76% 81%, #000 81% 84%, transparent 84%);
+  opacity: 0.9;
+}
+@media (max-width: 560px) { .rising { width: 140%; top: -3%; } }
 .deck-btn {
   border: 2px solid var(--ink); background: transparent; border-radius: 8px; padding: 4px 12px; font-weight: 700; cursor: pointer;
   font-size: 14px; color: var(--ink);
@@ -278,6 +294,15 @@ h1 em { font-style: normal; color: var(--red); }
 @keyframes bump { 40% { transform: scale(1.12); } }
 
 /* ── Manual pages ───────────────────────────────────── */
+main > .page:nth-of-type(odd) { background-color: rgba(140, 105, 50, 0.055); }
+.contents { display: grid; grid-template-columns: 1fr auto; gap: 60px; align-items: start; }
+@media (max-width: 760px) { .contents { grid-template-columns: 1fr; } .motto { display: none; } }
+.motto { margin: -70px 40px 0 0; text-align: center; }
+.motto-jp { writing-mode: vertical-rl; font: 800 50px/1.3 var(--mincho); letter-spacing: 0.1em; color: var(--ink); height: 6.6em; margin: 0 auto; }
+.motto-jp span { color: var(--red); margin-top: 0.6em; display: inline-block; }
+.motto figcaption { font-size: 14px; color: var(--faint); margin-top: 14px; letter-spacing: 0.04em; }
+.flow { margin: 4px 0 36px; }
+.flow svg { width: 100%; height: auto; }
 .tab {
   position: absolute; right: 0; top: 60px; display: none; flex-direction: column; align-items: center; gap: 6px;
   background: var(--red); color: var(--paper); padding: 12px 9px 14px; border-radius: 10px 0 0 10px;
@@ -319,6 +344,17 @@ h3 { font-size: 19px; margin: 0 0 6px; font-weight: 900; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start; }
 .two.wide-r { grid-template-columns: 1fr 1fr; }
 @media (max-width: 820px) { .two, .two.wide-r { grid-template-columns: 1fr; } }
+.two > *, .ctrl > *, .contents > * { min-width: 0; }
+.steps b, .steps a { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .page { padding: 48px 0 64px; }
+  .page-head { flex-wrap: nowrap; gap: 12px; }
+  .num { font-size: 44px; }
+  h2 { font-size: 28px; }
+  h2 .jp { display: block; margin: 6px 0 0; font-size: 15px; }
+  .flow { overflow-x: auto; margin-left: -16px; margin-right: -16px; padding: 0 16px 8px; }
+  .flow svg { min-width: 720px; }
+}
 
 .ctrl { display: grid; grid-template-columns: 1.1fr 1fr; gap: 36px; align-items: center; }
 @media (max-width: 820px) { .ctrl { grid-template-columns: 1fr; } }
@@ -355,11 +391,19 @@ pre .c { color: #9c9283; }
   border-radius: 8px; box-shadow: 0 4px 0 #8e2219; margin: 6px 14px 6px 0;
 }
 .btn-dl:active { transform: translateY(3px); box-shadow: 0 1px 0 #8e2219; }
-.btn-ghost { color: var(--ink); font-weight: 700; }
+.btn-ghost { color: var(--ink); font-weight: 700; white-space: nowrap; }
 
-.back { padding: 40px 0 64px; border-top: 2px solid var(--ink); font-size: 14px; color: var(--ink-2); }
-.back .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
-.back nav a { color: var(--ink); font-weight: 700; margin-left: 18px; }
+.back { background: var(--ink); color: #b9b0a0; padding: 72px 0 40px; font-size: 14px; }
+.back-top { display: flex; justify-content: space-between; align-items: center; gap: 30px; padding-bottom: 40px; border-bottom: 1px solid #3a352d; }
+.back-title { font: 900 clamp(40px, 7vw, 76px)/0.95 var(--sans); color: var(--paper); letter-spacing: -0.04em; }
+.back-title em { font-style: normal; color: var(--red); }
+.back-top p { font-size: 18px; color: #d8cfbf; margin: 14px 0 22px; }
+.stamp.small { width: 96px; height: 96px; font-size: 26px; mix-blend-mode: normal; flex: none; }
+.back-bottom { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding-top: 24px; }
+.back-bottom span { max-width: 44em; }
+.back a { color: #f0e8da; }
+.back nav a { font-weight: 700; margin-left: 18px; }
+.back .btn-dl { color: #fff; }
 </style>
 </head>
 <body>
@@ -374,6 +418,7 @@ pre .c { color: #9c9283; }
     <p class="tagline"><b>Learn Japanese from the games you're already playing.</b> Tap a word in the game, read the entry, press once for an Anki card. Try it below: Yui will explain.</p>
 
     <div class="stage">
+      <div class="rising" aria-hidden="true"></div>
       <div class="thor" id="handheld" data-shell="black">
         <div class="lid half">
           <div class="bezel">
@@ -431,13 +476,9 @@ pre .c { color: #9c9283; }
         </div>
       </div>
       <div class="hud">
-        <span id="keys"><kbd>←</kbd><kbd>→</kbd> word · <kbd>A</kbd> card · <kbd>B</kbd> close · <kbd>Space</kbd> next line · or plug in a gamepad</span>
-        <span class="hud-r">
-        <span class="shells" role="group" aria-label="Shell colour">Shell
-          <button data-s="black" aria-pressed="true" aria-label="Black"></button><button data-s="white" aria-pressed="false" aria-label="White"></button><button data-s="rainbow" aria-pressed="false" aria-label="Rainbow"></button><button data-s="purple" aria-pressed="false" aria-label="Clear purple"></button>
-        </span>
+        <span class="shells" role="group" aria-label="Shell colour"><span class="lbl">Shell</span><button data-s="black" aria-pressed="true" aria-label="Black"></button><button data-s="white" aria-pressed="false" aria-label="White"></button><button data-s="rainbow" aria-pressed="false" aria-label="Rainbow"></button><button data-s="purple" aria-pressed="false" aria-label="Clear purple"></button></span>
+        <span id="keys" class="keys"><kbd>←</kbd><kbd>→</kbd> word <i>·</i> <kbd>A</kbd> card <i>·</i> <kbd>B</kbd> close <i>·</i> <kbd>Space</kbd> next line</span>
         <button class="deck-btn" id="deckBtn" title="Download the cards you made, for Anki's import">Your deck<span class="n" id="deckN">0</span></button>
-        </span>
       </div>
     </div>
   </div>
@@ -447,6 +488,7 @@ pre .c { color: #9c9283; }
   <section class="page" id="contents">
     <div class="wrap">
       <div class="page-head"><h2>Contents <span class="jp" lang="ja">目次</span></h2></div>
+      <div class="contents">
       <ol class="toc">
         <li><a href="#start">Before you start</a><span>1</span></li>
         <li><a href="#thor">On the AYN Thor</a><span>2</span></li>
@@ -457,6 +499,11 @@ pre .c { color: #9c9283; }
         <li><a href="#dictionaries">Dictionaries</a><span>7</span></li>
         <li><a href="#caution">Caution</a><span>8</span></li>
       </ol>
+      <figure class="motto">
+        <div class="motto-jp" lang="ja">遊びながら、<span>覚える。</span></div>
+        <figcaption>Learn while you play.</figcaption>
+      </figure>
+      </div>
     </div>
   </section>
 
@@ -541,6 +588,23 @@ cd LearnFromGames
     <span class="tab" aria-hidden="true"><b>3</b><span lang="ja">読み取り</span></span>
     <div class="wrap">
       <div class="page-head"><span class="num">3</span><h2>How the game is read <span class="jp" lang="ja">読み取り</span></h2></div>
+      <figure class="flow">
+        <svg viewBox="0 0 960 200" role="img" aria-label="Four steps: text moving, settled, read with a box per character, then tappable">
+          <defs><linearGradient id="dusk2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b3a63"/><stop offset=".6" stop-color="#6d5a86"/><stop offset="1" stop-color="#e59c74"/></linearGradient>
+          <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#c8382c"/></marker></defs>
+          <g><rect width="210" height="130" rx="10" fill="#1c1915"/><rect x="10" y="10" width="190" height="110" rx="3" fill="url(#dusk2)"/><rect x="20" y="66" width="170" height="46" rx="4" fill="#0c0c14"/><rect x="36" y="78" width="118" height="7" rx="3" fill="#ece5d6" opacity=".25"/><rect x="30" y="78" width="104" height="7" rx="3" fill="#ece5d6"/><rect x="137" y="75" width="3" height="13" fill="#f0c07a"/><circle cx="186" cy="22" r="5" fill="#f0c07a"/></g>
+          <g transform="translate(250,0)"><rect width="210" height="130" rx="10" fill="#1c1915"/><rect x="10" y="10" width="190" height="110" rx="3" fill="url(#dusk2)"/><rect x="20" y="66" width="170" height="46" rx="4" fill="#0c0c14"/><rect x="30" y="78" width="150" height="7" rx="3" fill="#ece5d6"/><rect x="30" y="94" width="88" height="7" rx="3" fill="#ece5d6"/><circle cx="186" cy="22" r="5" fill="#8fc5a0"/></g>
+          <g transform="translate(500,0)"><rect width="210" height="130" rx="10" fill="#1c1915"/><rect x="10" y="10" width="190" height="110" rx="3" fill="url(#dusk2)"/><rect x="20" y="66" width="170" height="46" rx="4" fill="#0c0c14"/><rect x="30" y="75" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="45" y="75" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="60" y="75" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="75" y="75" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="90" y="75" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="105" y="75" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="120" y="75" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="135" y="75" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="150" y="75" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="165" y="75" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="30" y="91" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="45" y="91" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="60" y="91" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="75" y="91" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="90" y="91" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><rect x="105" y="91" width="12" height="13" rx="1.5" fill="none" stroke="#f0c07a" stroke-width="1.3"/><circle cx="186" cy="22" r="5" fill="#8fc5a0"/></g>
+          <g transform="translate(750,0)"><rect width="210" height="130" rx="10" fill="#1c1915"/><rect x="10" y="10" width="190" height="110" rx="3" fill="url(#dusk2)"/><rect x="20" y="66" width="170" height="46" rx="4" fill="#0c0c14"/><rect x="30" y="78" width="150" height="7" rx="3" fill="#ece5d6"/><rect x="30" y="94" width="88" height="7" rx="3" fill="#ece5d6"/><rect x="146" y="73" width="38" height="17" rx="3" fill="rgba(177,165,238,.25)" stroke="#b1a5ee" stroke-width="2"/><rect x="26" y="89" width="28" height="17" rx="3" fill="rgba(177,165,238,.25)" stroke="#b1a5ee" stroke-width="2"/><circle cx="186" cy="22" r="5" fill="#8fc5a0"/></g>
+          <g stroke="#c8382c" stroke-width="3" fill="none" marker-end="url(#arr)"><path d="M216 65H242"/><path d="M466 65H492"/><path d="M716 65H742"/></g>
+          <g font-family="Zen Kaku Gothic New, sans-serif" fill="#1c1915">
+            <text x="0" y="160" font-weight="900" font-size="17"><tspan fill="#c8382c">1 </tspan>Text moving</text><text x="0" y="184" font-size="14" fill="#4a443b">VOCR sees it change, and waits.</text>
+            <text x="250" y="160" font-weight="900" font-size="17"><tspan fill="#c8382c">2 </tspan>Settled</text><text x="250" y="184" font-size="14" fill="#4a443b">Still for a moment: time to read.</text>
+            <text x="500" y="160" font-weight="900" font-size="17"><tspan fill="#c8382c">3 </tspan>Read</text><text x="500" y="184" font-size="14" fill="#4a443b">ScreenAI boxes every character.</text>
+            <text x="750" y="160" font-weight="900" font-size="17"><tspan fill="#c8382c">4 </tspan>Tappable</text><text x="750" y="184" font-size="14" fill="#4a443b">One word, across the line break.</text>
+          </g>
+        </svg>
+      </figure>
       <div class="cols">
         <p>LFG sits over any game or emulator. It doesn't hook into the game. It looks at the screen as you do.</p>
         <p>A small, quick reader (VOCR) checks every picture. It only asks two things: has the text changed, and has it stopped moving? A line still typing itself out, or a background still scrolling, isn't read yet. That's what the "TEXT MOVING" light on Yui's screen is copying.</p>
@@ -681,8 +745,18 @@ cd LearnFromGames
 
 <footer class="back">
   <div class="wrap">
-    <span>LearnFromGames · GPL-3.0-or-later · after <a href="https://github.com/bpwhelan/GameSentenceMiner">GameSentenceMiner</a><br>AYN and Thor are AYN's names. LFG is not made by or affiliated with AYN; the handheld above is a drawing.</span>
-    <nav><a href="https://github.com/bee-san/LearnFromGames">GitHub</a><a href="https://github.com/bee-san/LearnFromGames/releases">Releases</a><a href="https://github.com/bee-san/LearnFromGames/issues">Issues</a></nav>
+    <div class="back-top">
+      <div>
+        <div class="back-title">Learn<em>From</em>Games</div>
+        <p>Learn Japanese from the games you're already playing.</p>
+        <a class="btn-dl" href="https://github.com/bee-san/LearnFromGames/releases/latest">Download the APK</a>
+      </div>
+      <div class="stamp small" aria-hidden="true">読<br>む<small>LFG</small></div>
+    </div>
+    <div class="back-bottom">
+      <span>GPL-3.0-or-later · after <a href="https://github.com/bpwhelan/GameSentenceMiner">GameSentenceMiner</a> · AYN and Thor are AYN's names. LFG is not made by or affiliated with AYN; the handheld above is a drawing.</span>
+      <nav><a href="https://github.com/bee-san/LearnFromGames">GitHub</a><a href="https://github.com/bee-san/LearnFromGames/releases">Releases</a><a href="https://github.com/bee-san/LearnFromGames/issues">Issues</a></nav>
+    </div>
   </div>
 </footer>
 
@@ -918,7 +992,7 @@ cd LearnFromGames
     requestAnimationFrame(poll);
   }
   window.addEventListener("gamepadconnected", function () {
-    $("keys").innerHTML = "Gamepad found: <kbd>D-pad</kbd> word · <kbd>A</kbd> card, or next line · <kbd>B</kbd> close · <kbd>R1</kbd> next line";
+    $("keys").innerHTML = "Gamepad: <kbd>D-pad</kbd> word <i>·</i> <kbd>A</kbd> card <i>·</i> <kbd>B</kbd> close <i>·</i> <kbd>R1</kbd> next line";
   });
   if (navigator.getGamepads) requestAnimationFrame(poll);
 
