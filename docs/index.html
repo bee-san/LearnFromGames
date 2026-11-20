@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LearnFromGames</title>
+<meta name="description" content="Learn Japanese from the games you are already playing. Tap a word in a game on your Android handheld, read the entry, and make an Anki card with one press.">
+<meta property="og:title" content="LearnFromGames">
+<meta property="og:description" content="Learn Japanese from the games you are already playing. Tap a word, read the entry, one press for an Anki card.">
+<meta property="og:image" content="https://bee-san.github.io/LearnFromGames/screens.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#111218">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23b1a5ee'/%3E%3Ctext x='32' y='44' font-family='sans-serif' font-size='34' font-weight='700' text-anchor='middle' fill='%23111218'%3E%E8%AA%AD%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #111218;
+  --bg-2: #171821;
+  --card: #1e1f2a;
+  --card-2: #252634;
+  --line: #2e3040;
+  --text: #ecebf3;
+  --dim: #a3a3b6;
+  --faint: #6f7085;
+  --accent: #b1a5ee;
+  --accent-ink: #15131f;
+  --accent-soft: rgba(177, 165, 238, 0.14);
+  --green: #8fc5a0;
+  --green-soft: rgba(143, 197, 160, 0.14);
+  --amber: #e0a84e;
+  --amber-soft: rgba(224, 168, 78, 0.12);
+  --radius: 18px;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --jp: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+img { max-width: 100%; height: auto; display: block; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+@media (max-width: 600px) { .wrap { padding: 0 16px; } }
+
+/* Nav */
+nav {
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(17, 18, 24, 0.82);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+nav .wrap { display: flex; align-items: center; gap: 28px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
+.brand:hover { text-decoration: none; }
+.mark {
+  width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: var(--accent-ink);
+  display: grid; place-items: center; font: 700 17px var(--jp);
+}
+nav .links { display: flex; gap: 22px; margin-left: auto; font-size: 15px; }
+nav .links a { color: var(--dim); }
+nav .links a:hover { color: var(--text); text-decoration: none; }
+@media (max-width: 720px) { nav .links a:not(.gh) { display: none; } }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 20px; border-radius: 12px; font-weight: 600; font-size: 15px;
+  border: 1px solid var(--line); color: var(--text); background: var(--card);
+  transition: transform .15s, background .15s, border-color .15s;
+}
+.btn:hover { text-decoration: none; transform: translateY(-1px); border-color: #43455a; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { background: #c0b6f3; }
+.btn svg { width: 18px; height: 18px; }
+
+/* Hero */
+.hero { padding: 72px 0 40px; position: relative; }
+.hero::before {
+  content: ""; position: absolute; inset: -200px 0 auto 0; height: 700px; z-index: -1;
+  background:
+    radial-gradient(600px 300px at 20% 30%, rgba(177, 165, 238, 0.16), transparent 70%),
+    radial-gradient(500px 280px at 85% 20%, rgba(143, 197, 160, 0.10), transparent 70%);
+}
+.hero-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 56px; align-items: center; }
+@media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; gap: 40px; } }
+.pill {
+  display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px;
+  font-size: 13px; font-weight: 500; color: var(--amber); background: var(--amber-soft);
+  border: 1px solid rgba(224, 168, 78, 0.28);
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+h1 {
+  font-size: clamp(38px, 5.6vw, 60px); line-height: 1.05; letter-spacing: -0.035em;
+  margin: 20px 0 18px; font-weight: 800;
+}
+h1 .jp { font-family: var(--jp); color: var(--accent); font-weight: 700; letter-spacing: 0; }
+.lede { font-size: 19px; color: var(--dim); max-width: 34em; margin: 0 0 28px; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; }
+.meta { margin-top: 22px; font-size: 14px; color: var(--faint); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+
+/* Demo: a game's text box with tappable words */
+.demo {
+  background: linear-gradient(180deg, #213040, #1a2633);
+  border-radius: 20px; padding: 18px; position: relative;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+.demo .scene {
+  height: 150px; border-radius: 12px; position: relative; overflow: hidden;
+  background:
+    radial-gradient(120px 60px at 75% 40%, rgba(255, 230, 180, 0.22), transparent 70%),
+    linear-gradient(180deg, #2a3e55 0%, #34506a 55%, #2b4258 56%, #22364a 100%);
+}
+.demo .scene::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 45%;
+  background: repeating-linear-gradient(90deg, rgba(0,0,0,0.12) 0 2px, transparent 2px 46px);
+}
+.box {
+  margin-top: 12px; background: rgba(9, 12, 18, 0.92); border-radius: 10px; padding: 16px 20px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.box .who { font: 500 13px var(--jp); color: #8d97a8; margin-bottom: 4px; }
+.box .line { font: 400 clamp(19px, 2.4vw, 23px)/1.7 var(--jp); color: #f1f1f4; }
+.w {
+  cursor: pointer; border-radius: 4px; padding: 1px 0; transition: background .12s, box-shadow .12s;
+  outline: none;
+}
+.w:hover, .w:focus-visible { background: rgba(177, 165, 238, 0.18); }
+.w.on { background: rgba(177, 165, 238, 0.22); box-shadow: 0 0 0 1.5px var(--accent); }
+.entry {
+  margin-top: 12px; background: var(--card); border-radius: 14px; padding: 16px 18px;
+  border: 1px solid var(--line); min-height: 132px; display: flex; flex-direction: column;
+}
+.entry .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.entry .term { font: 700 28px var(--jp); }
+.entry .reading { font: 400 16px var(--jp); color: var(--dim); }
+.entry .tag {
+  font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 6px;
+  background: #3a3b4b; color: #d6d5e3; margin-left: 2px;
+}
+.entry .gloss { margin: 6px 0 0; color: var(--text); }
+.entry .foot { margin-top: auto; padding-top: 12px; display: flex; align-items: center; gap: 12px; }
+.entry .add {
+  background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px;
+  padding: 8px 16px; font: 600 14px var(--sans); cursor: pointer;
+}
+.entry .add.done { background: var(--green); }
+.entry .src { font-size: 12.5px; color: var(--faint); margin-left: auto; }
+.entry .hint { color: var(--faint); margin: auto 0; text-align: center; font-size: 15px; }
+.demo-cap { text-align: center; font-size: 13px; color: var(--faint); margin-top: 12px; }
+
+/* Sections */
+section { padding: 88px 0; }
+section.alt { background: var(--bg-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.eyebrow { font: 500 13px var(--mono); color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; }
+h2 { font-size: clamp(30px, 3.8vw, 42px); letter-spacing: -0.03em; line-height: 1.1; margin: 10px 0 14px; font-weight: 800; }
+.sub { color: var(--dim); font-size: 18px; max-width: 40em; margin: 0 0 44px; }
+
+/* Feature grid */
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+@media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+.feat {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px;
+  transition: border-color .2s, transform .2s;
+}
+.feat:hover { border-color: #43455a; transform: translateY(-2px); }
+.feat .ic {
+  width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent); margin-bottom: 16px;
+}
+.feat .ic.g { background: var(--green-soft); color: var(--green); }
+.feat .ic svg { width: 21px; height: 21px; }
+.feat h3 { margin: 0 0 6px; font-size: 17px; letter-spacing: -0.01em; }
+.feat p { margin: 0; color: var(--dim); font-size: 15px; }
+kbd {
+  font: 500 12.5px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1px solid #45475a;
+  background: #2a2b39; color: var(--text); white-space: nowrap;
+}
+
+/* Pipeline */
+.flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; counter-reset: step; }
+@media (max-width: 900px) { .flow { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .flow { grid-template-columns: 1fr; } }
+.step {
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px; position: relative;
+  counter-increment: step;
+}
+.step::before {
+  content: counter(step, decimal-leading-zero); font: 500 13px var(--mono); color: var(--accent);
+  display: block; margin-bottom: 10px;
+}
+.step h3 { margin: 0 0 6px; font-size: 16px; }
+.step p { margin: 0; font-size: 14px; color: var(--dim); }
+.note { margin-top: 24px; color: var(--dim); font-size: 15px; max-width: 52em; }
+
+/* Showcase rows */
+.show { display: grid; grid-template-columns: 1fr 1.25fr; gap: 56px; align-items: center; }
+.show.rev { grid-template-columns: 1.25fr 1fr; }
+.show.rev .copy { order: 2; }
+@media (max-width: 900px) { .show, .show.rev { grid-template-columns: 1fr; gap: 32px; } .show.rev .copy { order: 0; } }
+.shot { border-radius: 16px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4); }
+.ticks { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.ticks li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; color: var(--dim); }
+.ticks li::before {
+  content: ""; width: 18px; height: 18px; margin-top: 3px; border-radius: 50%;
+  background: var(--green-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%238fc5a0' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 10.5l3.2 3L15 7'/%3E%3C/svg%3E") center/14px no-repeat;
+}
+.ticks b { color: var(--text); font-weight: 600; }
+.shots-2 { display: grid; gap: 16px; }
+.shot.tall { max-width: 420px; justify-self: center; width: 100%; }
+
+/* Dictionaries */
+.dicts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.chip {
+  padding: 8px 14px; border-radius: 10px; background: var(--card); border: 1px solid var(--line);
+  font-size: 14.5px; color: var(--text);
+}
+.chip small { color: var(--faint); margin-left: 6px; }
+
+/* Install */
+.install { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 800px) { .install { grid-template-columns: 1fr; } }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; }
+.panel h3 { margin: 0 0 14px; font-size: 18px; }
+ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 14px; }
+ol.steps li { counter-increment: s; display: grid; grid-template-columns: 28px 1fr; gap: 12px; color: var(--dim); }
+ol.steps li::before {
+  content: counter(s); width: 26px; height: 26px; border-radius: 8px; background: var(--accent-soft); color: var(--accent);
+  display: grid; place-items: center; font: 600 13px var(--mono);
+}
+ol.steps b { color: var(--text); font-weight: 600; }
+pre {
+  margin: 0; background: #0c0d12; border: 1px solid var(--line); border-radius: 12px; padding: 16px;
+  font: 13.5px/1.7 var(--mono); color: #d4d3e0; overflow-x: auto;
+}
+pre .c { color: var(--faint); }
+.req { margin-top: 16px; font-size: 14px; color: var(--faint); }
+
+/* Status */
+.status {
+  display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: start;
+  background: var(--amber-soft); border: 1px solid rgba(224, 168, 78, 0.3); border-radius: var(--radius); padding: 28px;
+}
+.status .ic { width: 44px; height: 44px; border-radius: 12px; background: rgba(224, 168, 78, 0.18); color: var(--amber); display: grid; place-items: center; }
+.status h3 { margin: 0 0 6px; font-size: 19px; }
+.status p { margin: 0 0 10px; color: var(--dim); }
+.status p:last-child { margin: 0; }
+@media (max-width: 600px) { .status { grid-template-columns: 1fr; } }
+
+/* Footer */
+footer { padding: 48px 0 64px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 16px 32px; justify-content: space-between; }
+footer .links { display: flex; flex-wrap: wrap; gap: 20px; }
+footer a { color: var(--dim); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; scroll-behavior: auto !important; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><span class="mark">読</span>LearnFromGames</a>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#install">Install</a>
+      <a class="gh" href="https://github.com/bee-san/LearnFromGames">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="pill">Early: not yet run on a real handheld</span>
+      <h1>Learn Japanese from the games you're <span class="jp">already playing</span>.</h1>
+      <p class="lede">
+        Tap a word in a game, or pick it with the controller. Read the entry. Press once for an Anki card with the screenshot.
+        LearnFromGames brings <a href="https://github.com/bpwhelan/GameSentenceMiner">GameSentenceMiner</a>'s mining to Android handhelds.
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/bee-san/LearnFromGames/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12m0 0l-5-5m5 5l5-5M5 20h14"/></svg>
+          Download the APK
+        </a>
+        <a class="btn" href="https://github.com/bee-san/LearnFromGames">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>
+          Source on GitHub
+        </a>
+      </div>
+      <div class="meta">
+        <span>Android 13+</span><span>Designed for the AYN Thor</span><span>GPL-3.0-or-later</span>
+      </div>
+    </div>
+
+    <div>
+      <div class="demo" aria-label="A demonstration: tap a word in the game's text box">
+        <div class="scene" aria-hidden="true"></div>
+        <div class="box">
+          <div class="who">ユイ</div>
+          <div class="line" id="line">そのとき<span class="w" tabindex="0" data-k="kanojo">彼女</span>は<span class="w" tabindex="0" data-k="shizuka">静かに</span><span class="w" tabindex="0" data-k="unazuku">頷いて</span>、<span class="w" tabindex="0" data-k="mado">窓</span>の<span class="w" tabindex="0" data-k="soto">外</span>の<span class="w" tabindex="0" data-k="keshiki">景色</span>を<span class="w" tabindex="0" data-k="shibaraku">しばらく</span><span class="w" tabindex="0" data-k="nagameru">眺めていた</span>。</div>
+        </div>
+        <div class="entry" id="entry" aria-live="polite">
+          <p class="hint">Tap a word above, as you would on the game.</p>
+        </div>
+      </div>
+      <p class="demo-cap">Try it: this is what a lookup looks like, minus the game.</p>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="eyebrow">What it does</div>
+    <h2>Read the game, keep what you learn.</h2>
+    <p class="sub">LFG sits over any game or emulator. It reads the Japanese on screen and turns it into something you can look up and keep, with no setup per game.</p>
+
+    <div class="grid">
+      <div class="feat">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M7 21h10M12 17v4"/><path d="M7 10h6M7 13h9"/></svg></div>
+        <h3>Reads the game for you</h3>
+        <p>An accessibility service pictures the screen, notices when new text has stopped moving, and reads it. No screen-recording prompt.</p>
+      </div>
+      <div class="feat">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11V5a2 2 0 0 1 4 0v6"/><path d="M13 10.5a2 2 0 0 1 4 0V12a2 2 0 0 1 3 1.7V16a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-5-2.7L5 15.6a1.8 1.8 0 0 1 3-2L9 15"/></svg></div>
+        <h3>Tap a word on the game</h3>
+        <p>Every line becomes tappable where it's drawn. A wrapped sentence stays one sentence, and a word cut by the line break is still one word.</p>
+      </div>
+      <div class="feat">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12a4 4 0 0 1 4 4v2a3 3 0 0 1-5.4 1.8L15 14H9l-1.6 1.8A3 3 0 0 1 2 14v-2a4 4 0 0 1 4-4z"/><path d="M7 11v2M6 12h2"/><circle cx="16" cy="11.5" r=".6" fill="currentColor"/><circle cx="18" cy="12.8" r=".6" fill="currentColor"/></svg></div>
+        <h3>Never let go of the controller</h3>
+        <p><kbd>L3</kbd> + <kbd>R3</kbd> turns the pad into a text cursor that moves by word, line or character. The game receives nothing until you leave.</p>
+      </div>
+      <div class="feat">
+        <div class="ic g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="9" rx="1.5"/><rect x="6" y="13" width="12" height="9" rx="1.5"/></svg></div>
+        <h3>Uses the second screen</h3>
+        <p>On a two-screen handheld the entry opens on the screen the game isn't on. On one screen it's a popup.</p>
+      </div>
+      <div class="feat">
+        <div class="ic g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 9v6M9 12h6"/></svg></div>
+        <h3>One press to Anki</h3>
+        <p>Cards go to AnkiDroid with the sentence, the word marked, the definition and a picture of the game. Kiku, Lapis and Senren are found by themselves.</p>
+      </div>
+      <div class="feat">
+        <div class="ic g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/></svg></div>
+        <h3>Sentence audio and moving pictures</h3>
+        <p>Switch them on and a card gets the game's own voice for the line, with the music cut away, and an animated picture of it appearing.</p>
+      </div>
+      <div class="feat">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M8 7h7M8 11h5"/></svg></div>
+        <h3>Your dictionaries</h3>
+        <p>A starter set downloads at first run. Add any Yomitan dictionary zip and it shows with its own styling, including pitch accent and frequencies.</p>
+      </div>
+      <div class="feat">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></div>
+        <h3>Every line is kept</h3>
+        <p>Mine after the session. See reading time, characters, speed and your streak, against daily goals, on two home-screen widgets.</p>
+      </div>
+      <div class="feat">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 9h10M7 13h6M7 17h8"/></svg></div>
+        <h3>Not only games</h3>
+        <p>Ask, and it reads any app: select text and choose LFG, use the quick-settings tiles, or keep reading a region of the screen for subtitles.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="how">
+  <div class="wrap">
+    <div class="eyebrow">How it works</div>
+    <h2>On the device, start to finish.</h2>
+    <p class="sub">Reading and lookup run on the handheld. A cheap check runs on every picture, and the full reader only runs once new text has settled.</p>
+    <div class="flow">
+      <div class="step"><h3>Watch</h3><p>VOCR checks each picture of the game: has the text changed, and has it stopped moving?</p></div>
+      <div class="step"><h3>Read</h3><p>ScreenAI reads the settled text, with a box for every character.</p></div>
+      <div class="step"><h3>Group</h3><p>Rows become sentences as the game shows them, and furigana is dropped.</p></div>
+      <div class="step"><h3>Look up</h3><p>Tap strips and the controller cursor go to hoshidicts, which answers in a few milliseconds.</p></div>
+      <div class="step"><h3>Keep</h3><p>The entry opens on the panel, a card goes to AnkiDroid, and the line is saved for stats.</p></div>
+    </div>
+    <p class="note">
+      The network is used for the first-run downloads, and only when you switch them on, for translation and recaps through OpenRouter and for game names from Steam.
+      Inside emulators and front-ends (Cocoon, ES-DE, RetroArch, Eden, Steam) LFG can tell which game is running, so each one gets its own stats.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap show">
+    <div class="copy">
+      <div class="eyebrow">Look up and mine</div>
+      <h2>The word, where you found it.</h2>
+      <p class="sub" style="margin-bottom:28px">The game on top, the entry below. One press and the card is in Anki with the sentence and the scene it came from.</p>
+      <ul class="ticks">
+        <li><span><b>Full Yomitan rendering:</b> each dictionary's own styling, pitch accent drawn over the reading, and frequency ranks.</span></li>
+        <li><span><b>Word audio</b> from local-audio-yomichan, played with a button, or <kbd>Y</kbd> in a game.</span></li>
+        <li><span><b>Translation and recaps</b> with your own OpenRouter key, if you want them.</span></li>
+        <li><span><b>Cards from old lines</b> after the session, with their own pictures.</span></li>
+      </ul>
+    </div>
+    <img class="shot tall" src="screens.png" width="1336" height="1524" loading="lazy"
+         alt="A game's dialogue box with the word 景色 marked across a line break, and its Jitendex entry with an Add card button below">
+  </div>
+</section>
+
+<section class="alt">
+  <div class="wrap show rev">
+    <div class="copy">
+      <div class="eyebrow">Stats</div>
+      <h2>See how much you read.</h2>
+      <p class="sub" style="margin-bottom:28px">Every line is kept, so LFG knows your reading time, characters and speed for each game and each session.</p>
+      <ul class="ticks">
+        <li><span><b>7 days, 30 days, 12 months or all time</b>, against the period before, with a bar for each day or month.</span></li>
+        <li><span><b>Daily goals</b> for hours, characters and cards, with a goal streak.</span></li>
+        <li><span><b>Two home-screen widgets:</b> today as rings, and the last seven days as bars.</span></li>
+        <li><span><b>Menus and labels are left out</b>, so the numbers count what you actually read.</span></li>
+      </ul>
+    </div>
+    <div class="shots-2">
+      <img class="shot" src="stats.png" width="1920" height="1080" loading="lazy" alt="The Stats screen: 8 h 41 min, 62,350 characters, 7,158 an hour over 30 days, with a bar for each day">
+      <img class="shot" src="widgets.png" width="1383" height="804" loading="lazy" alt="Two widgets: today's reading time and characters as rings, and the last seven days as bars">
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">Dictionaries</div>
+    <h2>A starter set, then anything Yomitan.</h2>
+    <p class="sub">A new install fetches Hachidori's starter set (about 180 MB, and it can wait for Wi-Fi). Add any Yomitan dictionary zip after that, or Rubi's <code style="font-family:var(--mono);font-size:.9em">.vjdict</code> files.</p>
+    <div class="dicts">
+      <span class="chip">Jitendex<small>definitions</small></span>
+      <span class="chip">JMnedict<small>names</small></span>
+      <span class="chip">Bee's Ultimate Kanji Dictionary<small>kanji</small></span>
+      <span class="chip">Jiten frequencies<small>frequency</small></span>
+      <span class="chip">Bee's Ultimate Grammar Dictionary<small>grammar</small></span>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="install">
+  <div class="wrap">
+    <div class="eyebrow">Install</div>
+    <h2>Get it on your handheld.</h2>
+    <p class="sub">There's one APK for each kind of device: arm64 for handhelds and phones, x86_64 for emulators.</p>
+    <div class="install">
+      <div class="panel">
+        <h3>Install</h3>
+        <ol class="steps">
+          <li><span><b>Download</b> the arm64 APK from the <a href="https://github.com/bee-san/LearnFromGames/releases/latest">latest release</a>, or add <code style="font-family:var(--mono);font-size:.9em">github.com/bee-san/LearnFromGames</code> to <a href="https://github.com/ImranR98/Obtainium">Obtainium</a> to get updates.</span></li>
+          <li><span><b>Open LFG</b> and let set-up fetch the dictionaries and the text reader.</span></li>
+          <li><span><b>Turn on its accessibility service</b> when asked. That's how it sees the game and hears the controller.</span></li>
+          <li><span><b>Install <a href="https://github.com/ankidroid/Anki-Android">AnkiDroid</a></b> for cards. Cards wait in LFG until it's there.</span></li>
+        </ol>
+        <p class="req">Needs Android 13 or newer.</p>
+      </div>
+      <div class="panel">
+        <h3>Build it yourself</h3>
+        <pre><span class="c"># JDK 17, Android SDK 36, NDK 29.0.14206865, CMake 3.31</span>
+git clone https://github.com/bee-san/LearnFromGames
+cd LearnFromGames
+./gradlew :app:assembleDebug
+
+<span class="c"># the same checks as CI: tests, lint, both APKs</span>
+tools/check.sh</pre>
+        <p class="req">See the <a href="https://github.com/bee-san/LearnFromGames#build">README</a> for the details.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="status">
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div>
+      <div>
+        <h3>Where it stands</h3>
+        <p>Every part is built and has run on Android emulators (Android 13 and 15), against PPSSPP's menus, and with Lapis and Senren in AnkiDroid. <b>Nothing has run on a real handheld yet.</b></p>
+        <p>What only a device can answer is still open: whether the controller stays with the game after a touch on the second screen, how AYN's firmware handles quickly changing overlays, and what background reading costs in battery and heat. The <a href="https://github.com/bee-san/LearnFromGames#not-done-or-not-known">README</a> lists it all.</p>
+        <p>If you try it on a handheld, <a href="https://github.com/bee-san/LearnFromGames/issues">an issue</a> with Settings › Help and diagnostics' report is the most useful thing you can send.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>LearnFromGames · GPL-3.0-or-later · Inspired by <a href="https://github.com/bpwhelan/GameSentenceMiner">GameSentenceMiner</a></div>
+    <div class="links">
+      <a href="https://github.com/bee-san/LearnFromGames">GitHub</a>
+      <a href="https://github.com/bee-san/LearnFromGames/releases">Releases</a>
+      <a href="https://github.com/bee-san/LearnFromGames/issues">Issues</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var dict = {
+    kanojo:    { t: "彼女", r: "かのじょ", pos: "pronoun · noun", g: "she; her; girlfriend" },
+    shizuka:   { t: "静か", r: "しずか", pos: "na-adjective", g: "quiet; silent; calm; gentle" },
+    unazuku:   { t: "頷く", r: "うなずく", pos: "godan verb", g: "to nod; to agree", inf: "頷いて · て-form" },
+    mado:      { t: "窓", r: "まど", pos: "noun", g: "window" },
+    soto:      { t: "外", r: "そと", pos: "noun", g: "outside; exterior; the open air" },
+    keshiki:   { t: "景色", r: "けしき", pos: "noun", g: "scenery; scene; landscape" },
+    shibaraku: { t: "しばらく", r: "暫く", pos: "adverb", g: "for a while; for a moment; for some time" },
+    nagameru:  { t: "眺める", r: "ながめる", pos: "ichidan verb", g: "to look at; to gaze at; to watch over a long time", inf: "眺めていた · ている, past" }
+  };
+  var entry = document.getElementById("entry");
+  var words = document.querySelectorAll("#line .w");
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  function show(el) {
+    words.forEach(function (w) { w.classList.toggle("on", w === el); });
+    var d = dict[el.getAttribute("data-k")];
+    entry.innerHTML =
+      '<div class="head"><span class="term">' + esc(d.t) + '</span><span class="reading">' + esc(d.r) + '</span>' +
+      '<span class="tag">' + esc(d.pos) + '</span></div>' +
+      (d.inf ? '<div style="font-size:13px;color:var(--faint);margin-top:2px">' + esc(d.inf) + '</div>' : '') +
+      '<p class="gloss">' + esc(d.g) + '</p>' +
+      '<div class="foot"><button class="add" type="button">Add card</button><span class="src">Jitendex</span></div>';
+    var add = entry.querySelector(".add");
+    add.addEventListener("click", function () { add.textContent = "Added to Anki ✓"; add.classList.add("done"); });
+  }
+
+  words.forEach(function (w) {
+    w.addEventListener("click", function () { show(w); });
+    w.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); show(w); } });
+  });
+})();
+</script>
+</body>
+</html>
