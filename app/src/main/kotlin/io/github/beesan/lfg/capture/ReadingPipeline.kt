@@ -55,9 +55,8 @@ class ReadingPipeline(
     /** Reused between frames: eight megabytes three times a second is too much to hand the collector. */
     private var buffer: IntArray? = null
 
-    /** Every fourth row of the last picture and of this one, to tell a screen that has not changed at all. */
-    private var lastRows = IntArray(0)
-    private var rows = IntArray(0)
+    /** The last picture's fingerprint, to tell a screen that has not changed at all. */
+    private var lastHash = 0L
 
     /** What the probe made of the last picture; null when the next one must be probed whatever it shows. */
     private var lastSignature: String? = null
@@ -69,18 +68,14 @@ class ReadingPipeline(
     private val cropsDir = File(framesDir.parentFile, "crops")
 
     /**
-     * Whether [bitmap] is the last picture again, by every fourth row of it. Text is taller than
-     * four rows, so no change to it can hide between them; and this costs a fortieth of the probe.
+     * Whether [bitmap] is the last picture again, by a fingerprint of every fourth row of it, read
+     * where Android keeps the pixels (about 1 ms against 15 for copying the rows out). Text is
+     * taller than four rows, so no change to it can hide between them.
      */
     private fun unchanged(bitmap: Bitmap): Boolean {
-        val step = 4
-        val count = (bitmap.height + step - 1) / step
-        if (rows.size != count * bitmap.width) rows = IntArray(count * bitmap.width)
-        for (i in 0 until count) bitmap.getPixels(rows, i * bitmap.width, bitmap.width, 0, i * step, bitmap.width, 1)
-        val same = rows.contentEquals(lastRows)
-        val swap = lastRows
-        lastRows = rows
-        rows = swap
+        val hash = Pixels.rowsHash(bitmap, 4)
+        val same = hash != 0L && hash == lastHash
+        lastHash = hash
         return same
     }
 
@@ -189,7 +184,7 @@ class ReadingPipeline(
             pictures.launch {
                 try {
                     cropsDir.mkdirs()
-                    file.outputStream().use { crop.compress(Bitmap.CompressFormat.WEBP_LOSSY, 90, it) }
+                    write(file, crop, 90)
                     store.setCrop(line.id, file.path)
                 } catch (_: Exception) {
                     file.delete()
@@ -198,6 +193,12 @@ class ReadingPipeline(
                 }
             }
         }
+    }
+
+    /** A still WebP through libwebp at a quick setting; Android's own encoder if that fails. */
+    private fun write(file: File, bitmap: Bitmap, quality: Int) {
+        val bytes = Pixels.webp(bitmap, quality)
+        if (bytes != null) file.writeBytes(bytes) else file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, quality, it) }
     }
 
     private fun saveFrame(frame: Bitmap): String? {
@@ -210,7 +211,7 @@ class ReadingPipeline(
         pictures.launch {
             try {
                 framesDir.mkdirs()
-                Perf.measure("picture.write") { file.outputStream().use { copy.compress(Bitmap.CompressFormat.WEBP_LOSSY, 85, it) } }
+                Perf.measure("picture.write") { write(file, copy, 85) }
             } catch (_: Exception) {
                 file.delete()
             } finally {

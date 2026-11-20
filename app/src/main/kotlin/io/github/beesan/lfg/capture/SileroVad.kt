@@ -51,6 +51,8 @@ class SileroVad private constructor(weights: Weights) {
     // Scratch space for one step. Each layer's output is laid out [channel][time]
     // with a column of zeros either side, the padding the next convolution needs.
     private val padded = FloatArray(INPUT + PAD)
+    private val re = FloatArray(WINDOW)
+    private val im = FloatArray(WINDOW)
     private val spectrum = FloatArray(BINS * (FRAMES + 2))
     private val e0 = FloatArray(128 * (FRAMES + 2))
     private val e1 = FloatArray(64 * (2 + 2))
@@ -79,18 +81,50 @@ class SileroVad private constructor(weights: Weights) {
         return sigmoid(sum)
     }
 
-    /** The magnitude of each of 129 frequencies in each of four windows of 256 samples, 128 apart. */
+    /**
+     * The magnitude of each of 129 frequencies in each of four windows of 256 samples, 128 apart.
+     * The model does this as a convolution with 258 rows of a Hann-windowed Fourier basis; the
+     * same sums by an FFT take a thirtieth of the work, and the window is the basis's own first
+     * row (the cosine of frequency 0), so it is the model's to the last bit.
+     */
     private fun stft(input: FloatArray) {
         System.arraycopy(input, 0, padded, 0, INPUT)
         // Reflected on the right only, as the model pads, without repeating the last sample.
         for (k in 0 until PAD) padded[INPUT + k] = input[INPUT - 2 - k]
         for (t in 0 until FRAMES) {
             val from = t * HOP
-            for (f in 0 until BINS) {
-                val re = dot(basis, f * WINDOW, padded, from, WINDOW)
-                val im = dot(basis, (f + BINS) * WINDOW, padded, from, WINDOW)
-                spectrum[f * (FRAMES + 2) + t + 1] = sqrt(re * re + im * im)
+            for (k in 0 until WINDOW) {
+                re[REVERSED[k]] = padded[from + k] * basis[k]
+                im[k] = 0f
             }
+            fft()
+            for (f in 0 until BINS) spectrum[f * (FRAMES + 2) + t + 1] = sqrt(re[f] * re[f] + im[f] * im[f])
+        }
+    }
+
+    /** An in-place radix-2 FFT of [re] and [im], whose input is already in bit-reversed order. */
+    private fun fft() {
+        var size = 2
+        while (size <= WINDOW) {
+            val half = size / 2
+            val step = WINDOW / size
+            var start = 0
+            while (start < WINDOW) {
+                for (k in 0 until half) {
+                    val wr = COS[k * step]
+                    val wi = -SIN[k * step]
+                    val a = start + k
+                    val b = a + half
+                    val tr = wr * re[b] - wi * im[b]
+                    val ti = wr * im[b] + wi * re[b]
+                    re[b] = re[a] - tr
+                    im[b] = im[a] - ti
+                    re[a] += tr
+                    im[a] += ti
+                }
+                start += size
+            }
+            size *= 2
         }
     }
 
@@ -166,6 +200,12 @@ class SileroVad private constructor(weights: Weights) {
             ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().get(floats)
             return SileroVad(floats)
         }
+
+        private val COS = FloatArray(WINDOW / 2) { kotlin.math.cos(2 * Math.PI * it / WINDOW).toFloat() }
+        private val SIN = FloatArray(WINDOW / 2) { kotlin.math.sin(2 * Math.PI * it / WINDOW).toFloat() }
+
+        /** Each index's bits reversed, eight of them: the order a radix-2 FFT takes its input in. */
+        private val REVERSED = IntArray(WINDOW) { Integer.reverse(it) ushr (32 - 8) }
 
         private fun sigmoid(x: Float) = 1f / (1f + exp(-x))
 

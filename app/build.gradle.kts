@@ -76,6 +76,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Native code built as in a release, with its symbols: VOCR, ScreenAI's wrapper, the
+            // dictionary and libwebp run several times slower at -O0, which made the app and its
+            // benchmarks on a debug build nothing like what people run.
+            externalNativeBuild {
+                cmake {
+                    arguments += listOf("-DCMAKE_BUILD_TYPE=RelWithDebInfo")
+                }
+            }
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

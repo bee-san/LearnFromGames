@@ -37,16 +37,16 @@ if(NOT ANDROID)
 endif()
 
 if(NOT LFG_HOST_TESTS)
-  # libwebp, for the animated picture: Android writes a still WebP itself, not a moving one.
+  # libwebp, for the animated picture and for stills at a faster setting than Android's own.
   foreach(tool ANIM_UTILS CWEBP DWEBP GIF2WEBP IMG2WEBP VWEBP WEBPINFO WEBPMUX EXTRAS)
     set(WEBP_BUILD_${tool} OFF CACHE BOOL "" FORCE)
   endforeach()
   set(WEBP_BUILD_LIBWEBPMUX ON CACHE BOOL "" FORCE)
   add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/libwebp libwebp EXCLUDE_FROM_ALL)
 
-  add_library(lfg SHARED lfg_jni.cpp lfg_screenai.cpp lfg_webp.cpp)
+  add_library(lfg SHARED lfg_jni.cpp lfg_screenai.cpp lfg_webp.cpp lfg_pixels.cpp)
   target_include_directories(lfg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/libwebp/src)
-  target_link_libraries(lfg PRIVATE lfg_dict lfg_vocr libwebpmux webp dl)
+  target_link_libraries(lfg PRIVATE lfg_dict lfg_vocr libwebpmux webp jnigraphics dl)
   target_link_options(lfg PRIVATE -Wl,-z,max-page-size=16384)
 else()
   # Host build: `cmake -S app/src/main/cpp -B host-build && cmake --build host-build`

@@ -113,6 +113,31 @@ front of it. What is left, per look: copying the screenshot out of graphics
 memory (40 ms here), the probe on a changing screen (90 ms), and a full
 reading per new line (320 ms with ScreenAI).
 
+A second round, on the debug build with its native code now optimised as in a
+release (it was built at -O0, which made VOCR and libwebp several times slower
+there than for anyone using the app), before and after on the same emulator:
+
+| | Before | After |
+| --- | --- | --- |
+| Is this the last picture again? (every look) | 15 ms | 1.2 ms |
+| Writing a line's screen (behind the reading) | 235 ms | 110 ms |
+| CPU, the same line on screen | 8.8% | 7.0% |
+| CPU, advancing a line every 4 s | 44.9% | 39.4% |
+| CPU, advancing and looking up | 48.8% | 44.4% |
+| Sentence audio: finding speech in 30 s | 1.06 s | 0.80 s |
+
+The check fingerprints every fourth row where Android keeps the pixels instead
+of copying them into Java (`lfg_pixels.cpp`); pictures go through libwebp at a
+quick setting (127 ms and 128 KB a 1080p screen, against Android's 337 ms and
+123 KB: `PixelsBench`); and the voice detector's spectrum is an FFT. Reading
+only around the text VOCR found was tried and left out: 17% quicker, but 0.8
+points fewer lines read exactly on the OCR bench, and text VOCR misses (a
+choice menu) would go unread.
+
+```sh
+adb shell am instrument -w -e count 40 io.github.beesan.lfg/.PixelsBench   # debug build, after the OCR bench's pages are pushed
+```
+
 A tap, with the five starter dictionaries: the lookup is 2–5 ms (finding it
 and reading its answer), building the entries 3–8 ms, and the popup shows them
 in 28–45 ms. The popup's page and every dictionary's stylesheet (a grammar
