@@ -56,6 +56,40 @@ class EnginesTest {
         assertEquals(1, Blocks.group(ScreenAi.decode(resource("/screenai/furigana.pb"))).size)
     }
 
+    /** A ScreenAI line: each symbol with its left edge and width, all [height] tall at y=100. */
+    private fun read(vararg symbols: Pair<String, IntRange>, height: Int = 50): Pair<String, List<io.github.beesan.lfg.core.CharBox>> {
+        val text = StringBuilder()
+        val chars = symbols.map { (s, x) ->
+            io.github.beesan.lfg.core.CharBox(text.length, text.length + s.length, io.github.beesan.lfg.core.Box(x.first, 100, x.last, 100 + height))
+                .also { text.append(s) }
+        }
+        val line = io.github.beesan.lfg.core.Box(chars.first().box.left, 100, chars.last().box.right, 100 + height)
+        return ScreenAi.ellipses(text.toString(), chars, vertical = false, line = line)
+    }
+
+    @Test
+    fun screenAiEllipsesAreCountedByTheRoomTheyTake() {
+        // From the OCR bench: 「ええ……。」 came out as ええ…………･･。 (boxes overlap and miscount).
+        val (text, boxes) = read(
+            "え" to 160..205, "え" to 205..250, "…" to 247..283, "…" to 245..290, "…" to 279..315, "…" to 304..340,
+            "･" to 338..365, "･" to 354..381, "。" to 381..426, height = 45,
+        )
+        assertEquals("ええ……。", text)
+        assertEquals(5, boxes.size)
+        assertEquals(text.indices.toList(), boxes.map { it.start })
+        assertTrue(boxes[2].box.left == 245 && boxes[3].box.right == 381)
+        // 「あのですね･…････ → あのですね……
+        assertEquals("あのですね……", read("あ" to 300..353, "の" to 360..413, "で" to 420..473, "す" to 480..533, "ね" to 500..553,
+            "･" to 558..584, "…" to 574..600, "･" to 581..607, "･" to 632..658, "･" to 639..674, "･" to 646..681, height = 53).first)
+    }
+
+    @Test
+    fun aMiddleDotInANameStays() {
+        assertEquals("ジョン・スミス", read("ジ" to 0..50, "ョ" to 55..100, "ン" to 110..160, "・" to 170..190,
+            "ス" to 200..250, "ミ" to 260..310, "ス" to 320..370).first)
+        assertEquals("もう大丈夫…", read("も" to 346..396, "う" to 396..446, "大" to 446..496, "丈" to 496..546, "夫" to 546..596, "…" to 596..646).first)
+    }
+
     @Test
     fun anEmptyOrBrokenResultIsNoLines() {
         assertEquals(0, ScreenAi.decode(ByteArray(0)).size)
