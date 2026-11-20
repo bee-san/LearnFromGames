@@ -152,6 +152,20 @@ class EntryWebView(
         if (loaded) run(script) else pending = script
     }
 
+    /**
+     * Loads the list's page with no entries yet, so the first lookup only
+     * swaps its entries in (about 30 ms) instead of starting the page from
+     * nothing (200-570 ms on the emulator). Does nothing once a page is up.
+     */
+    fun prewarm(styles: List<EntryHtml.Style>, palette: Palette) {
+        if (shown != null) return
+        setBackgroundColor(palette.bg)
+        val head = Perf.measure("entry.head") { EntryHtml.listHead(styles, palette) }
+        listHead = head
+        listBody = ""
+        load(head + EntryHtml.LIST_END)
+    }
+
     private var listHead: String? = null
     private var listBody: String? = null
     private var swapStarted = 0L

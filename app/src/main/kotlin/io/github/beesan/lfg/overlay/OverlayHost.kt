@@ -304,6 +304,15 @@ class OverlayHost(
             }
         }
         for (i in used until strips.size) strips[i].hide()
+        // Text to tap: the popup is made now, after this drawing, so the first tap does not wait for its page.
+        if (lines.isNotEmpty() && popupView == null && otherDisplay() == Display.INVALID_DISPLAY) {
+            val display = gameDisplay
+            handler.post {
+                if (popupView == null && gameDisplay == display) {
+                    popupView = PopupView(host.first).also { it.entry.prewarm(styles(), Ink.palette) }
+                }
+            }
+        }
 
         // The mark around the looked-up word: one piece for each row it is on.
         val spans = if (gameInFront && state.selected) state.selectedLine?.geometry?.spanBoxes(state.spanStart, state.spanEnd) ?: emptyList() else emptyList()
