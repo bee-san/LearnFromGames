@@ -171,6 +171,9 @@ fun DictionariesScreen(
     wordAudio: WordAudio.Info?,
     onAddAudio: () -> Unit,
     onRemoveAudio: () -> Unit,
+    /** The starter dictionaries not installed, by name, and the button that fetches them. */
+    starterMissing: List<String>,
+    onStarter: () -> Unit,
     onBack: () -> Unit,
 ) = Page("Dictionaries", onBack, actions = { LfgButton(if (busy.busy) "Adding…" else "Add dictionary…", onAdd, primary = true, enabled = !busy.busy) }) {
     val date = remember { SimpleDateFormat("d MMMM yyyy", Locale.getDefault()) }
@@ -187,6 +190,11 @@ fun DictionariesScreen(
     }
     val list = (state as? DictState.Ready)?.dictionaries ?: emptyList()
     if (list.isEmpty()) Text("No dictionary is installed.", color = Lfg.Dim, fontSize = 15.sp)
+    if (starterMissing.isNotEmpty() && fetching == null) {
+        Card("Starter set", "Hachidori's five: meanings, names, kanji, frequencies (which put the commoner word first) and grammar. Missing: " + starterMissing.joinToString(", ") + ". About 105 MB in all.") {
+            LfgButton("Download", onStarter, primary = true, enabled = !busy.busy)
+        }
+    }
     list.forEachIndexed { i, d ->
         Card(d.title, listOf(d.summary, date.format(Date(d.installedAt))).filter { it.isNotEmpty() }.joinToString(" · ")) {
             if (i > 0) LfgButton("Move up", { onMove(d.title, true) })

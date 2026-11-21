@@ -150,7 +150,7 @@ internal fun seeThrough(color: Int, percent: Int): Int = (color and 0x00FFFFFF) 
 /** `A Add card · B Close · ◀ ▶ Word · ▲ ▼ Row`: what replaces the button while the controller drives. */
 internal fun Context.keyHints(confirm: String, close: String, listen: Boolean = true, wholeWord: Boolean = true): TextView = label(12.5f, Ink.DIM).apply {
     // Y says the word only with word audio installed (Settings › Dictionaries); without it, it is not offered.
-    text = "$confirm Add card    $close Close    " + (if (listen) "Y Listen    " else "") +
+    text = "$confirm Add card    $close Close    X Note    " + (if (listen) "Y Listen    " else "") +
         (if (wholeWord) "◀ ▶ Word" else "◀ ▶ Character") + "    ▲ ▼ Row    L1 R1 Entry"
     setPadding(0, dp(6f), 0, 0)
 }
@@ -217,7 +217,28 @@ internal class NoteEditor(context: Context, onSave: (text: String, keepPicture: 
         keep.isChecked = true
         field.setText("")
         field.requestFocus()
-        field.post { context.getSystemService(InputMethodManager::class.java)?.showSoftInput(field, 0) }
+        keyboard()
+    }
+
+    /**
+     * Brings the keyboard up. Its window has only just been allowed focus, and
+     * the keyboard is refused until it has it, so this is asked again when
+     * focus arrives ([onWindowFocusChanged]) and once more a little later.
+     */
+    private fun keyboard() {
+        val show = Runnable {
+            if (visibility == VISIBLE && isAttachedToWindow) {
+                field.requestFocus()
+                context.getSystemService(InputMethodManager::class.java)?.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+        field.post(show)
+        field.postDelayed(show, 350)
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus && visibility == VISIBLE) keyboard()
     }
 
     private fun button(context: Context, text: String, primary: Boolean, onPress: () -> Unit) = context.pill(text, primary, 16f, onPress)

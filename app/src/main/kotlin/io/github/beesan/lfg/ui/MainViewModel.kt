@@ -222,6 +222,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** The starter set, asked for from Settings › Dictionaries: what is missing of it is downloaded behind the page. */
+    fun fetchStarterDictionaries() {
+        app.dictionaries.requestDefaults()
+        DictionaryWorker.start(app, replace = true, wifiOnly = app.settings.prefs.value.wifiOnly)
+    }
+
+    fun starterMissing(): List<String> = app.dictionaries.defaultsMissing().map { it.name }
+
     fun retryDownloads() = DictionaryWorker.start(app, replace = true, wifiOnly = app.settings.prefs.value.wifiOnly)
 
     /** Waits for Wi-Fi, or not, from now on; downloads still to do start again under the new rule. */
@@ -565,6 +573,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val line = opened ?: return
         lineLookup.selectEntry(entryIndex)
         _draft.value = NoteDraft(line, lines.value.indexOfFirst { it.id == line.id }.coerceAtLeast(0), picture(line))
+    }
+
+    /**
+     * A note asked for from over a game: on the line with [lineId] (the newest
+     * line when it is null or gone), and on the word starting at [at] of it
+     * when that is not negative.
+     */
+    fun noteFromGame(lineId: String?, at: Int) {
+        viewModelScope.launch {
+            val line = lineId?.let { id -> withContext(Dispatchers.IO) { app.database.lines().byId(id) } } ?: lines.value.firstOrNull()
+            if (line == null) {
+                _draft.value = NoteDraft()
+                return@launch
+            }
+            _draft.value = NoteDraft(line, lines.value.indexOfFirst { it.id == line.id }.coerceAtLeast(0), picture(line))
+            openLine(line)
+            if (at >= 0) lineLookup.select(0, at)
+        }
     }
 
     fun removeNotePicture() = _draft.update { it.copy(picture = null) }

@@ -26,6 +26,8 @@ class ControllerInput(
     private val controller: LookupController,
     private val swapConfirm: () -> Boolean,
     private val onClose: () -> Unit,
+    /** X: a note on the word shown. */
+    private val onNote: () -> Unit,
     private val onScroll: (Int) -> Unit,
     /** True while the shortcut's own buttons are down, so releasing them does not also change entry. */
     private val chordActive: () -> Boolean,
@@ -83,6 +85,8 @@ class ControllerInput(
             close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) onClose()
             // On release, and not when the two were the shortcut being pressed.
             KeyEvent.KEYCODE_BUTTON_Y -> if (down && event.repeatCount == 0) controller.playAudio()
+            // On release: the note's field then takes the controller's keys, and must not get this one's up.
+            KeyEvent.KEYCODE_BUTTON_X -> if (!down) onNote()
             KeyEvent.KEYCODE_BUTTON_L1 -> if (!down && !chordActive()) controller.previousEntry()
             KeyEvent.KEYCODE_BUTTON_R1 -> if (!down && !chordActive()) controller.nextEntry()
             else -> return KeyEvent.isGamepadButton(event.keyCode)

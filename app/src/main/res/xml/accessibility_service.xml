@@ -5,6 +5,7 @@
     android:accessibilityFlags="flagRetrieveInteractiveWindows|flagRequestFilterKeyEvents"
     android:canRetrieveWindowContent="true"
     android:canRequestFilterKeyEvents="true"
+    android:canPerformGestures="true"
     android:canTakeScreenshot="true"
     android:description="@string/service_description"
     android:notificationTimeout="100"

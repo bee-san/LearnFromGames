@@ -30,6 +30,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -225,9 +226,9 @@ class MainActivity : ComponentActivity() {
                             onClearWord = model.lineLookup::clear,
                             onSave = { title, text, inLookups ->
                                 model.saveNote(title, text, inLookups)
-                                page = Page.NOTES
+                                if (noteFromGame) finish() else page = Page.NOTES
                             },
-                            onCancel = ::back,
+                            onCancel = { if (noteFromGame) finish() else back() },
                         )
                         page == Page.LINE -> LineLookupScreen(
                             state = lookup,
@@ -277,6 +278,8 @@ class MainActivity : ComponentActivity() {
                             wordAudio = wordAudio,
                             onAddAudio = { pickAudio.launch(arrayOf("*/*")) },
                             onRemoveAudio = { model.removeWordAudio() },
+                            starterMissing = remember(dictionary, fetchingDictionary) { model.starterMissing() },
+                            onStarter = model::fetchStarterDictionaries,
                             onBack = ::back,
                         )
                         page == Page.SOURCES -> SourcesScreen(sources, ::back)
@@ -348,8 +351,16 @@ class MainActivity : ComponentActivity() {
         take(intent)
     }
 
+    /** The note page was opened from over a game: saving or leaving it goes back to the game's lines. */
+    private var noteFromGame = false
+
     private fun take(intent: Intent?) {
         if (intent?.action == ACTION_STATS) requested.value = Page.STATS
+        noteFromGame = intent?.action == ACTION_NOTE
+        if (noteFromGame) {
+            model.noteFromGame(intent?.getStringExtra(EXTRA_LINE), (intent?.getIntExtra(EXTRA_AT, -1) ?: -1))
+            requested.value = Page.NOTE_NEW
+        }
     }
 
     override fun onResume() {
@@ -399,5 +410,10 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_STATS = "io.github.beesan.lfg.action.STATS"
+
+        /** A note written from over a game: [EXTRA_LINE] is the line's id, [EXTRA_AT] where its word starts in it. */
+        const val ACTION_NOTE = "io.github.beesan.lfg.action.NOTE"
+        const val EXTRA_LINE = "line"
+        const val EXTRA_AT = "at"
     }
 }

@@ -114,6 +114,14 @@ class LfgAccessibilityService : AccessibilityService() {
             controller = controller,
             prefs = { app.settings.prefs.value },
             chordActive = { chordFired },
+            tapOn = { display, x, y ->
+                val path = android.graphics.Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+                val tap = android.accessibilityservice.GestureDescription.Builder()
+                    .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 30))
+                    .setDisplayId(display)
+                    .build()
+                if (!dispatchGesture(tap, null, null)) Log.w(TAG, "the tap that brings the controller back was refused")
+            },
             onToggleStrips = ::toggleStrips,
             onTapElsewhere = { if (asked?.continuous == false) endAsked() },
             // While a reading is up, the button takes it away, a region kept reading included.

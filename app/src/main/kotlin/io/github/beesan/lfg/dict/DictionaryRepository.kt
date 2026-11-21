@@ -237,6 +237,17 @@ class DictionaryRepository(private val context: Context) {
      * once, when the device has no dictionary; a device that already had some
      * keeps its own set, and one the user removes later does not come back.
      */
+    /** The starter dictionaries not installed here, whether or not they are being fetched. */
+    fun defaultsMissing(): List<DefaultDictionaries.Source> = installed().let { have -> DefaultDictionaries.ALL.filter { have.none(it::matches) } }
+
+    /**
+     * Asks for every starter dictionary that is missing, on a device that had
+     * dictionaries of its own and so was never given them. [ensureDefaults] fetches them.
+     */
+    fun requestDefaults() {
+        prefs.edit().putStringSet(KEY_DEFAULTS_PENDING, defaultsMissing().map { it.id }.toSet()).apply()
+    }
+
     fun defaultsPending(): Boolean = prefs.getStringSet(KEY_DEFAULTS_PENDING, null)?.isNotEmpty() == true
 
     /**

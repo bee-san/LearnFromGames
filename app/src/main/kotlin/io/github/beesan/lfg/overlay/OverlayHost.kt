@@ -66,6 +66,8 @@ class OverlayHost(
     private val onRegion: (Box, Boolean) -> Unit,
     /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
     private val onAsk: (lineId: String, what: Ask) -> Unit,
+    /** Taps a point of a screen, as a finger would: only ever our own focus window. */
+    private val tapOn: (displayId: Int, x: Int, y: Int) -> Unit,
     private val styles: () -> List<EntryHtml.Style>,
     private val media: (dictionary: String, path: String) -> ByteArray?,
     /**
@@ -138,6 +140,7 @@ class OverlayHost(
         controller,
         swapConfirm = { prefs().swapConfirm },
         onClose = { controller.exitControllerMode() },
+        onNote = { startNote(state.entryIndex) },
         onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(0, dy) },
         chordActive = chordActive,
     )
@@ -277,7 +280,9 @@ class OverlayHost(
         noting?.let { written -> if (written.entry != null && (!next.selected || next.selectedLine?.lineId != written.line?.lineId)) endNote() }
         // The cursor is on the game's own text, so its entry is over the game.
         if (next.controllerMode && !wasController) pickedOnPanel = false
+        val entered = next.controllerMode && !wasController
         state = next
+        if (entered) bringController()
         if (wasController && !next.controllerMode) input.release()
         render()
     }
@@ -291,8 +296,11 @@ class OverlayHost(
     /** The screens this app's own pages are in front on. The lines' screen is not drawn over them. */
     fun onOwnApp(displays: Set<Int>) {
         if (displays == ownApp) return
+        // A page of the app has just left the lines' screen: the controller is the game's again.
+        val left = panelDisplay in ownApp && panelDisplay !in displays
         ownApp = displays
         render()
+        if (left) bringController()
     }
 
     /** Every note, newest first; the lines' screen shows the current game's among its lines. */
@@ -405,14 +413,38 @@ class OverlayHost(
         if (other != Display.INVALID_DISPLAY) renderPanel(other) else panel?.hide()
         if (entryOverGame(other) && !(pickedOnPanel && panel?.shown == true)) renderPopup(host, span) else hidePopup()
 
-        // Lookup mode: a window that can take focus, and so the controller.
-        if (state.controllerMode && gameInFront && noting == null) {
+        // Lookup mode: a window that can take focus, and so the controller. It is also up for a
+        // moment whenever the controller has to be brought back to the game's screen.
+        val holding = state.controllerMode && gameInFront && noting == null
+        if (holding || bringing) {
             val win = focus ?: Win(FocusView(host.first), host.second, FOCUS_FLAGS).also { focus = it }
-            win.place(0, 0, 1, 1)
-            win.view.requestFocus()
+            win.place(0, 0, FOCUS_PX, FOCUS_PX)
+            if (holding) win.view.requestFocus()
         } else {
             focus?.hide()
         }
+    }
+
+    /** True for the moment [bringController] has the focus window up to be tapped. */
+    private var bringing = false
+
+    /**
+     * Brings the controller to the game's screen. On a two-screen handheld the
+     * buttons go to whichever screen was last touched on something that takes
+     * focus: after a page of the app, or the launcher, on the other screen,
+     * that is not the game's, and neither the game nor lookup mode hears them.
+     * A tap on our own focus window, in the corner of the game's screen, makes
+     * that screen the one again without touching the game.
+     */
+    private fun bringController() {
+        if (gameDisplay == Display.INVALID_DISPLAY || !gameInFront) return
+        bringing = true
+        render()
+        handler.postDelayed({ tapOn(gameDisplay, FOCUS_PX / 2, FOCUS_PX / 2) }, 60)
+        handler.postDelayed({
+            bringing = false
+            render()
+        }, 450)
     }
 
     private fun renderPanel(displayId: Int) {
@@ -459,8 +491,8 @@ class OverlayHost(
         val gap = context.dp(6f)
         // Portrait: near the full width. Landscape: Hachidori's popup beside the word, which is what
         // GameSentenceMiner's overlay shows. A fixed height: the entries scroll inside it. "No entry" needs one line.
-        var width = if (screen.height > screen.width) screen.width - 2 * context.dp(10f) else minOf(context.dp(400f), screen.width * 46 / 100)
-        val want = if (state.entries.isEmpty()) context.dp(60f) else minOf(screen.height * 56 / 100, context.dp(460f))
+        var width = if (screen.height > screen.width) screen.width - 2 * context.dp(10f) else minOf(context.dp(520f), screen.width * 56 / 100)
+        val want = if (state.entries.isEmpty()) context.dp(60f) else minOf(screen.height * 66 / 100, context.dp(560f))
         val geometry = state.selectedLine?.geometry
         // Clear of the row the word is on, as Hachidori places its popup; in a tall block the other rows may be covered.
         val row = geometry?.rows?.firstOrNull { it.intersects(span) } ?: span
@@ -621,6 +653,13 @@ class OverlayHost(
             isFocusableInTouchMode = true
         }
 
+        // Our own tap, bringing the controller here: it is not a tap on the game.
+        @SuppressLint("ClickableViewAccessibility")
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            ownTouch()
+            return true
+        }
+
         // The window with focus decides whether the system bars show. A game hides them; taking
         // the controller from it must not bring them back and shift the picture under the mark.
         override fun onAttachedToWindow() {
@@ -738,7 +777,11 @@ class OverlayHost(
      */
     @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
     private inner class PopupView(context: Context) : LinearLayout(context) {
-        val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }.apply { glass = true }
+        val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }.apply {
+            glass = true
+            // Read from the game's distance, not a page's.
+            settings.textZoom = 112
+        }
         private val message = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
         private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
@@ -810,6 +853,16 @@ class OverlayHost(
     }
 
     private fun beginNote(next: Noting, heading: String) {
+        // With a screen for the lines, the note is written on the app's own page there: nothing
+        // drawn over other apps can have the keyboard above it, and the page has the keyboard.
+        if (panel?.shown == true) {
+            openApp(
+                android.content.Intent(io.github.beesan.lfg.ui.MainActivity.ACTION_NOTE)
+                    .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_LINE, next.line?.lineId)
+                    .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_AT, if (next.entry != null && next.line === state.selectedLine) state.spanStart else -1),
+            )
+            return
+        }
         noting = next
         if (panel?.shown == true) {
             panelView?.showNote(heading)
@@ -1210,8 +1263,8 @@ class OverlayHost(
         line.screenshotPath?.takeIf { java.io.File(it).isFile } ?: line.cropPath?.takeIf { java.io.File(it).isFile }
 
     /** The app's own window, on the screen the lines are on. */
-    private fun openApp() {
-        val intent = android.content.Intent(service, io.github.beesan.lfg.ui.MainActivity::class.java)
+    private fun openApp(asking: android.content.Intent? = null) {
+        val intent = (asking ?: android.content.Intent()).setClass(service, io.github.beesan.lfg.ui.MainActivity::class.java)
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         val options = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(panelDisplay.takeIf { it != Display.INVALID_DISPLAY } ?: Display.DEFAULT_DISPLAY)
         try {
@@ -1282,7 +1335,9 @@ class OverlayHost(
         const val POPUP_FLAGS = BASE or LayoutParams.FLAG_NOT_TOUCH_MODAL or LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
         const val PANEL_FLAGS = BASE or LayoutParams.FLAG_NOT_TOUCH_MODAL
 
-        // Focusable, so it holds the controller; untouchable, so taps still reach the strips and the game.
-        const val FOCUS_FLAGS = LayoutParams.FLAG_NOT_TOUCHABLE or LayoutParams.FLAG_LAYOUT_IN_SCREEN or LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        // Focusable, so it holds the controller. A few pixels in the corner, which our own tap lands on
+        // to bring the controller to this screen; every other tap still reaches the strips and the game.
+        const val FOCUS_FLAGS = LayoutParams.FLAG_NOT_TOUCH_MODAL or LayoutParams.FLAG_LAYOUT_IN_SCREEN or LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        const val FOCUS_PX = 4
     }
 }
