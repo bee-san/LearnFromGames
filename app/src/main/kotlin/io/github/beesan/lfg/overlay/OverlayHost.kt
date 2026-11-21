@@ -22,6 +22,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.ui.EntryLink
@@ -62,6 +63,8 @@ class OverlayHost(
     /** A region dragged out: where, and whether to keep reading it. */
     private val onRegion: (Box, Boolean) -> Unit,
     private val onHistoryLine: (LookupLine) -> Unit,
+    /** Translate pressed on the panel for this saved line; the answer comes back through [onTranslation]. */
+    private val onTranslate: (lineId: String) -> Unit,
     private val styles: () -> List<EntryHtml.Style>,
     private val media: (dictionary: String, path: String) -> ByteArray?,
     /** A note written on a word over the game: the line, the entry, the text, and whether to keep the picture. */
@@ -96,8 +99,10 @@ class OverlayHost(
     private var buttonY = -1
     private var picker: Win? = null
     private val handler = android.os.Handler(service.mainLooper)
-    private var history: List<LookupLine> = emptyList()
-    private var session: String? = null
+    private var history: List<GameLine> = emptyList()
+
+    /** The game of the session still going and its stats, as the top of the panel shows them. */
+    private var session: Pair<String, String>? = null
 
     /** The line and entry a note is being written on, while the note editor shows. */
     private var noting: Pair<LookupLine, Entry>? = null
@@ -242,15 +247,16 @@ class OverlayHost(
         render()
     }
 
-    fun onHistory(lines: List<LookupLine>) {
+    /** The newest lines read, of every game; the panel shows the current game's. */
+    fun onHistory(lines: List<GameLine>) {
         history = lines
-        panelView?.showHistory(lines)
+        panelView?.showHistory()
     }
 
-    /** The session still going, as one line for the top of the panel; null when there is none. */
-    fun onSession(text: String?) {
-        session = text
-        panelView?.showSession(text)
+    /** The session still going: its game and its stats; null when there is none. */
+    fun onSession(game: String?, stats: String?) {
+        session = if (game != null && stats != null) game to stats else null
+        panelView?.showSession(game, stats)
     }
 
     private fun moveTo(displayId: Int) {
@@ -358,7 +364,7 @@ class OverlayHost(
         }
         val host = manager(displayId) ?: return
         val size = bounds(displayId) ?: return
-        val view = panelView?.takeIf { panel != null } ?: PanelView(host.first).also { panelView = it; it.showHistory(history); it.showSession(session) }
+        val view = panelView?.takeIf { panel != null } ?: PanelView(host.first).also { panelView = it; it.showSession(session?.first, session?.second) }
         val win = panel ?: Win(view, host.second, PANEL_FLAGS).also { panel = it }
         view.show(state, stripsOn)
         win.place(0, 0, size.width, size.height)
@@ -722,28 +728,61 @@ class OverlayHost(
     private fun showEntries(view: EntryWebView, state: LookupState) =
         view.showList(state.entries, styles(), state.buttons.map { it.htmlState() }, state.entryIndex, state.message, Ink.palette)
 
-    /** The bottom screen: the line to tap, then every entry of the lookup in one scrolling list, as in the popup. */
+    /**
+     * The bottom screen, laid out as the app is: the game and its session at
+     * the top, the line on screen as a card to tap, and under it either the
+     * entry of the word picked or this game's earlier lines with their times.
+     */
     @SuppressLint("ViewConstructor")
     private inner class PanelView(context: Context) : LinearLayout(context) {
+        private val pad = context.dp(16f)
         private val lines = LinesView(context) { line, index -> controller.select(line, index) }
 
         /** The entry in full: pictures, tables and each dictionary's own styling. */
         val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }
         private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
+        private val title = context.label(19f, Ink.TEXT, bold = true)
+        private val stats = context.label(13f, Ink.DIM)
+        private val nowLabel = context.label(12f, Ink.ACCENT, bold = true)
+        private val translation = context.label(15f, Ink.DIM)
+        private val translateButton = context.pill("Translate", primary = false) { translateNow() }
+        private val earlierLabel = context.label(12f, Ink.DIM, bold = true)
         private val historyList = LinearLayout(context)
         private val historyScroll = ScrollView(context)
         private val message = context.label(12.5f, Ink.DIM)
-        private val stripsToggle = context.label(12.5f, Ink.DIM)
+        private val stripsToggle = context.pill("", primary = false, sizeSp = 12.5f) { onToggleStrips() }
         private val hints = hints(context)
         private val empty = context.label(15f, Ink.DIM)
-        private val sessionLine = context.label(13f, Ink.DIM)
+        private val card = LinearLayout(context)
+        private val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+
+        /** The line Translate is for: the one picked in, else the newest on screen that was saved. */
+        private var translateFor: String? = null
 
         init {
             orientation = VERTICAL
             setBackgroundColor(Ink.BG)
-            val pad = context.dp(16f)
 
-            // The text on screen never takes more than two fifths of the panel: the entry needs the rest.
+            // The game and its session, as the app's page header.
+            val header = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundColor(Ink.SURFACE)
+                setPadding(pad, context.dp(12f), context.dp(12f), context.dp(12f))
+            }
+            val names = LinearLayout(context).apply { orientation = VERTICAL }
+            title.maxLines = 1
+            title.ellipsize = TextUtils.TruncateAt.END
+            stats.maxLines = 1
+            stats.ellipsize = TextUtils.TruncateAt.END
+            names.addView(title)
+            names.addView(stats, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(4f) })
+            header.addView(names, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+            header.addView(context.pill("Open LFG", primary = false) { openApp() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
+            addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+            addView(divider(context))
+
+            // The line on screen: a card, its text never more than two fifths of the panel, so the entry has the rest.
             val top = object : ScrollView(context) {
                 override fun onMeasure(widthSpec: Int, heightSpec: Int) {
                     val most = (this@PanelView.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels) * 2 / 5
@@ -752,27 +791,33 @@ class OverlayHost(
             }.apply {
                 isFocusable = false
                 addView(lines)
-                setPadding(pad, context.dp(12f), pad, context.dp(10f))
             }
-            sessionLine.setBackgroundColor(Ink.SURFACE)
-            sessionLine.setPadding(pad, context.dp(8f), pad, context.dp(8f))
-            sessionLine.maxLines = 1
-            sessionLine.ellipsize = TextUtils.TruncateAt.END
-            sessionLine.visibility = View.GONE
-            addView(sessionLine, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-            addView(top, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+            card.orientation = VERTICAL
+            card.background = rounded(Ink.SURFACE, Ink.BORDER, context.dp(14f).toFloat())
+            card.setPadding(pad, context.dp(12f), pad, context.dp(14f))
+            card.addView(nowLabel)
+            card.addView(top, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8f) })
+            translation.setLineSpacing(context.dp(3f).toFloat(), 1f)
+            card.addView(translation, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
+            val cardActions = LinearLayout(context).apply { orientation = HORIZONTAL }
+            cardActions.addView(translateButton, wrap())
+            card.addView(cardActions, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(12f) })
+            addView(card, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { setMargins(context.dp(12f), context.dp(12f), context.dp(12f), context.dp(4f)) })
             empty.text = "Waiting for text in the game. In an ordinary app, ask with the Read screen tile, the LFG button or the lookup shortcut."
-            empty.setPadding(pad, 0, pad, context.dp(10f))
+            empty.setLineSpacing(context.dp(3f).toFloat(), 1f)
+            empty.setPadding(pad, context.dp(16f), pad, context.dp(10f))
             addView(empty)
-            addView(divider(context))
 
-            addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = context.dp(8f) })
             note.visibility = View.GONE
             addView(note, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
             historyList.orientation = VERTICAL
+            earlierLabel.text = "EARLIER"
+            earlierLabel.letterSpacing = 0.08f
+            earlierLabel.setPadding(0, context.dp(14f), 0, context.dp(4f))
             historyScroll.isFocusable = false
             historyScroll.addView(historyList)
-            historyScroll.setPadding(pad, context.dp(8f), pad, 0)
+            historyScroll.setPadding(pad, 0, pad, 0)
             addView(historyScroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
 
             message.setPadding(pad, 0, pad, context.dp(6f))
@@ -781,14 +826,10 @@ class OverlayHost(
             val actions = LinearLayout(context).apply {
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(pad, context.dp(10f), pad, context.dp(12f))
-                addView(hints, wrap())
-                addView(View(context), LayoutParams(0, 1, 1f))
-                addView(stripsToggle, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(14f) })
+                setPadding(pad, context.dp(8f), context.dp(12f), context.dp(8f))
+                addView(hints, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+                addView(stripsToggle, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
             }
-            stripsToggle.minHeight = context.dp(40f)
-            stripsToggle.gravity = Gravity.CENTER_VERTICAL
-            stripsToggle.setOnClickListener { onToggleStrips() }
             addView(actions)
         }
 
@@ -804,17 +845,49 @@ class OverlayHost(
 
         fun show(state: LookupState, stripsOn: Boolean) {
             lines.show(state)
-            lines.visibility = if (state.lines.isEmpty()) View.GONE else View.VISIBLE
-            empty.visibility = if (state.lines.isEmpty()) View.VISIBLE else View.GONE
+            val has = state.lines.isNotEmpty()
+            card.visibility = if (has) View.VISIBLE else View.GONE
+            empty.visibility = if (has) View.GONE else View.VISIBLE
+            val onScreen = state.lines.any { it.geometry != null }
+            nowLabel.text = (if (onScreen) "ON SCREEN" else "EARLIER LINE") + (if (state.controllerMode) "  ·  CONTROLLER" else "")
+            nowLabel.letterSpacing = 0.08f
             val showEntry = state.selected && (state.entry != null || state.message != null)
             val writing = note.visibility == View.VISIBLE
             entry.visibility = if (showEntry && !writing) View.VISIBLE else View.GONE
             historyScroll.visibility = if (showEntry || writing) View.GONE else View.VISIBLE
             if (showEntry) showEntries(entry, state)
-            hints.visibility = if (state.controllerMode) View.VISIBLE else View.GONE
+            hints.visibility = if (state.controllerMode) View.VISIBLE else View.INVISIBLE
             message.text = state.message.takeIf { state.entry != null } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
-            stripsToggle.text = if (stripsOn) "Tap strips: on" else "Tap strips: off"
+            stripsToggle.text = if (stripsOn) "Tap strips on" else "Tap strips off"
+            val picked = state.selectedLine?.takeIf { state.selected }
+            translateFor = (picked ?: state.lines.lastOrNull { it.lineId != null })?.lineId
+            showTranslation()
+            showSession(session?.first, session?.second)
+            showHistory()
+        }
+
+        /** The kept or asked-for translation of the line Translate is for, and the button. */
+        fun showTranslation() {
+            val id = translateFor
+            val t = id?.let { translations[it] }
+            val can = id != null && translateReady()
+            translation.text = t?.text ?: t?.error ?: if (t?.busy == true) "Translating…" else ""
+            translation.setTextColor(if (t?.text == null && t?.error != null) Ink.ACCENT else Ink.DIM)
+            translation.visibility = if (translation.text.isEmpty()) View.GONE else View.VISIBLE
+            translateButton.visibility = if (can) View.VISIBLE else View.GONE
+            translateButton.text = if (t?.text != null) "Translate again" else "Translate"
+            translateButton.isEnabled = t?.busy != true
+            translateButton.alpha = if (t?.busy == true) 0.5f else 1f
+            (translateButton.parent as? View)?.visibility = translateButton.visibility
+        }
+
+        private fun translateNow() {
+            val id = translateFor ?: return
+            if (translations[id]?.busy == true) return
+            translations[id] = Translation(translations[id]?.text, busy = true)
+            showTranslation()
+            onTranslate(id)
         }
 
         fun showNote(word: String) {
@@ -828,24 +901,69 @@ class OverlayHost(
             note.visibility = View.GONE
         }
 
-        fun showSession(text: String?) {
-            sessionLine.text = text.orEmpty()
-            sessionLine.visibility = if (text == null) View.GONE else View.VISIBLE
+        fun showSession(game: String?, text: String?) {
+            title.text = game ?: state.lines.firstOrNull()?.gameName ?: "LearnFromGames"
+            stats.text = text ?: "No reading yet this session"
         }
 
-        /** While nothing is selected, the lines read before: tap one to look a word up in it. */
-        fun showHistory(history: List<LookupLine>) {
+        /** While nothing is picked, this game's lines read before, newest first, as on the app's Lines page. */
+        fun showHistory() {
+            val game = state.lines.firstOrNull()?.gameName ?: session?.first
+            val showing = state.lines.mapNotNullTo(HashSet()) { it.lineId }
+            val rows = history.filter { it.gameName == game && it.id !in showing }.take(HISTORY_SHOWN)
             historyList.removeAllViews()
-            for (line in history) {
-                historyList.addView(
-                    context.label(16f, Ink.DIM).apply {
-                        text = line.text
-                        setPadding(0, context.dp(8f), 0, context.dp(8f))
-                        setOnClickListener { onHistoryLine(line) }
-                    },
-                )
+            if (rows.isEmpty()) return
+            historyList.addView(earlierLabel)
+            for (row in rows) {
+                val item = LinearLayout(context).apply {
+                    orientation = HORIZONTAL
+                    setPadding(0, context.dp(10f), 0, context.dp(10f))
+                    setOnClickListener { onHistoryLine(LookupLine(row.lineText, row.id, row.screenshotPath, row.gameName)) }
+                }
+                item.addView(context.label(13f, Ink.DIM).apply { text = clock.format(java.util.Date(row.createdAt)); setPadding(0, context.dp(3f), 0, 0) }, LayoutParams(context.dp(54f), LayoutParams.WRAP_CONTENT))
+                val texts = LinearLayout(context).apply { orientation = VERTICAL }
+                texts.addView(context.label(17f, Ink.TEXT).apply { text = row.lineText; setLineSpacing(context.dp(4f).toFloat(), 1f) })
+                (translations[row.id]?.text ?: row.translation)?.let { t ->
+                    texts.addView(context.label(14f, Ink.DIM).apply { text = t; setPadding(0, context.dp(4f), 0, 0) })
+                }
+                if (row.noteIds.isNotEmpty()) {
+                    texts.addView(context.label(11.5f, Ink.ACCENT, bold = true).apply {
+                        text = "CARD"
+                        letterSpacing = 0.08f
+                        setPadding(0, context.dp(5f), 0, 0)
+                    })
+                }
+                item.addView(texts, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+                historyList.addView(item)
+                historyList.addView(divider(context))
             }
         }
+    }
+
+    /** The app's own window, on the screen the panel is on. */
+    private fun openApp() {
+        val intent = android.content.Intent(service, io.github.beesan.lfg.ui.MainActivity::class.java)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        val options = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(panelDisplay.takeIf { it != Display.INVALID_DISPLAY } ?: Display.DEFAULT_DISPLAY)
+        try {
+            service.startActivity(intent, options.toBundle())
+        } catch (e: Exception) {
+            Log.w(TAG, "open app", e)
+        }
+    }
+
+    private fun translateReady(): Boolean = prefs().let { it.translate != Prefs.TRANSLATE_OFF && it.openRouterKey.isNotBlank() }
+
+    /** A line's translation on the panel: kept, being asked for, or what went wrong. */
+    private data class Translation(val text: String? = null, val busy: Boolean = false, val error: String? = null)
+
+    private val translations = HashMap<String, Translation>()
+
+    /** The answer to Translate, from the service. */
+    fun onTranslation(lineId: String, text: String?, error: String?) {
+        translations[lineId] = Translation(text ?: translations[lineId]?.text, error = error)
+        panelView?.showTranslation()
+        if (text != null) panelView?.showHistory()
     }
 
     private companion object {
@@ -858,6 +976,7 @@ class OverlayHost(
         const val PICKER_FLAGS = BASE
 
         const val NOTICE_MS = 3500L
+        const val HISTORY_SHOWN = 15
 
         /** How long after a touch outside the strips to wait for the strip or entry it may have been on. */
         const val OUTSIDE_WAIT_MS = 120L

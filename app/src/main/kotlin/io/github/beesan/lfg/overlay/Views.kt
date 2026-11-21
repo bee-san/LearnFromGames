@@ -132,6 +132,21 @@ internal fun Context.keyHints(confirm: String, close: String, listen: Boolean = 
     setPadding(0, dp(6f), 0, 0)
 }
 
+/** A button as the app draws one: filled for the main action, outlined for the rest. */
+internal fun Context.pill(text: String, primary: Boolean, sizeSp: Float = 14f, onPress: () -> Unit) = TextView(this).apply {
+    this.text = text
+    setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
+    typeface = Typeface.DEFAULT_BOLD
+    gravity = Gravity.CENTER
+    minHeight = dp(if (sizeSp >= 16f) 44f else 38f)
+    setPadding(dp(16f), 0, dp(16f), 0)
+    includeFontPadding = false
+    setTextColor(if (primary) Ink.ON_FILL else Ink.TEXT)
+    background = rounded(if (primary) Ink.FILL else Ink.SURFACE, if (primary) Ink.FILL else Ink.BORDER_STRONG, dp(19f).toFloat())
+    isFocusable = false
+    setOnClickListener { onPress() }
+}
+
 internal fun wrap() = ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
 internal val TRANSPARENT = Color.TRANSPARENT
@@ -182,16 +197,5 @@ internal class NoteEditor(context: Context, onSave: (text: String, keepPicture: 
         field.post { context.getSystemService(InputMethodManager::class.java)?.showSoftInput(field, 0) }
     }
 
-    private fun button(context: Context, text: String, primary: Boolean, onPress: () -> Unit) = TextView(context).apply {
-        this.text = text
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-        typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.CENTER
-        minHeight = context.dp(44f)
-        setPadding(context.dp(18f), 0, context.dp(18f), 0)
-        setTextColor(if (primary) Ink.ON_FILL else Ink.TEXT)
-        background = rounded(if (primary) Ink.FILL else Ink.SURFACE, if (primary) Ink.FILL else Ink.BORDER_STRONG, context.dp(5f).toFloat())
-        isFocusable = false
-        setOnClickListener { onPress() }
-    }
+    private fun button(context: Context, text: String, primary: Boolean, onPress: () -> Unit) = context.pill(text, primary, 16f, onPress)
 }

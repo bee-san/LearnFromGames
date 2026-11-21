@@ -73,6 +73,6 @@ object GameStats {
         val minutes = (session.seconds / 60).toLong()
         val time = if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
         val speed = session.charsPerHour.takeIf { it > 0 }?.let { "%,d an hour".format(it) }
-        return listOfNotNull(title, time, "%,d characters".format(session.chars), speed, if (cards == 1) "1 card" else "$cards cards").joinToString(" · ")
+        return listOfNotNull(title.ifEmpty { null }, time, "%,d characters".format(session.chars), speed, if (cards == 1) "1 card" else "$cards cards").joinToString(" · ")
     }
 }

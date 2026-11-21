@@ -118,6 +118,14 @@ class LfgAccessibilityService : AccessibilityService() {
             onReadButtonHeld = { if (asked?.continuous == true) endAsked() else pickRegion() },
             onRegion = { region, keep -> ask(region, keep) },
             onHistoryLine = { controller.setLines(listOf(it)) },
+            onTranslate = { id ->
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching { app.database.lines().byId(id)?.let { app.translator.translate(it) } ?: error("That line is not saved.") }
+                    }
+                    overlays.onTranslation(id, result.getOrNull(), result.exceptionOrNull()?.let { it.message ?: "Could not translate." })
+                }
+            },
             styles = { styles },
             media = { dictionary, path -> app.dictionaries.mediaBlocking(dictionary, path) },
             onSaveNote = { line, entry, text, keepPicture ->
@@ -174,14 +182,13 @@ class LfgAccessibilityService : AccessibilityService() {
         }
         scope.launch { controller.state.collect(overlays::onState) }
         scope.launch {
-            app.database.lines().recent(8).collect { rows ->
-                overlays.onHistory(rows.map { LookupLine(it.lineText, it.id, it.screenshotPath, it.gameName) })
-            }
+            // Enough of every game's newest lines that the panel still has some of the one being played.
+            app.database.lines().recent(60).collect(overlays::onHistory)
         }
         // The session still going, on the panel: again with each new line, and each minute so it ends when its gap has passed.
         scope.launch {
             combine(app.database.lines().recent(1), minutes()) { rows, _ -> rows.firstOrNull() }.collect { latest ->
-                overlays.onSession(withContext(Dispatchers.IO) { sessionLine(latest) })
+                overlays.onSession(latest?.gameName, withContext(Dispatchers.IO) { sessionLine(latest) })
             }
         }
         scope.launch { captureLoop() }
@@ -208,7 +215,7 @@ class LfgAccessibilityService : AccessibilityService() {
         val session = ReadingStats.summarise(stamps, ZoneId.systemDefault()).sessions
             .lastOrNull { it.gameId == latest.gameId }?.takeIf { GameStats.live(it, now) } ?: return null
         val cards = GameStats.sessionCards(listOf(session), app.database.cards().madeSince((session.start * 1000).toLong()))[session] ?: 0
-        return GameStats.strip(latest.gameName, session, cards)
+        return GameStats.strip("", session, cards)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -269,6 +276,7 @@ class LfgAccessibilityService : AccessibilityService() {
         if (!KeyEvent.isGamepadButton(event.keyCode) && event.keyCode !in DPAD) return false
         val (first, second) = when (app.settings.prefs.value.shortcut) {
             Prefs.SHORTCUT_L1_R1 -> KeyEvent.KEYCODE_BUTTON_L1 to KeyEvent.KEYCODE_BUTTON_R1
+            Prefs.SHORTCUT_L2_R2 -> KeyEvent.KEYCODE_BUTTON_L2 to KeyEvent.KEYCODE_BUTTON_R2
             else -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBR
         }
         if (event.action == KeyEvent.ACTION_DOWN) {

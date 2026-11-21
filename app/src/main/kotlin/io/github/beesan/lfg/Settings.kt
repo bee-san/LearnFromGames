@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** The few choices the app has. Every one has a default, so none is ever asked for. */
 data class Prefs(
-    /** [SHORTCUT_L3_R3] or [SHORTCUT_L1_R1]. */
+    /** [SHORTCUT_L3_R3], [SHORTCUT_L1_R1] or [SHORTCUT_L2_R2]. */
     val shortcut: String = SHORTCUT_L3_R3,
     /** Swap which face button adds a card and which closes, for pads printed the other way round. */
     val swapConfirm: Boolean = false,
@@ -93,6 +93,9 @@ data class Prefs(
     companion object {
         const val SHORTCUT_L3_R3 = "l3r3"
         const val SHORTCUT_L1_R1 = "l1r1"
+
+        /** The triggers: on pads that send them as buttons too, as the Thor's does. */
+        const val SHORTCUT_L2_R2 = "l2r2"
         const val TRANSLATE_OFF = "off"
         const val TRANSLATE_ASK = "ask"
         const val TRANSLATE_EVERY = "every"
