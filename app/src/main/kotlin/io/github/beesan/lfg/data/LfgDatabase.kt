@@ -215,18 +215,39 @@ interface RecapDao {
     fun latestFlow(gameId: String): Flow<RecapRow?>
 }
 
+@Dao
+interface QuestionDao {
+    @Insert
+    suspend fun insert(question: QuestionRow): Long
+
+    /** A game's questions, newest first. */
+    @Query("SELECT * FROM questions WHERE game_id = :gameId ORDER BY created_at DESC LIMIT :count")
+    suspend fun recent(gameId: String, count: Int = KEEP): List<QuestionRow>
+
+    /** Drops all but a game's newest [keep] questions. */
+    @Query("DELETE FROM questions WHERE game_id = :gameId AND id NOT IN (SELECT id FROM questions WHERE game_id = :gameId ORDER BY created_at DESC LIMIT :keep)")
+    suspend fun trim(gameId: String, keep: Int = KEEP)
+
+    companion object {
+        /** Questions kept for each game. */
+        const val KEEP = 20
+    }
+}
+
 /** Schema changes add a numbered migration; nothing here is ever rebuilt destructively. */
 @Database(
-    entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class],
-    version = 6,
+    entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class, QuestionRow::class],
+    version = 7,
     exportSchema = true,
     // 2: a crop and a translation for each line, notes, and recaps. Room writes it from the exported schemas.
     // 3: a row for each game named inside an emulator.
     // 4: whether a row is an ordinary app, read on demand.
     // 5: whether a line is interface text (a menu label, a name plate), and an index to find a line's text in a game.
     // 6: the visual novel on VNDB a game is linked to, for its character names.
+    // 7: questions asked about a game, and their answers.
     autoMigrations = [
         AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6),
+        AutoMigration(from = 6, to = 7),
     ],
 )
 abstract class LfgDatabase : RoomDatabase() {
@@ -236,6 +257,7 @@ abstract class LfgDatabase : RoomDatabase() {
     abstract fun cards(): CardDao
     abstract fun notes(): NoteDao
     abstract fun recaps(): RecapDao
+    abstract fun questions(): QuestionDao
 
     companion object {
         fun open(context: Context): LfgDatabase =

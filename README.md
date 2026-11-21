@@ -50,7 +50,7 @@ flowchart LR
     F --> J[Stats]
 ```
 
-Reading and lookup run on the device. The network is used for the first-run downloads (the starter dictionaries from GitHub, jitendex.org's releases and api.jiten.moe; ScreenAI's files from Chromium's package store) and, only when you turn them on, for translation and recaps through OpenRouter and for game names from Steam's Web API.
+Reading and lookup run on the device. The network is used for the first-run downloads (the starter dictionaries from GitHub, jitendex.org's releases and api.jiten.moe; ScreenAI's files from Chromium's package store) and, only when you turn them on, for translation, recaps and Ask (questions about a game, answered with OpenRouter’s web search) through OpenRouter and for game names from Steam's Web API.
 
 ## Where it stands
 

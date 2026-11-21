@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
             val explanation by model.explanation.collectAsStateWithLifecycle()
             val keyTest by model.keyTest.collectAsStateWithLifecycle()
             val recap by model.recap.collectAsStateWithLifecycle()
+            val asking by model.asking.collectAsStateWithLifecycle()
             val backupMessage by model.backupMessage.collectAsStateWithLifecycle()
             val pendingRestore by model.pendingRestore.collectAsStateWithLifecycle()
             val saveBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { model.backUpTo(it) }
@@ -146,7 +147,7 @@ class MainActivity : ComponentActivity() {
                 // Stats keeps its period and chart across the goals page, and opens on its defaults again after Home.
                 if (page == Page.STATS) saved.removeState(Page.STATS)
                 page = when (page) {
-                    Page.LINE, Page.NOTES, Page.RECAP, Page.STATS, Page.SETTINGS -> Page.HOME
+                    Page.LINE, Page.NOTES, Page.RECAP, Page.ASK, Page.STATS, Page.SETTINGS -> Page.HOME
                     Page.NOTE_NEW -> Page.NOTES
                     Page.SOURCES -> Page.DICTIONARIES
                     Page.VN_SEARCH -> Page.GAMES
@@ -215,6 +216,21 @@ class MainActivity : ComponentActivity() {
                                 model.openRecap()
                                 page = Page.RECAP
                             },
+                            onAsk = {
+                                model.openAsk()
+                                page = Page.ASK
+                            },
+                        )
+                        page == Page.ASK -> AskScreen(
+                            state = asking,
+                            games = games,
+                            on = prefs.ask,
+                            hasKey = prefs.openRouterKey.isNotBlank(),
+                            onGame = model::askGame,
+                            onAsk = model::ask,
+                            onTurnOn = { model.updatePrefs { it.copy(ask = true) } },
+                            onKey = { page = Page.TRANSLATION },
+                            onBack = ::back,
                         )
                         page == Page.RECAP -> RecapScreen(
                             state = recap,

@@ -4,6 +4,7 @@ package io.github.beesan.lfg.ask
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -26,14 +27,29 @@ import java.net.URL
  *     POST https://openrouter.ai/api/v1/chat/completions   Authorization: Bearer <key>
  *     {"model": "openai/gpt-oss-120b", "messages": [{"role", "content"}], "reasoning": {"effort": "low", "exclude": true}}
  *     →  {"choices": [{"message": {"content": "…"}}]}
+ *
+ * Ask also turns on OpenRouter's web search server tool for its request alone
+ * (`"tools": [{"type": "openrouter:web_search"}]`, which replaces the
+ * deprecated `:online` suffix and `web` plugin), and may send the screen as
+ * an `image_url` part; the pages it read come back as `url_citation`
+ * annotations on the message.
  */
 object OpenRouter {
     const val API = "https://openrouter.ai/api/v1"
 
     class Failure(message: String) : Exception(message)
 
-    /** The request's body. */
-    fun body(model: String, system: String, prompt: String): String = buildJsonObject {
+    /** A page the web search read, from the answer's annotations. */
+    data class Source(val url: String, val title: String)
+
+    /** Pages one web search request may bring back. */
+    const val SEARCH_RESULTS = 5
+
+    /**
+     * The request's body. [webSearch] lets the model search the web for this request alone;
+     * [image] is a `data:` URL of a picture sent after the prompt.
+     */
+    fun body(model: String, system: String, prompt: String, webSearch: Boolean = false, image: String? = null): String = buildJsonObject {
         put("model", model)
         putJsonArray("messages") {
             addJsonObject {
@@ -42,7 +58,28 @@ object OpenRouter {
             }
             addJsonObject {
                 put("role", "user")
-                put("content", prompt)
+                if (image == null) {
+                    put("content", prompt)
+                } else {
+                    putJsonArray("content") {
+                        addJsonObject {
+                            put("type", "text")
+                            put("text", prompt)
+                        }
+                        addJsonObject {
+                            put("type", "image_url")
+                            putJsonObject("image_url") { put("url", image) }
+                        }
+                    }
+                }
+            }
+        }
+        if (webSearch) {
+            putJsonArray("tools") {
+                addJsonObject {
+                    put("type", "openrouter:web_search")
+                    putJsonObject("parameters") { put("max_results", SEARCH_RESULTS) }
+                }
             }
         }
         putJsonObject("reasoning") {
@@ -50,6 +87,19 @@ object OpenRouter {
             put("exclude", true)
         }
     }.toString()
+
+    /** The pages the answer cites, each once, in the order cited. */
+    fun sources(response: String): List<Source> = try {
+        val message = Json.parseToJsonElement(response).jsonObject["choices"]?.jsonArray?.firstOrNull()
+            ?.jsonObject?.get("message")?.jsonObject
+        (message?.get("annotations") as? JsonArray).orEmpty().mapNotNull { a ->
+            val cite = (a as? JsonObject)?.get("url_citation") as? JsonObject ?: return@mapNotNull null
+            val url = cite.text("url").takeIf { it.startsWith("http") } ?: return@mapNotNull null
+            Source(url, cite.text("title"))
+        }.distinctBy { it.url }
+    } catch (_: Exception) {
+        emptyList()
+    }
 
     /** The answer's text, from the response's body. */
     fun answer(response: String): String {
@@ -65,7 +115,10 @@ object OpenRouter {
     }
 
     /** Asks [model] with [system] as its instructions. Throws [Failure] with a message to show. */
-    suspend fun ask(key: String, model: String, system: String, prompt: String): String = withContext(Dispatchers.IO) {
+    suspend fun ask(key: String, model: String, system: String, prompt: String): String = answer(request(key, body(model, system, prompt)))
+
+    /** Sends [body] and gives back the response's body. Throws [Failure] with a message to show. */
+    suspend fun request(key: String, body: String): String = withContext(Dispatchers.IO) {
         if (key.isBlank()) throw Failure("Add an OpenRouter key in Settings › Translation.")
         val connection = try {
             (URL("$API/chat/completions").openConnection() as HttpURLConnection).apply {
@@ -75,7 +128,7 @@ object OpenRouter {
                 readTimeout = 120_000
                 setRequestProperty("Authorization", "Bearer ${key.trim()}")
                 setRequestProperty("Content-Type", "application/json")
-                outputStream.use { it.write(body(model, system, prompt).toByteArray()) }
+                outputStream.use { it.write(body.toByteArray()) }
             }
         } catch (_: IOException) {
             throw Failure("OpenRouter isn’t reachable. Check the connection and try again.")
@@ -83,7 +136,7 @@ object OpenRouter {
         try {
             val code = connection.responseCode
             if (code != 200) throw Failure(failure(code))
-            answer(connection.inputStream.bufferedReader().use { it.readText() })
+            connection.inputStream.bufferedReader().use { it.readText() }
         } catch (_: IOException) {
             throw Failure("OpenRouter isn’t reachable. Check the connection and try again.")
         } finally {

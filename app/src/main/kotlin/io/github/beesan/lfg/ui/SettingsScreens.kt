@@ -422,8 +422,11 @@ fun TranslationScreen(
     SettingText("OpenRouter key", "Kept on this device, and never in a backup. Lines you translate or explain, and recaps' lines, go to OpenRouter.", prefs.openRouterKey, secret = true) { v ->
         onChange { it.copy(openRouterKey = v.trim()) }
     }
-    SettingText("Model", "Also explains lines and writes recaps", prefs.model) { v -> onChange { it.copy(model = v.trim()) } }
-    SettingText("Into", "The language translations, explanations and recaps are in", prefs.translateInto) { v -> onChange { it.copy(translateInto = v) } }
+    Card("Ask", if (prefs.ask) "Questions about a game, its last lines and, if you choose, the screen go to OpenRouter, which searches the web" else "No question is sent anywhere") {
+        OnOff(prefs.ask) { v -> onChange { it.copy(ask = v) } }
+    }
+    SettingText("Model", "Also explains lines, writes recaps and answers questions", prefs.model) { v -> onChange { it.copy(model = v.trim()) } }
+    SettingText("Into", "The language translations, explanations, recaps and answers are in", prefs.translateInto) { v -> onChange { it.copy(translateInto = v) } }
     Card("Lines before", "Sent with the line, so the answer knows who is speaking") {
         Stepper(if (prefs.translateContext == 0) "None" else "${prefs.translateContext}", prefs.translateContext, Prefs.CONTEXT_STEPS) { v ->
             onChange { it.copy(translateContext = v) }
@@ -1057,7 +1060,7 @@ internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE }
+enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINE, NOTES, NOTE_NEW, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE }
 
 @Composable
 fun StorageScreen(

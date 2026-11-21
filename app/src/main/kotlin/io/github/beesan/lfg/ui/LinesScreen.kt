@@ -93,6 +93,7 @@ fun LinesScreen(
     onSettings: () -> Unit,
     onNotes: () -> Unit,
     onRecap: () -> Unit,
+    onAsk: () -> Unit,
     shortcut: String = "L3 + R3",
     loaded: Boolean = true,
 ) {
@@ -104,6 +105,7 @@ fun LinesScreen(
         PageHeader("Lines") {
             LfgButton("Notes", onNotes)
             LfgButton("Recap", onRecap)
+            LfgButton("Ask", onAsk)
             LfgButton("Stats", onStats)
             LfgButton("Settings", onSettings)
         }

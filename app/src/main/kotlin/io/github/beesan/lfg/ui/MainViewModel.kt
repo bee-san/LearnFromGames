@@ -16,6 +16,7 @@ import io.github.beesan.lfg.backup.Backup
 import android.content.Intent
 import io.github.beesan.lfg.ask.Recap
 import io.github.beesan.lfg.games.GameNameSources
+import io.github.beesan.lfg.data.QuestionRow
 import io.github.beesan.lfg.data.RecapRow
 import kotlinx.serialization.json.Json
 import io.github.beesan.lfg.ask.Translator
@@ -489,6 +490,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             withContext(Dispatchers.Main) { app.restart() }
+        }
+    }
+
+    // ── ask ──────────────────────────────────────────────────────────────────
+
+    /** A game's questions, newest first, and the one being asked. */
+    data class AskState(
+        val gameId: String? = null,
+        val history: List<QuestionRow> = emptyList(),
+        val busy: Boolean = false,
+        val error: String? = null,
+    )
+
+    private val _asking = MutableStateFlow(AskState())
+    val asking: StateFlow<AskState> = _asking
+
+    /** Ask opens on the game read last. */
+    fun openAsk() = askGame(lines.value.firstOrNull()?.gameId ?: games.value.firstOrNull()?.id)
+
+    fun askGame(gameId: String?) {
+        _asking.value = AskState(gameId)
+        if (gameId == null) return
+        viewModelScope.launch {
+            val history = app.database.questions().recent(gameId)
+            _asking.update { if (it.gameId == gameId) it.copy(history = history) else it }
+        }
+    }
+
+    fun ask(question: String, withScreen: Boolean) {
+        val gameId = _asking.value.gameId ?: return
+        if (_asking.value.busy || question.isBlank()) return
+        val name = games.value.firstOrNull { it.id == gameId }?.title.orEmpty()
+        _asking.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch {
+            val error = try {
+                app.asker.ask(gameId, name, question, withScreen)
+                null
+            } catch (e: OpenRouter.Failure) {
+                e.message
+            }
+            val history = app.database.questions().recent(gameId)
+            _asking.update { if (it.gameId == gameId) it.copy(history = history, busy = false, error = error) else it }
         }
     }
 

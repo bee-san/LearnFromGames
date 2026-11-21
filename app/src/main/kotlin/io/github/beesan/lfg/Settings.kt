@@ -72,6 +72,8 @@ data class Prefs(
     val translateInto: String = "English",
     /** How many lines before a line are sent with it, so its translation knows who is speaking. */
     val translateContext: Int = 10,
+    /** Whether Ask may send questions about a game, with its last lines, to OpenRouter, which searches the web for them. */
+    val ask: Boolean = false,
     /** The folder automatic backups and the lines file go to: a document tree's link, or empty for none. */
     val backupFolder: String = "",
     /** [BACKUP_OFF], [BACKUP_DAILY] or [BACKUP_WEEKLY]. */
@@ -198,6 +200,7 @@ class Settings(context: Context) {
             model = store.getString("model", d.model) ?: d.model,
             translateInto = store.getString("translateInto", d.translateInto) ?: d.translateInto,
             translateContext = store.getInt("translateContext", d.translateContext),
+            ask = store.getBoolean("ask", d.ask),
             backupFolder = store.getString("backupFolder", d.backupFolder) ?: d.backupFolder,
             backupEvery = store.getString("backupEvery", d.backupEvery) ?: d.backupEvery,
             backupKeep = store.getInt("backupKeep", d.backupKeep),
@@ -251,6 +254,7 @@ class Settings(context: Context) {
             .putString("model", next.model)
             .putString("translateInto", next.translateInto)
             .putInt("translateContext", next.translateContext)
+            .putBoolean("ask", next.ask)
             .putString("backupFolder", next.backupFolder)
             .putString("backupEvery", next.backupEvery)
             .putInt("backupKeep", next.backupKeep)

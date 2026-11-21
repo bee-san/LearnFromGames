@@ -181,3 +181,21 @@ data class RecapRow(
     val model: String,
     @ColumnInfo(name = "created_at") val createdAt: Long,
 )
+
+/**
+ * A question asked about a game, and its answer. Only the newest
+ * [QuestionDao.KEEP] of each game are kept.
+ */
+@Entity(tableName = "questions", indices = [Index("game_id")])
+data class QuestionRow(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "game_id") val gameId: String,
+    val question: String,
+    val answer: String,
+    /** The pages the answer cites, one `url<tab>title` a line. */
+    val sources: String = "",
+    /** Whether the screen went with the question. */
+    @ColumnInfo(name = "with_screen") val withScreen: Boolean = false,
+    val model: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+)

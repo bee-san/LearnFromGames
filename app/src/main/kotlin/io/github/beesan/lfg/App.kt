@@ -28,6 +28,7 @@ import io.github.beesan.lfg.data.Notes
 import android.content.Intent
 import io.github.beesan.lfg.ask.OpenRouter
 import io.github.beesan.lfg.backup.BackupWorker
+import io.github.beesan.lfg.ask.Asker
 import io.github.beesan.lfg.ask.Recapper
 import io.github.beesan.lfg.ask.Translator
 import java.io.File
@@ -55,6 +56,7 @@ class App : Application() {
     val translator by lazy { Translator(database) { settings.prefs.value } }
     val explainer by lazy { io.github.beesan.lfg.ask.Explainer(database) { settings.prefs.value } }
     val recapper by lazy { Recapper(database, { settings.prefs.value }) }
+    val asker by lazy { Asker(database, { settings.prefs.value }) }
     val dictionaries by lazy { DictionaryRepository(this) }
     val wordAudio by lazy { WordAudio(this) }
     val anki by lazy { AnkiBridge(this) }
