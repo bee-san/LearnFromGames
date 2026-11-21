@@ -1,0 +1,9 @@
+Art for the stand-in game's optional scene (started with --ez scene true). Both are CC0.
+
+classroom.jpg: "classroom001.jpg" from "Classroom 002" by Midnight68, OpenGameArt,
+  https://opengameart.org/content/classroom-002 (CC0). Cropped to 16:9 and scaled to 1920x1080.
+  Source SHA-256 10e2f4be688c414e5f80d445fd3d0fbf301a34cfb7090ebdcf72748270bdd8cf
+
+yui.png: "pl1 sadhappy.png" from "VIsual novel Character Sprite" by FALLiNG_AiR, OpenGameArt,
+  https://opengameart.org/content/visual-novel-character-sprite (CC0). Trimmed and scaled to 1000 px tall.
+  Source archive character_5.zip SHA-256 df847f16d5ac45905023bfad0a12dccc71d614423d1505fde0d4d9e756dbfb11

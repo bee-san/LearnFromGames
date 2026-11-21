@@ -3,7 +3,10 @@ package io.github.beesan.lfg.fakegame
 
 import android.app.Activity
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.RectF
 import android.graphics.Color
 import android.graphics.Paint
 import android.media.AudioAttributes
@@ -32,6 +35,10 @@ import kotlin.math.sin
  * the recording `voice.s16le` (16 kHz, 16-bit, mono) from the app's external
  * files folder when one has been pushed there, except on every third page,
  * which stays unvoiced.
+ *
+ * Started with `--ez scene true`, the box sits over a classroom with a
+ * character in it (CC0 art, see assets/scene/CREDITS.txt), for the website's
+ * recording. Without it the ground stays flat, as the OCR tests expect.
  */
 class GameActivity : Activity() {
     private lateinit var game: GameView
@@ -40,6 +47,10 @@ class GameActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         game = GameView(this)
+        if (intent.getBooleanExtra("scene", false)) {
+            game.scene = assets.open("scene/classroom.jpg").use(BitmapFactory::decodeStream) to
+                assets.open("scene/yui.png").use(BitmapFactory::decodeStream)
+        }
         if (intent.getBooleanExtra("music", false)) {
             game.voice = getExternalFilesDir(null)?.resolve("voice.s16le")?.takeIf { it.canRead() }?.readBytes()
             music = game.play(music(), 22_050, loop = true)
@@ -90,6 +101,15 @@ class GameActivity : Activity() {
         private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF3F5F7.toInt() }
         private val name = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8FA6B5.toInt() }
         private val box = Paint().apply { color = 0xFF0C141B.toInt() }
+        private val art = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        /** A background and a character drawn behind the box, when the scene is on. */
+        var scene: Pair<Bitmap, Bitmap>? = null
+            set(value) {
+                field = value
+                if (value != null) box.color = 0xE60C141B.toInt()
+                invalidate()
+            }
         private val typing = object : Runnable {
             override fun run() {
                 if (shown < pages[page].sumOf { it.length }) {
@@ -174,6 +194,12 @@ class GameActivity : Activity() {
             val size = h * 0.052f
             text.textSize = size
             name.textSize = size * 0.6f
+            scene?.let { (ground, person) ->
+                canvas.drawBitmap(ground, null, RectF(0f, 0f, w, h), art)
+                val ph = h * 0.98f
+                val pw = ph * person.width / person.height
+                canvas.drawBitmap(person, null, RectF(w * 0.62f - pw / 2, h * 0.06f, w * 0.62f + pw / 2, h * 0.06f + ph), art)
+            }
             canvas.drawRect(w * 0.04f, h * 0.70f, w * 0.96f, h * 0.95f, box)
             canvas.drawText("ユイ", w * 0.07f, h * 0.745f, name)
             var left = shown
