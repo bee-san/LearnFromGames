@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -200,6 +201,51 @@ internal fun GamesList(stats: StatsState, games: Map<String, Game>, period: Stat
         return
     }
     val most = rows.maxOf { it.totals.seconds }.coerceAtLeast(1.0)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth < NARROW) NarrowGames(rows, games, most, today, zone, onGame) else WideGames(rows, games, most, today, zone, onGame)
+    }
+}
+
+/**
+ * The table on a narrow screen: five number columns left no room for the
+ * name, which went one letter a line. Time and the day stay as columns; the
+ * rest goes in a line under the name.
+ */
+@Composable
+private fun NarrowGames(rows: List<GameStats.Row>, games: Map<String, Game>, most: Double, today: LocalDate, zone: ZoneId, onGame: (String) -> Unit) {
+    Column {
+        HorizontalDivider(color = Lfg.Border)
+        rows.forEach { row ->
+            val game = games[row.gameId]
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(4.dp)).clickable { onGame(row.gameId) }
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                GameCover(game, COVER_W, COVER_H)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(game?.title ?: "Unknown game", color = Lfg.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "%,d chars · %s/h · %s".format(row.totals.chars, speed(row.totals.charsPerHour), if (row.cards == 1) "1 card" else "${row.cards} cards"),
+                        color = Lfg.Dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Lfg.Sunken)) {
+                        Box(Modifier.fillMaxHeight().fillMaxWidth((row.totals.seconds / most).toFloat().coerceIn(0.01f, 1f)).background(Lfg.Accent))
+                    }
+                }
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(duration(row.totals.seconds), color = Lfg.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    Text(shortDay(ReadingStats.dayOf(row.last, zone), today), color = Lfg.Dim, fontSize = 13.sp, maxLines = 1)
+                }
+            }
+            HorizontalDivider(color = Lfg.Border.copy(alpha = 0.5f))
+        }
+    }
+}
+
+@Composable
+private fun WideGames(rows: List<GameStats.Row>, games: Map<String, Game>, most: Double, today: LocalDate, zone: ZoneId, onGame: (String) -> Unit) = Column {
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Spacer(Modifier.width(COVER_W))
         Text("Game", color = Lfg.Dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))

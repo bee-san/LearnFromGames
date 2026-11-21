@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
@@ -101,20 +102,33 @@ internal fun Page(title: String, onBack: () -> Unit, actions: @Composable () -> 
 
 /** A row of the app: a name, a line of detail, and whatever it does on the right. */
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun Card(name: String, detail: String = "", onClick: (() -> Unit)? = null, trailing: @Composable () -> Unit = {}) {
     val shape = RoundedCornerShape(8.dp)
-    Row(
+    BoxWithConstraints(
         Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(name, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            if (detail.isNotEmpty()) Text(detail, color = Lfg.Dim, fontSize = 14.sp)
+        // Narrow, a row of buttons beside the name squeezed it to a letter a line: the buttons go under it.
+        if (maxWidth < NARROW - 32.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column {
+                    Text(name, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    if (detail.isNotEmpty()) Text(detail, color = Lfg.Dim, fontSize = 14.sp)
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) { trailing() }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(name, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    if (detail.isNotEmpty()) Text(detail, color = Lfg.Dim, fontSize = 14.sp)
+                }
+                Spacer(Modifier.width(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { trailing() }
+            }
         }
-        Spacer(Modifier.width(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { trailing() }
     }
 }
 
@@ -614,6 +628,11 @@ fun GoalsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -
             onChange { it.copy(goalCards = v) }
         }
     }
+    Card("Today widget", "Auto follows the widget's size; some launchers never pass it on, so the layout can be chosen here.") {
+        Choice(listOf("auto" to "Auto", "small" to "Small", "wide" to "Wide", "large" to "Large"), prefs.widgetSize) { v ->
+            onChange { it.copy(widgetSize = v) }
+        }
+    }
     Text(
         "A day runs from 4:00 to 4:00, so reading after midnight counts towards the day before. Stats shows today against each goal, " +
             "the days that met it, and a line on the chart of each day.",
@@ -786,7 +805,8 @@ internal fun RowScope.Tile(label: String, parts: List<Pair<String, String>>, sub
                     }
                 }
             },
-            color = Lfg.Text, fontSize = 32.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            // Two lines: on a narrow screen the unit ("an hour") moves under the number instead of being cut off.
+            color = Lfg.Text, fontSize = 32.sp, fontWeight = FontWeight.SemiBold, maxLines = 2,
         )
         if (progress != null) {
             Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(Lfg.Soft)) {

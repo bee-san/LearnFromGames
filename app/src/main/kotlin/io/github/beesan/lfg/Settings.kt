@@ -30,6 +30,11 @@ data class Prefs(
     val goalChars: Int = 5_000,
     /** Cards a day, a ring on the Today widget; 0 is none. Not part of the reading goals' streak. */
     val goalCards: Int = 10,
+    /**
+     * The Today widget's layout: "auto" lets the launcher's size pick it; "small",
+     * "wide" or "large" fix it, for launchers (Cocoon) that never pass the size on.
+     */
+    val widgetSize: String = "auto",
     /** One of [Palette.SCHEMES]. */
     val colours: String = Palette.PINK,
     /** [Palette.THEME_SYSTEM], [Palette.THEME_LIGHT] or [Palette.THEME_DARK]. */
@@ -119,6 +124,7 @@ class Settings(context: Context) {
             goalMinutes = store.getInt("goalMinutes", d.goalMinutes),
             goalChars = store.getInt("goalChars", d.goalChars),
             goalCards = store.getInt("goalCards", d.goalCards),
+            widgetSize = store.getString("widgetSize", d.widgetSize) ?: d.widgetSize,
             colours = store.getString("colours", d.colours) ?: d.colours,
             theme = store.getString("theme", d.theme) ?: d.theme,
             translate = store.getString("translate", d.translate) ?: d.translate,
@@ -160,6 +166,7 @@ class Settings(context: Context) {
             .putInt("goalMinutes", next.goalMinutes)
             .putInt("goalChars", next.goalChars)
             .putInt("goalCards", next.goalCards)
+            .putString("widgetSize", next.widgetSize)
             .putString("colours", next.colours)
             .putString("theme", next.theme)
             .putString("translate", next.translate)

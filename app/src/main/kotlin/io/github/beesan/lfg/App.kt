@@ -72,7 +72,7 @@ class App : Application() {
         if (dictionaries.state.value is DictState.Missing || dictionaries.defaultsPending() || readerMissing) DictionaryWorker.start(this, wifiOnly = settings.prefs.value.wifiOnly)
         scope.launch(Dispatchers.IO) { models.forgetMeiki() }
         // The widgets measure against the goals and draw in the chosen colours, so they redraw as soon as one changes.
-        scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
+        scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme, it.widgetSize) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
         // WorkManager keeps the automatic backup across restarts; it changes only when the setting does.
         scope.launch { settings.prefs.map { it.backupEvery }.distinctUntilChanged().drop(1).collect { BackupWorker.schedule(this@App, it) } }
     }

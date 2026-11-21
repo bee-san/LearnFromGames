@@ -4,6 +4,9 @@ package io.github.beesan.lfg.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -26,6 +29,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.Prefs
@@ -40,12 +44,28 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun PageHeader(title: String, actions: @Composable () -> Unit = {}) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) {
-        Text(title, color = Lfg.Text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { actions() }
+    // A narrow screen (the Thor's lower one is about 470 dp) has no room for the
+    // title beside a row of buttons: squeezed, the title went one letter a line.
+    // There the buttons go under the title and wrap.
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+        if (maxWidth < NARROW) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(title, color = Lfg.Text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) { actions() }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = Lfg.Text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { actions() }
+            }
+        }
     }
 }
+
+/** Below this width a page stacks what sits side by side on a wide screen. */
+internal val NARROW = 640.dp
 
 /**
  * What opens from the launcher: the lines the app has read, newest first,

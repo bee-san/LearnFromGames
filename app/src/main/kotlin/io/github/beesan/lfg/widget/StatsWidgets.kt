@@ -131,13 +131,20 @@ object StatsWidgets {
         )
         if (today.isNotEmpty()) {
             val rings = data.rings.takeIf { it.isNotEmpty() }?.let { rings(colored(it), RING_PX) }
-            val views = RemoteViews(
-                mapOf(
-                    TODAY_SQUARE to todayViews(app, data, rings, Size.SQUARE, open),
-                    TODAY_WIDE to todayViews(app, data, rings, Size.WIDE, open),
-                    TODAY_LARGE to todayViews(app, data, rings, Size.LARGE, open),
-                ),
-            )
+            // A launcher that never tells the widget its size (Cocoon) always gets the
+            // largest layout that fits its first guess, so the size can be fixed in Settings.
+            val views = when (app.settings.prefs.value.widgetSize) {
+                "small" -> todayViews(app, data, rings, Size.SQUARE, open)
+                "wide" -> todayViews(app, data, rings, Size.WIDE, open)
+                "large" -> todayViews(app, data, rings, Size.LARGE, open)
+                else -> RemoteViews(
+                    mapOf(
+                        TODAY_SQUARE to todayViews(app, data, rings, Size.SQUARE, open),
+                        TODAY_WIDE to todayViews(app, data, rings, Size.WIDE, open),
+                        TODAY_LARGE to todayViews(app, data, rings, Size.LARGE, open),
+                    ),
+                )
+            }
             today.forEach { manager.updateAppWidget(it, views) }
         }
         if (week.isNotEmpty()) {
