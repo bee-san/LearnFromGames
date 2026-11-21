@@ -85,6 +85,9 @@ class LfgAccessibilityService : AccessibilityService() {
     )
 
     private var front: Front? = null
+
+    /** The screens this app's own pages are in front on: the lines' screen gives way to them there. */
+    private var ownAppOn: Set<Int> = emptySet()
     private val packageOfWindow = HashMap<Int, String>()
     private val games = HashMap<String, Game>()
     /** Rows of games named inside an emulator, by package and key. */
@@ -104,7 +107,7 @@ class LfgAccessibilityService : AccessibilityService() {
         pipeline = ReadingPipeline(app.lines, File(filesDir, "frames"), apart = { app.settings.prefs.value.interfaceApart })
         controller = LookupController(
             scope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) }, ::prepareLine,
-            matchLength = { app.dictionaries.matchLength(it) },
+            selection = { app.settings.prefs.value.picking },
         )
         overlays = OverlayHost(
             service = this,
@@ -117,26 +120,31 @@ class LfgAccessibilityService : AccessibilityService() {
             onReadButton = { if (asked != null) endAsked() else ask() },
             onReadButtonHeld = { if (asked?.continuous == true) endAsked() else pickRegion() },
             onRegion = { region, keep -> ask(region, keep) },
-            onHistoryLine = { controller.setLines(listOf(it)) },
-            onTranslate = { id ->
+            onAsk = { id, what ->
                 scope.launch {
                     val result = withContext(Dispatchers.IO) {
-                        runCatching { app.database.lines().byId(id)?.let { app.translator.translate(it) } ?: error("That line is not saved.") }
+                        runCatching {
+                            val line = app.database.lines().byId(id) ?: error("That line is not saved.")
+                            if (what == OverlayHost.Ask.TRANSLATE) app.translator.translate(line) else app.explainer.explain(line)
+                        }
                     }
-                    overlays.onTranslation(id, result.getOrNull(), result.exceptionOrNull()?.let { it.message ?: "Could not translate." })
+                    overlays.onAnswer(id, what, result.getOrNull(), result.exceptionOrNull()?.let { it.message ?: "That did not work. Try again." })
                 }
             },
             styles = { styles },
             media = { dictionary, path -> app.dictionaries.mediaBlocking(dictionary, path) },
             onSaveNote = { line, entry, text, keepPicture ->
-                val gameId = front?.game?.id.orEmpty()
+                // On a word, on a line alone, or on the game as it is now: then the newest screen is its picture.
+                val game = front?.game ?: pipeline.latest.value?.game
+                val picture = line?.framePath ?: pipeline.latest.value?.framePath
                 scope.launch {
                     val note = Note(
-                        gameId = gameId, gameName = line.gameName, lineId = line.lineId, lineText = line.text,
-                        term = entry.expression, reading = entry.reading, gloss = entry.senses().firstOrNull().orEmpty(),
+                        gameId = game?.id.orEmpty(), gameName = line?.gameName ?: game?.title.orEmpty(),
+                        lineId = line?.lineId, lineText = line?.text.orEmpty(),
+                        term = entry?.expression.orEmpty(), reading = entry?.reading.orEmpty(), gloss = entry?.senses()?.firstOrNull().orEmpty(),
                         text = text, createdAt = System.currentTimeMillis(),
                     )
-                    app.notes.save(note, if (keepPicture) line.framePath else null)
+                    app.notes.save(note, if (keepPicture) picture else null)
                 }
             },
         )
@@ -182,9 +190,10 @@ class LfgAccessibilityService : AccessibilityService() {
         }
         scope.launch { controller.state.collect(overlays::onState) }
         scope.launch {
-            // Enough of every game's newest lines that the panel still has some of the one being played.
-            app.database.lines().recent(60).collect(overlays::onHistory)
+            // Enough of every game's newest lines that the lines' screen still has those of the one being played.
+            app.database.lines().recent(80).collect(overlays::onHistory)
         }
+        scope.launch { app.notes.all.collect(overlays::onNotes) }
         // The session still going, on the panel: again with each new line, and each minute so it ends when its gap has passed.
         scope.launch {
             combine(app.database.lines().recent(1), minutes()) { rows, _ -> rows.firstOrNull() }.collect { latest ->
@@ -653,6 +662,7 @@ class LfgAccessibilityService : AccessibilityService() {
                 null
             }
             front = now
+            overlays.onOwnApp(ownAppOn)
             val prefs = app.settings.prefs.value
             if (!shooting) overlays.showReadButton(ordinaryFront?.displayId?.takeIf { prefs.readButton && (now == null || asked != null) })
             // A reading asked for owns the overlays until it ends; the game's own reading waits.
@@ -767,12 +777,14 @@ class LfgAccessibilityService : AccessibilityService() {
         try {
             val all = windowsOnAllDisplays
             val alive = HashSet<Int>()
+            val own = HashSet<Int>()
             for (i in 0 until all.size()) {
                 val windows = all.valueAt(i)
                 // Windows come front to back: the first app window is the one on top of its screen.
                 val top = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION } ?: continue
                 alive += top.id
                 val name = packageOfWindow[top.id] ?: top.root?.packageName?.toString()?.also { packageOfWindow[top.id] = it } ?: continue
+                if (name == packageName) own += all.keyAt(i)
                 // A status or navigation bar on the screen means an ordinary app; a game hides them.
                 // A phone held sideways hides them for every app, though: an app
                 // whose window holds text items of its own is ordinary, while a
@@ -788,6 +800,7 @@ class LfgAccessibilityService : AccessibilityService() {
                     .map { Box(it.left, it.top, it.right, it.bottom) }
                 candidates += Candidate(top, all.keyAt(i), name, !bars, covered)
             }
+            ownAppOn = own
             if (packageOfWindow.size > 32) packageOfWindow.keys.retainAll(alive)
             if (textItems.size > 32) textItems.keys.retainAll(alive)
         } catch (e: Exception) {

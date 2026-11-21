@@ -7,13 +7,12 @@ import io.github.beesan.lfg.core.KeyRepeat
 import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.ReadingStats.Stamp
-import io.github.beesan.lfg.core.Segmenter
+import io.github.beesan.lfg.core.Selectable
 import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.core.TextCursor
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.ocr.Vocr
 import io.github.beesan.lfg.widget.WidgetData
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -24,68 +23,133 @@ import java.time.ZoneId
 import java.util.Locale
 
 class CursorTest {
-    private val words = listOf("昨日", "の", "夜", "森", "奥", "で", "不思議", "な", "光", "を", "見た", "ん", "だ", "でも", "近づいたら", "消えて", "しまった", "ユイ")
-
-    /** A stand-in for the dictionary: the longest listed word at the start of the text. */
-    private val match: suspend (String) -> Int = { text -> words.filter { text.startsWith(it) }.maxOfOrNull { it.length } ?: 0 }
-
     private fun line(text: String, top: Int, left: Int = 100) = TextLine(
         text, Box(left, top, left + text.length * 50, top + 50),
         text.indices.map { CharBox(it, it + 1, Box(left + it * 50, top, left + it * 50 + 50, top + 50)) },
     )
 
-    private fun cursor(vararg lines: TextLine) = TextCursor(lines.toList(), lines.map { runBlocking { Segmenter.wordStarts(it.text, match) } })
+    private fun cursor(vararg lines: TextLine, japaneseOnly: Boolean = false) = TextCursor(lines.toList(), japaneseOnly)
 
-    @Test
-    fun aLineIsSplitWhereTheDictionarysLongestWordsEnd() = runBlocking {
-        //                       0 1 2 3 4 5 6 7 8 9 ...
-        val starts = Segmenter.wordStarts("昨日の夜、森の奥で不思議な光を見たんだ。", match)
-        assertEquals(listOf(0, 2, 3, 5, 6, 7, 8, 9, 12, 13, 14, 15, 17, 18), starts)
-    }
-
-    @Test
-    fun punctuationIsNeverAWordAndUnknownCharactersAreOneEach() = runBlocking {
-        assertEquals(listOf(1, 2, 4), Segmenter.wordStarts("「謎々、光」", match))
-        assertEquals(emptyList<Int>(), Segmenter.wordStarts("……。", match))
-    }
+    // ── the cursor, by Rubi for Vita's rules (its core/text_rows.c and docs/touch-lookup.md) ──
 
     @Test
     fun theCursorStartsOnTheDialogueNotTheSpeakersName() {
         val c = cursor(line("ユイ", 0), line("昨日の夜、森の奥で", 100))
         assertEquals(CursorPos(1, 0), c.first())
+        // Punctuation never holds the cursor: a line of it has nowhere to start.
         assertNull(cursor(line("……", 0)).first())
     }
 
     @Test
-    fun wordStepsStopAtTheEndsOfTheLine() {
-        val c = cursor(line("昨日の夜、森", 0))
-        var pos = c.first()!!
-        pos = c.nextWord(pos); assertEquals(2, pos.index)
-        pos = c.nextWord(pos); assertEquals(3, pos.index)
-        pos = c.nextWord(pos); assertEquals(5, pos.index)
-        assertEquals(pos, c.nextWord(pos))
-        pos = c.previousWord(pos); assertEquals(3, pos.index)
-        assertEquals(CursorPos(0, 0), c.previousWord(c.previousWord(c.previousWord(pos))))
+    fun rightGoesPastTheWordShownAndLeftRetracesIt() {
+        //                     0 1 2 3 4 5 6 7 8 9 10 11
+        val c = cursor(line("昨日すき焼きを食べました", 0))
+        var pos = CursorPos(0, 0)
+        pos = c.right(pos, matchedEnd = 2); assertEquals(2, pos.index)   // past 昨日
+        pos = c.right(pos, matchedEnd = 6); assertEquals(6, pos.index)   // past すき焼き
+        pos = c.right(pos, matchedEnd = 7); assertEquals(7, pos.index)   // past を
+        // No word shown (its lookup is not in, or Character selection): one character.
+        assertEquals(CursorPos(0, 8), c.right(pos, matchedEnd = 0))
+        c.left(CursorPos(0, 8))
+        // Left retraces each Right, newest first, then steps a character at a time.
+        pos = c.left(pos); assertEquals(6, pos.index)
+        pos = c.left(pos); assertEquals(2, pos.index)
+        pos = c.left(pos); assertEquals(0, pos.index)
+        assertEquals(CursorPos(0, 3), c.left(CursorPos(0, 4)))
     }
 
     @Test
-    fun characterStepsSkipPunctuationAndStopAtTheEnds() {
-        val c = cursor(line("夜、森。", 0))
-        assertEquals(CursorPos(0, 2), c.nextCharacter(CursorPos(0, 0)))
-        assertEquals(CursorPos(0, 2), c.nextCharacter(CursorPos(0, 2)))
-        assertEquals(CursorPos(0, 0), c.previousCharacter(CursorPos(0, 2)))
-        assertEquals(CursorPos(0, 0), c.previousCharacter(CursorPos(0, 0)))
+    fun theStickGoesACharacterAtATimeWhateverWordIsShown() {
+        // The owner's example: from 食べました the stick's right is べ, then ま, where the D-pad's Right goes past the whole word.
+        val c = cursor(line("昨日すき焼きを食べました", 0))
+        val word = c.right(c.right(c.right(CursorPos(0, 0), 2), 6), 7)
+        assertEquals(CursorPos(0, 7), word)
+        val be = c.stickRight(word)
+        assertEquals(CursorPos(0, 8), be)
+        val ma = c.stickRight(be)
+        assertEquals(CursorPos(0, 9), ma)
+        // The stick's left steps back and never retraces; the Rights that started at or after where it lands are done with.
+        assertEquals(CursorPos(0, 8), c.stickLeft(ma))
+        assertEquals(CursorPos(0, 7), c.stickLeft(CursorPos(0, 8)))
+        // The D-pad's Left then retraces the Rights made before those: back to を's start, then すき焼き's.
+        assertEquals(CursorPos(0, 6), c.left(CursorPos(0, 7)))
+        assertEquals(CursorPos(0, 2), c.left(CursorPos(0, 6)))
     }
 
     @Test
-    fun lineStepsKeepTheColumn() {
-        // "でも、近づいたら消えてしまった" starts: 0, 3, 8, 11. "昨日の夜、森の奥で" starts: 0, 2, 3, 5, 6, 7, 8.
-        val c = cursor(line("昨日の夜、森の奥で", 0), line("……", 100), line("でも、近づいたら消えてしまった", 200))
-        // From 奥 (index 7, x centre 475) down, past the line with no words, to the word nearest that column: 近づいたら at 3 (centre 275) or 消えて at 8 (525).
-        assertEquals(CursorPos(2, 8), c.lineDown(CursorPos(0, 7)))
-        assertEquals(CursorPos(0, 3), c.lineUp(CursorPos(2, 3)))
-        assertEquals(CursorPos(0, 0), c.lineUp(CursorPos(0, 0)))
-        assertEquals(CursorPos(2, 0), c.lineDown(CursorPos(2, 0)))
+    fun theHistoryHoldsSixteenRightsAndATapForgetsThem() {
+        val c = cursor(line("あ".repeat(30), 0))
+        var pos = CursorPos(0, 0)
+        repeat(20) { pos = c.right(pos) }
+        assertEquals(20, pos.index)
+        repeat(16) { pos = c.left(pos) }
+        assertEquals(4, pos.index)
+        // The seventeenth has nothing to retrace: one character back.
+        assertEquals(CursorPos(0, 3), c.left(pos))
+        repeat(3) { pos = c.right(pos) }
+        c.forget()
+        assertEquals(CursorPos(0, pos.index - 1), c.left(pos))
+    }
+
+    @Test
+    fun punctuationIsPassedOverAndJapaneseOnlyLeavesLatinOutToo() {
+        val text = "夜、森 A。"
+        val all = cursor(line(text, 0))
+        assertEquals(listOf(2, 4), generateSequence(CursorPos(0, 0)) { p -> all.stickRight(p).takeIf { it != p } }.drop(1).map { it.index }.toList())
+        val japanese = cursor(line(text, 0), japaneseOnly = true)
+        assertEquals(CursorPos(0, 2), japanese.stickRight(CursorPos(0, 0)))
+        assertEquals(CursorPos(0, 2), japanese.stickRight(CursorPos(0, 2)))
+        assertEquals(CursorPos(0, 0), japanese.stickLeft(CursorPos(0, 2)))
+        assertTrue(Selectable.at("々ー𠮟", 0, true) && Selectable.at("々ー𠮟", 1, true) && Selectable.at("々ー𠮟", 2, true))
+        assertFalse(Selectable.at("ａ　!", 0, true))   // full-width Latin is not a Japanese letter
+        assertTrue(Selectable.at("ａ　!", 0, false))
+        assertFalse(Selectable.at("ａ　!", 1, false))  // an ideographic space never holds the cursor
+        assertFalse(Selectable.at("ａ　!", 2, false))  // nor punctuation
+        // The D-pad's Right from a word goes past the comma after it to the next word.
+        assertEquals(CursorPos(0, 4), cursor(line("今なお、それは", 0)).right(CursorPos(0, 0), matchedEnd = 3))
+        assertFalse(Selectable.at("𠮟", 1, false))     // the second half of a pair is not a character
+    }
+
+    @Test
+    fun leftAndRightRunOnAcrossRowsAndLinesAndStopAtTheTextsEnds() {
+        val c = cursor(line("ユイ", 0), line("森の奥で", 100))
+        assertEquals(CursorPos(1, 0), c.right(CursorPos(0, 1)))
+        assertEquals(CursorPos(1, 3), c.right(CursorPos(1, 3)))       // the last: more than one row, so it stays
+        assertEquals(CursorPos(0, 1), c.stickLeft(CursorPos(1, 0)))
+        assertEquals(CursorPos(0, 0), c.left(CursorPos(0, 0)))
+        // A word that ends its row: Right from it goes to the next row's first character.
+        assertEquals(CursorPos(1, 0), c.right(CursorPos(0, 0), matchedEnd = 2))
+    }
+
+    @Test
+    fun aTextOnOneRowGoesRoundItsEndsForTheDpadOnly() {
+        val c = cursor(line("森の奥", 0))
+        assertEquals(CursorPos(0, 0), c.right(CursorPos(0, 2)))
+        // Left retraces that wrap like any other Right.
+        assertEquals(CursorPos(0, 2), c.left(CursorPos(0, 0)))
+        c.forget()
+        assertEquals(CursorPos(0, 2), c.left(CursorPos(0, 0)))
+        assertEquals(CursorPos(0, 2), c.stickRight(CursorPos(0, 2)))
+        assertEquals(CursorPos(0, 0), c.stickLeft(CursorPos(0, 0)))
+    }
+
+    @Test
+    fun upAndDownGoToTheNearestCharacterAndKeepTheirColumnAcrossAShortRow() {
+        val c = cursor(line("昨日の夜、森の奥で", 0), line("森", 100), line("でも、近づいたら消えてしまった", 200))
+        // From 奥 (index 7) down: the short row has only 森, then the long row is entered at the column 奥 was in.
+        val short = c.down(CursorPos(0, 7))
+        assertEquals(CursorPos(1, 0), short)
+        assertEquals(CursorPos(2, 7), c.down(short))
+        assertEquals(CursorPos(0, 7), c.up(c.up(CursorPos(2, 7))))
+        assertEquals(CursorPos(0, 0), c.up(CursorPos(0, 0)))
+        assertEquals(CursorPos(2, 0), c.down(CursorPos(2, 0)))
+        // A sideways step drops the column: down from the short row is then straight below it.
+        c.down(CursorPos(0, 7))
+        c.stickLeft(CursorPos(1, 0))
+        assertEquals(CursorPos(2, 0), c.down(CursorPos(1, 0)))
+        // Up and Down forget the Rights: Left then steps a character.
+        val right = c.right(CursorPos(0, 0), matchedEnd = 2)
+        assertEquals(CursorPos(0, 1), c.left(c.up(c.down(right)).let { CursorPos(0, 2) }))
     }
 
     @Test
@@ -97,13 +161,24 @@ class CursorTest {
         // The longest line is where the cursor starts.
         assertEquals(CursorPos(1, 0), c.first())
         // 森 is the sixth character of the first row; straight below it in the second row is を (text index 14).
-        assertEquals(CursorPos(1, 14), c.lineDown(CursorPos(1, 5)))
-        assertEquals(CursorPos(1, 14), c.lineDown(CursorPos(1, 14)))
-        assertEquals(CursorPos(1, 5), c.lineUp(CursorPos(1, 14)))
+        assertEquals(CursorPos(1, 14), c.down(CursorPos(1, 5)))
+        assertEquals(CursorPos(1, 14), c.down(CursorPos(1, 14)))
+        assertEquals(CursorPos(1, 5), c.up(CursorPos(1, 14)))
         // Up from the first row leaves the sentence for the name.
-        assertEquals(CursorPos(0, 0), c.lineUp(CursorPos(1, 0)))
-        // Word steps run on through the line break.
-        assertEquals(CursorPos(1, 9), c.nextWord(CursorPos(1, 8)))
+        assertEquals(CursorPos(0, 0), c.up(CursorPos(1, 0)))
+        // Steps run on through the line break, and two rows never go round.
+        assertEquals(CursorPos(1, 9), c.right(CursorPos(1, 8)))
+        assertEquals(CursorPos(1, 16), c.right(CursorPos(1, 16)))
+    }
+
+    @Test
+    fun aLineWithNoPlaceOnScreenIsOneRowOfCharacters() {
+        // A line from the store, looked into beside the one on screen: it has no boxes.
+        val stored = TextLine("森の奥で", Box(0, 0, 0, 0), emptyList())
+        val c = cursor(line("ユイ", 0), stored)
+        assertEquals(CursorPos(1, 1), c.stickRight(CursorPos(1, 0)))
+        assertEquals(CursorPos(0, 1), c.stickLeft(CursorPos(1, 0)))
+        assertEquals(CursorPos(1, 3), c.right(CursorPos(1, 0), matchedEnd = 3))
     }
 
     @Test
@@ -117,6 +192,20 @@ class CursorTest {
         assertTrue(r.press(2, 460)) // another direction steps at once
         r.release()
         assertTrue(r.press(2, 470))
+    }
+
+    @Test
+    fun theSticksStepsComeSoonerEachTimeDownToTwentyASecond() {
+        val r = KeyRepeat.stick()
+        var now = 0L
+        assertTrue(r.press(1, now))
+        val gaps = List(12) {
+            val due = r.nextRepeatAt
+            assertFalse(r.press(1, due - 1))
+            assertTrue(r.press(1, due))
+            (due - now).also { now = due }
+        }
+        assertEquals(listOf(167L, 154L, 141L, 128L, 115L, 102L, 89L, 76L, 63L, 50L, 50L, 50L), gaps)
     }
 
     // ── reading time, by Rubi's adaptive rule (its tools/tests/test_reading_stats.py) ──

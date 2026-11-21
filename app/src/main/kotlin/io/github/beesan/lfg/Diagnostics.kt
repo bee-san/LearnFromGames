@@ -59,7 +59,7 @@ object Diagnostics {
             "Settings",
             "shortcut ${prefs.shortcut}, second screen ${prefs.secondScreenPanel}, sentence audio ${prefs.sentenceAudio}, " +
                 "animated pictures ${prefs.animatedPicture}, screens kept ${if (prefs.keepScreensDays == 0) "always" else "${prefs.keepScreensDays} days"}, " +
-                "translation ${if (prefs.translate == Prefs.TRANSLATE_OFF) "off" else "on"}",
+                "translation ${if (prefs.aiReady) "on" else "off"}",
         )
         val usage = app.pictures.usage(app.getDatabasePath("lfg.db"))
         line(

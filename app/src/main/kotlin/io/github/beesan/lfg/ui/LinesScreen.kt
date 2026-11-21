@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -180,10 +182,12 @@ fun LineLookupScreen(
     onTap: (Int) -> Unit,
     onLink: (EntryLink, Int) -> Unit,
     translation: MainViewModel.TranslationState,
-    /** What Settings › Translation says: nothing shows while it is off. */
-    translate: String,
+    explanation: MainViewModel.TranslationState,
+    /** There is an OpenRouter key: Translate and Explain show. Without one nothing is offered. */
+    ai: Boolean,
     translateContext: Int,
     onTranslate: () -> Unit,
+    onExplain: () -> Unit,
     onBack: () -> Unit,
 ) {
     val line = state.lines.firstOrNull()
@@ -192,10 +196,11 @@ fun LineLookupScreen(
         HorizontalDivider(color = Lfg.Border)
         if (line == null) return
         Row(Modifier.fillMaxWidth().weight(1f).padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            Column(Modifier.weight(1f)) {
-                TappableSentence(line.text, state.spanStart, if (state.selected) state.spanEnd else 0, onTap)
+            // An explanation runs long: the column scrolls.
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                TappableSentence(line.text, state.spanStart, if (state.selected) state.markEnd else 0, onTap)
                 if (!state.selected) Text("Tap a word.", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 10.dp))
-                if (translate != Prefs.TRANSLATE_OFF) {
+                if (ai) {
                     HorizontalDivider(color = Lfg.Border, modifier = Modifier.padding(top = 18.dp))
                     Text("Translation", color = Lfg.Dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp))
                     when {
@@ -210,6 +215,16 @@ fun LineLookupScreen(
                         )
                         LfgButton(if (translation.text == null) "Translate" else "Translate again", onTranslate, enabled = !translation.busy)
                     }
+                    HorizontalDivider(color = Lfg.Border, modifier = Modifier.padding(top = 14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
+                        Text("Explanation", color = Lfg.Dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        LfgButton(if (explanation.text == null) "Explain" else "Explain again", onExplain, enabled = !explanation.busy)
+                    }
+                    when {
+                        explanation.text != null -> Text(explanation.text, color = Lfg.Text, fontSize = 15.sp, lineHeight = 23.sp, modifier = Modifier.padding(top = 8.dp))
+                        explanation.busy -> Text("Explaining…", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp))
+                    }
+                    explanation.error?.let { Text(it, color = Lfg.Warn, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
                 }
             }
             Column(Modifier.weight(1.2f).fillMaxHeight()) {

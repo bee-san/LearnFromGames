@@ -1,5 +1,6 @@
 package io.github.beesan.lfg
 
+import io.github.beesan.lfg.ask.Explainer
 import io.github.beesan.lfg.ask.Moment
 import io.github.beesan.lfg.ask.OpenRouter
 import io.github.beesan.lfg.ask.Recap
@@ -44,6 +45,16 @@ class AskTest {
         assertTrue(prompt.contains("<before>\n村の長老が待っている。\n橋を渡ろう。\n</before>"))
         assertTrue(prompt.trimEnd().endsWith("<line>\n新しい剣を手に入れた！\n</line>"))
         assertFalse(Translator.prompt("Quest", emptyList(), "a").contains("<before>"))
+    }
+
+    @Test
+    fun anExplanationIsAskedForTheLineAloneInPlainTextInTheChosenLanguage() {
+        val prompt = Explainer.prompt("Quest", listOf("橋を渡ろう。"), "新しい剣を手に入れた！")
+        assertTrue(prompt.contains("<before>\n橋を渡ろう。\n</before>"))
+        assertTrue(prompt.trimEnd().endsWith("Explain this line:\n<line>\n新しい剣を手に入れた！\n</line>"))
+        assertFalse(Explainer.prompt("", emptyList(), "a").contains("<before>"))
+        val system = Explainer.system("French")
+        assertTrue(system.contains("in French") && system.contains("no Markdown") && system.contains("no romaji"))
     }
 
     private fun line(id: String, text: String, day: Int) = GameLine(

@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
             val notes by model.notes.collectAsStateWithLifecycle()
             val draft by model.draft.collectAsStateWithLifecycle()
             val translation by model.translation.collectAsStateWithLifecycle()
+            val explanation by model.explanation.collectAsStateWithLifecycle()
             val keyTest by model.keyTest.collectAsStateWithLifecycle()
             val recap by model.recap.collectAsStateWithLifecycle()
             val backupMessage by model.backupMessage.collectAsStateWithLifecycle()
@@ -244,9 +245,11 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             translation = translation,
-                            translate = prefs.translate,
+                            explanation = explanation,
+                            ai = prefs.aiReady,
                             translateContext = prefs.translateContext,
                             onTranslate = model::translateLine,
+                            onExplain = model::explainLine,
                             onBack = ::back,
                         )
                         page == Page.STATS -> saved.SaveableStateProvider(Page.STATS) {

@@ -53,6 +53,7 @@ class App : Application() {
         }
     }
     val translator by lazy { Translator(database) { settings.prefs.value } }
+    val explainer by lazy { io.github.beesan.lfg.ask.Explainer(database) { settings.prefs.value } }
     val recapper by lazy { Recapper(database, { settings.prefs.value }) }
     val dictionaries by lazy { DictionaryRepository(this) }
     val wordAudio by lazy { WordAudio(this) }

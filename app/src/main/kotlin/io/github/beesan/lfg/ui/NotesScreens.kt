@@ -163,7 +163,7 @@ fun NoteNewScreen(
                 }
                 val line = draft.line
                 if (line != null) {
-                    TappableSentence(line.lineText, lookup.spanStart, if (lookup.selected) lookup.spanEnd else 0, onTap)
+                    TappableSentence(line.lineText, lookup.spanStart, if (lookup.selected) lookup.markEnd else 0, onTap)
                     Text("Tap a word to note it.", color = Lfg.Dim, fontSize = 14.sp)
                 } else {
                     Text("No lines yet: this note is on its own.", color = Lfg.Dim, fontSize = 14.sp)

@@ -45,9 +45,11 @@ object EntryHtml {
     data class Style(val dictionary: String, val css: String)
 
     /** The whole page for a WebView: the app's look, then each dictionary's own, then the entry. */
-    fun page(entry: Entry?, styles: List<Style>, message: String? = null, audio: Boolean = false, palette: Palette = DEFAULT_PALETTE): String = buildString {
+    fun page(
+        entry: Entry?, styles: List<Style>, message: String? = null, audio: Boolean = false, palette: Palette = DEFAULT_PALETTE, glass: Boolean = false,
+    ): String = buildString {
         append("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>")
-        append(colours(palette)).append(BASE_CSS)
+        append(colours(palette, glass)).append(BASE_CSS)
         for (style in styles) append(scoped(style))
         append("</style></head><body>")
         if (entry == null) {
@@ -77,9 +79,9 @@ object EntryHtml {
      * swaps in each lookup's [listBody] with `lfgShow`, rather than parsing the
      * page and every dictionary's stylesheet again on each tap.
      */
-    fun listHead(styles: List<Style>, palette: Palette): String = buildString {
+    fun listHead(styles: List<Style>, palette: Palette, glass: Boolean = false): String = buildString {
         append("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>")
-        append(colours(palette)).append(BASE_CSS)
+        append(colours(palette, glass)).append(BASE_CSS)
         for (style in styles) append(scoped(style))
         append("</style><script>").append(STATE_SCRIPT).append("</script></head><body>")
     }
@@ -389,24 +391,35 @@ object EntryHtml {
 
     private val DEFAULT_PALETTE = Palette.of(Palette.PINK, Palette.THEME_DARK, systemDark = true)
 
-    /** The palette as the CSS variables [BASE_CSS] reads. */
-    fun colours(p: Palette): String {
+    /**
+     * The palette as the CSS variables [BASE_CSS] reads. [glass] is the popup
+     * over a game: the page itself is clear, so the popup's own see-through
+     * ground shows, and each dictionary's card lets a little of it through.
+     */
+    fun colours(p: Palette, glass: Boolean = false): String {
         fun hex(c: Int) = "#%06x".format(c and 0xFFFFFF)
+        fun clear(c: Int, alpha: String) = "rgba(${c shr 16 and 0xFF},${c shr 8 and 0xFF},${c and 0xFF},$alpha)"
         return ":root{color-scheme:" + (if (p.dark) "dark" else "light") +
             ";--bg:" + hex(p.bg) + ";--surface:" + hex(p.surface) + ";--border:" + hex(p.border) + ";--border-strong:" + hex(p.borderStrong) +
             ";--text:" + hex(p.text) + ";--dim:" + hex(p.dim) + ";--accent:" + hex(p.accent) + ";--soft:" + hex(p.soft) +
             ";--ok:" + hex(p.ok) + ";--ok-soft:" + hex(p.okSoft) + ";--chip:" + hex(p.chip) +
-            ";--freq-name:" + hex(p.freqName) + ";--freq-name-text:" + hex(p.freqNameText) + "}"
+            ";--freq-name:" + hex(p.freqName) + ";--freq-name-text:" + hex(p.freqNameText) +
+            ";--page:" + (if (glass) "transparent" else hex(p.bg)) + ";--card:" + (if (glass) clear(p.surface, ".62") else hex(p.surface)) + "}"
     }
 
-    /** The app's own look for an entry, after Hachidori's; its colours are [colours]' variables. */
+    /**
+     * The app's own look for an entry, after Hachidori's reader (its
+     * extension/render/reader.css): the headword with its buttons beside it,
+     * then a card for each dictionary, with filled tags. Its colours are
+     * [colours]' variables.
+     */
     const val BASE_CSS = """
-html{background:var(--bg);color:var(--text);font:16px/1.5 system-ui,sans-serif;-webkit-text-size-adjust:100%}
-body{margin:0;padding:12px 16px 16px;overflow-wrap:anywhere}
+html{background:var(--page);color:var(--text);font:16px/1.5 system-ui,sans-serif;-webkit-text-size-adjust:100%}
+body{margin:0;padding:10px 12px 14px;overflow-wrap:anywhere}
 :lang(ja){font-family:"Noto Sans CJK JP","Noto Sans JP",sans-serif}
-.lfg-head{display:flex;align-items:flex-end;column-gap:.75em}
+.lfg-head{display:flex;align-items:flex-end;column-gap:.7em;padding:0 2px}
 .lfg-term{font-size:1.75em;font-weight:650;line-height:1.2}
-.lfg-term rt{font-size:.45em;font-weight:400;color:var(--dim)}
+.lfg-term rt{font-size:.5em;font-weight:400;color:var(--dim)}
 .lfg-graph{flex:none;margin-bottom:.3em;color:#59b2ff}
 .lfg-graph[data-pitch="atamadaka"]{color:#ff8686}
 .lfg-graph[data-pitch="nakadaka"]{color:#ff9b54}
@@ -415,37 +428,38 @@ body{margin:0;padding:12px 16px 16px;overflow-wrap:anywhere}
 .lfg-graph polyline{fill:none;stroke:currentColor;stroke-width:2}
 .lfg-graph circle{fill:currentColor}
 .lfg-graph circle.lfg-particle{fill:var(--bg);stroke:currentColor;stroke-width:2}
-.lfg-actions{display:flex;gap:4px;margin-left:auto;align-self:center}
-.lfg-button{display:inline-flex;width:44px;height:44px;border-radius:22px;align-items:center;justify-content:center;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-.lfg-audio{background:var(--chip);color:var(--text)}
+.lfg-actions{display:flex;gap:6px;margin-left:auto;align-self:center}
+.lfg-button{display:inline-flex;width:42px;height:42px;border-radius:11px;align-items:center;justify-content:center;box-sizing:border-box;outline:none;-webkit-tap-highlight-color:transparent}
+.lfg-audio,.lfg-note{border:1px solid var(--border-strong);color:var(--text)}
 .lfg-audio svg{width:20px;height:20px;fill:currentColor}
-.lfg-note{background:var(--chip);color:var(--text)}
 .lfg-note svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lfg-button:active{background:var(--soft)}
 .lfg-card{border:1.5px solid var(--accent);background:var(--soft);color:var(--accent)}
 .lfg-card svg{display:none;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 .lfg-card[data-state="add"] .lfg-i-add,.lfg-card[data-state="adding"] .lfg-i-adding,.lfg-card[data-state="in-anki"] .lfg-i-in-anki,.lfg-card[data-state="waiting"] .lfg-i-waiting{display:block}
 .lfg-card[data-state="adding"]{border-style:dashed}
 .lfg-card[data-state="in-anki"]{border-color:var(--ok);background:var(--ok-soft);color:var(--ok)}
 .lfg-card[data-state="waiting"]{border-color:var(--border);background:var(--surface);color:var(--dim)}
-.lfg-entry+.lfg-entry{border-top:2px solid var(--border-strong);margin-top:14px;padding-top:12px}
+.lfg-entry+.lfg-entry{border-top:1px solid var(--border-strong);margin-top:16px;padding-top:12px}
 .lfg-entry[data-current] .lfg-term{color:var(--accent)}
-.lfg-meta{display:flex;flex-wrap:wrap;gap:4px;margin:.35em 0 .15em}
-.lfg-pitch-tag,.lfg-freq{display:inline-flex;font-size:.72em;line-height:1.5;border-radius:4px;overflow:hidden;white-space:nowrap}
-.lfg-pitch-tag{padding:0 .45em;color:#111111;background:#59b2ff}
+.lfg-meta{display:flex;flex-wrap:wrap;gap:4px;margin:.45em 2px .1em}
+.lfg-pitch-tag,.lfg-freq{display:inline-flex;font-size:.72em;line-height:1.55;border-radius:5px;overflow:hidden;white-space:nowrap}
+.lfg-pitch-tag{padding:0 .5em;font-weight:600;color:#111111;background:#59b2ff}
 .lfg-pitch-tag b{margin-left:.3em}
 .lfg-pitch-tag[data-pitch="atamadaka"]{background:#ff8686}
 .lfg-pitch-tag[data-pitch="nakadaka"]{background:#ff9b54}
 .lfg-pitch-tag[data-pitch="odaka"]{background:#67e47d}
 .lfg-pitch-tag[data-pitch="kifuku"]{background:#bc99f6}
-.lfg-freq-name{padding:0 .45em;background:var(--freq-name);color:var(--freq-name-text)}
-.lfg-freq-value{padding:0 .45em;background:var(--chip);color:var(--text)}
-.lfg-path{color:var(--dim);font-size:.8em}
-.lfg-senses{margin:.4em 0 0;padding-left:1.4em}
+.lfg-freq-name{padding:0 .5em;font-weight:600;background:var(--freq-name);color:var(--freq-name-text)}
+.lfg-freq-value{padding:0 .5em;background:var(--chip);color:var(--text)}
+.lfg-path{color:var(--dim);font-size:.78em;margin:.25em 2px 0}
+.lfg-dict{border:1px solid var(--border);border-radius:10px;background:var(--card);margin-top:8px;padding:7px 10px 9px;box-shadow:0 1px 4px rgba(0,0,0,.14)}
+.lfg-source{display:inline-block;font-size:.68em;font-weight:700;letter-spacing:.02em;line-height:1.65;color:var(--accent);background:var(--soft);border-radius:5px;padding:0 .55em}
+.lfg-senses{margin:.3em 0 0;padding-left:1.35em}
 .lfg-senses>li{margin:.15em 0}
-.lfg-tags{margin-right:.4em}
-.lfg-tag{display:inline-block;font-size:.7em;color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:0 .3em;margin-right:.25em;vertical-align:middle}
-.lfg-dict{border-top:1px solid var(--border);margin-top:.5em;padding-top:.5em}
-.lfg-source{display:inline-block;font-size:.72em;font-weight:600;line-height:1.5;color:var(--accent);background:var(--soft);border-radius:4px;padding:0 .45em}
+.lfg-senses>li:only-child{list-style:none;margin-left:-1.35em}
+.lfg-tags{margin-right:.35em}
+.lfg-tag{display:inline-block;font-size:.66em;font-weight:700;line-height:1.5;color:#ffffff;background:#6f6f78;border-radius:4px;padding:0 .45em;margin-right:.25em;vertical-align:middle}
 .lfg-message{color:var(--dim)}
 .gloss-text,.gloss-list>li{white-space:pre-line}
 .gloss-list,.gloss-sc-ul,.gloss-sc-ol{margin:0;padding-left:1.3em}

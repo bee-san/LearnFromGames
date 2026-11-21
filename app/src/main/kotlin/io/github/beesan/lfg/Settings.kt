@@ -17,8 +17,19 @@ data class Prefs(
     val keepScreensDays: Int = 14,
     /** The first run's downloads wait for an unmetered network. */
     val wifiOnly: Boolean = false,
-    /** On a two-screen handheld, show the entry on the screen the game is not on. */
+    /** On a two-screen handheld, the screen the game is not on shows the game's lines as they are read. */
     val secondScreenPanel: Boolean = true,
+    /**
+     * Where a looked-up word's entry shows on a two-screen handheld: [ENTRY_OVER_GAME], a
+     * popup beside the word, or [ENTRY_OTHER_SCREEN], on the lines' screen. One screen always has the popup.
+     */
+    val entryPlace: String = ENTRY_OVER_GAME,
+    /** How much of the game shows through the popup over it, as a percentage: 0 is solid. */
+    val popupSeeThrough: Int = 12,
+    /** [SELECT_WORD] or [SELECT_CHARACTER]: what a lookup marks, and how far the D-pad's Right goes. Rubi for Vita's Selection mode. */
+    val selection: String = SELECT_WORD,
+    /** The cursor and a tap land only on kana and kanji. Off, on Latin letters and digits too; punctuation is always passed over. */
+    val japaneseOnly: Boolean = false,
     /** Sentence audio from a rolling buffer of game sound. Needs screen recording consent each session. */
     val sentenceAudio: Boolean = false,
     /** Android's voice reads the line onto a card the game gave no voice. */
@@ -90,12 +101,22 @@ data class Prefs(
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
+    /** Translate and Explain are offered wherever a line shows, once there is a key to ask with. */
+    val aiReady: Boolean get() = openRouterKey.isNotBlank()
+
+    val picking: io.github.beesan.lfg.core.Selection get() = io.github.beesan.lfg.core.Selection(selection != SELECT_CHARACTER, japaneseOnly)
+
     companion object {
         const val SHORTCUT_L3_R3 = "l3r3"
         const val SHORTCUT_L1_R1 = "l1r1"
 
         /** The triggers: on pads that send them as buttons too, as the Thor's does. */
         const val SHORTCUT_L2_R2 = "l2r2"
+        const val ENTRY_OVER_GAME = "game"
+        const val ENTRY_OTHER_SCREEN = "other"
+        const val SELECT_WORD = "word"
+        const val SELECT_CHARACTER = "character"
+        val SEE_THROUGH_STEPS = listOf(0, 6, 12, 20, 30, 40)
         const val TRANSLATE_OFF = "off"
         const val TRANSLATE_ASK = "ask"
         const val TRANSLATE_EVERY = "every"
@@ -121,6 +142,10 @@ class Settings(context: Context) {
             keepScreensDays = store.getInt("keepScreensDays", d.keepScreensDays),
             wifiOnly = store.getBoolean("wifiOnly", d.wifiOnly),
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
+            entryPlace = store.getString("entryPlace", d.entryPlace) ?: d.entryPlace,
+            popupSeeThrough = store.getInt("popupSeeThrough", d.popupSeeThrough),
+            selection = store.getString("selection", d.selection) ?: d.selection,
+            japaneseOnly = store.getBoolean("japaneseOnly", d.japaneseOnly),
             sentenceAudio = store.getBoolean("sentenceAudio", d.sentenceAudio),
             spokenLines = store.getBoolean("spokenLines", d.spokenLines),
             animatedPicture = store.getBoolean("animatedPicture", d.animatedPicture),
@@ -163,6 +188,10 @@ class Settings(context: Context) {
             .putInt("keepScreensDays", next.keepScreensDays)
             .putBoolean("wifiOnly", next.wifiOnly)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)
+            .putString("entryPlace", next.entryPlace)
+            .putInt("popupSeeThrough", next.popupSeeThrough)
+            .putString("selection", next.selection)
+            .putBoolean("japaneseOnly", next.japaneseOnly)
             .putBoolean("sentenceAudio", next.sentenceAudio)
             .putBoolean("spokenLines", next.spokenLines)
             .putBoolean("animatedPicture", next.animatedPicture)

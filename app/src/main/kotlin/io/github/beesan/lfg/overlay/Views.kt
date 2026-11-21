@@ -22,7 +22,6 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import io.github.beesan.lfg.core.Palette
-import io.github.beesan.lfg.lookup.LookupState
 
 /**
  * The app's colours as plain colour ints, for the Views drawn over the game.
@@ -61,48 +60,39 @@ internal fun Context.label(sizeSp: Float, color: Int, bold: Boolean = false) = T
 }
 
 /**
- * The lines on screen as text, each character tappable, with the looked-up
- * word marked. This is the bottom-screen twin of the tap strips over the game.
+ * One line of text with every character tappable and the looked-up word
+ * marked: a row of the bottom screen's list of lines. It is the bottom-screen
+ * twin of a tap strip over the game.
  */
 @SuppressLint("ViewConstructor")
-/** More pieces of text than this on screen is a menu or a page, not a dialogue box. */
-private const val MANY = 4
-
-internal class LinesView(context: Context, private val onTap: (line: Int, index: Int) -> Unit) : TextView(context) {
-    private var starts = IntArray(0)
-    private var texts: List<String> = emptyList()
-
-    /** Which of the state's lines each shown one is. */
-    private var shown = IntArray(0)
+internal class LineText(context: Context, sizeSp: Float, private val onTap: (index: Int) -> Unit) : TextView(context) {
+    private var line = ""
+    private var from = 0
+    private var to = 0
 
     init {
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 21f)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
         setTextColor(Ink.TEXT)
-        setLineSpacing(context.dp(8f).toFloat(), 1f)
+        setLineSpacing(context.dp(if (sizeSp >= 20f) 7f else 4f).toFloat(), 1f)
         isFocusable = false
     }
 
-    fun show(state: LookupState) {
-        // A dialogue box is a line or two and is shown whole. A menu is dozens of pieces of text:
-        // once a word is picked in it, only its own piece is shown, so the entry stays on screen.
-        shown = if (state.selected && state.lines.size > MANY) intArrayOf(state.line) else IntArray(state.lines.size) { it }
-        texts = shown.map { state.lines[it].text }
-        starts = IntArray(texts.size)
-        val joined = StringBuilder()
-        texts.forEachIndexed { i, t ->
-            if (i > 0) joined.append('\n')
-            starts[i] = joined.length
-            joined.append(t)
+    /** [line] with the characters `[markStart, markEnd)` marked; an empty range marks nothing. */
+    fun show(line: String, markStart: Int = 0, markEnd: Int = 0) {
+        val start = markStart.coerceIn(0, line.length)
+        val end = markEnd.coerceIn(start, line.length)
+        if (line == this.line && start == from && end == to && text.isNotEmpty() == line.isNotEmpty()) return
+        this.line = line
+        from = start
+        to = end
+        if (end <= start) {
+            text = line
+            return
         }
-        val span = SpannableString(joined)
-        val at = shown.indexOf(state.line)
-        if (state.selected && at >= 0 && state.spanEnd > state.spanStart) {
-            val from = starts[at] + state.spanStart
-            val to = starts[at] + state.spanEnd
-            span.setSpan(BackgroundColorSpan(Ink.WASH), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            span.setSpan(ForegroundColorSpan(Ink.ACCENT), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        text = SpannableString(line).apply {
+            setSpan(BackgroundColorSpan(Ink.WASH), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(ForegroundColorSpan(Ink.ACCENT), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
-        text = span
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -112,23 +102,56 @@ internal class LinesView(context: Context, private val onTap: (line: Int, index:
         val layout = layout ?: return true
         val x = event.x - totalPaddingLeft + scrollX
         val y = event.y - totalPaddingTop + scrollY
+        if (y < 0 || y > layout.height) return true
         val row = layout.getLineForVertical(y.toInt())
-        if (y < 0 || y > layout.height || x < layout.getLineLeft(row) || x > layout.getLineRight(row)) return true
+        if (x < layout.getLineLeft(row) || x > layout.getLineRight(row)) return true
         // The caret nearest the touch sits on one side of the character under it.
-        var offset = layout.getOffsetForHorizontal(row, x)
-        if (offset > layout.getLineStart(row) && layout.getPrimaryHorizontal(offset) > x) offset--
-        val line = starts.indexOfLast { it <= offset }
-        if (line < 0) return true
-        val index = offset - starts[line]
-        if (index in texts[line].indices) onTap(shown[line], if (Character.isLowSurrogate(texts[line][index]) && index > 0) index - 1 else index)
+        var index = layout.getOffsetForHorizontal(row, x)
+        if (index > layout.getLineStart(row) && layout.getPrimaryHorizontal(index) > x) index--
+        if (index in line.indices) onTap(if (Character.isLowSurrogate(line[index]) && index > 0) index - 1 else index)
         return true
     }
 }
 
-/** `A Add card · B Close · ◀ ▶ Word · ▲ ▼ Line`: what replaces the button while the controller drives. */
-internal fun Context.keyHints(confirm: String, close: String, listen: Boolean = true): TextView = label(12.5f, Ink.DIM).apply {
+/**
+ * The soft shadow round the popup over a game, in a window of its own under
+ * the popup's: the popup is see-through, so the shadow is drawn only outside
+ * its card ([inset] in from every edge), never beneath it.
+ */
+internal class ShadeDrawable(private val radius: Float, private val inset: Float, dark: Boolean) : android.graphics.drawable.Drawable() {
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        setShadowLayer(inset * 0.72f, 0f, inset * 0.22f, if (dark) 0x8C000000.toInt() else 0x47000000)
+    }
+    private val card = android.graphics.RectF()
+    private val path = android.graphics.Path()
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        card.set(bounds)
+        card.inset(inset, inset)
+        path.rewind()
+        path.addRoundRect(card, radius, radius, android.graphics.Path.Direction.CW)
+        canvas.save()
+        canvas.clipOutPath(path)
+        canvas.drawRoundRect(card, radius, radius, paint)
+        canvas.restore()
+    }
+
+    override fun setAlpha(alpha: Int) = Unit
+    override fun setColorFilter(filter: android.graphics.ColorFilter?) = Unit
+
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+}
+
+/** [color] with [percent] of what is behind it showing through. */
+internal fun seeThrough(color: Int, percent: Int): Int = (color and 0x00FFFFFF) or ((255 * (100 - percent.coerceIn(0, 90)) / 100) shl 24)
+
+/** `A Add card · B Close · ◀ ▶ Word · ▲ ▼ Row`: what replaces the button while the controller drives. */
+internal fun Context.keyHints(confirm: String, close: String, listen: Boolean = true, wholeWord: Boolean = true): TextView = label(12.5f, Ink.DIM).apply {
     // Y says the word only with word audio installed (Settings › Dictionaries); without it, it is not offered.
-    text = "$confirm Add card    $close Close    " + (if (listen) "Y Listen    " else "") + "◀ ▶ Word    ▲ ▼ Line    L1 R1 Entry"
+    text = "$confirm Add card    $close Close    " + (if (listen) "Y Listen    " else "") +
+        (if (wholeWord) "◀ ▶ Word" else "◀ ▶ Character") + "    ▲ ▼ Row    L1 R1 Entry"
     setPadding(0, dp(6f), 0, 0)
 }
 
@@ -188,9 +211,9 @@ internal class NoteEditor(context: Context, onSave: (text: String, keepPicture: 
         addView(buttons, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
     }
 
-    /** Ready for a note on [word]: an empty field with the keyboard up. */
-    fun open(word: String) {
-        title.text = "Note on $word"
+    /** Ready for a note headed [heading] ("Note on 雪"): an empty field with the keyboard up. */
+    fun open(heading: String) {
+        title.text = heading
         keep.isChecked = true
         field.setText("")
         field.requestFocus()

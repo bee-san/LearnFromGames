@@ -23,6 +23,7 @@ import android.widget.TextView
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.data.GameLine
+import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.ui.EntryLink
@@ -40,8 +41,9 @@ import io.github.beesan.lfg.lookup.LookupState
  *
  * - an invisible strip over each line, where a tap lands on a character;
  * - a mark around the looked-up word;
- * - the entry: a panel on the other screen of a two-screen handheld, or a
- *   popup beside the word on a one-screen one;
+ * - the entry, a see-through popup beside the word, with its shadow;
+ * - on the other screen of a two-screen handheld, the game's lines as they are
+ *   read, as a texthooker page lists them;
  * - in lookup mode, a window that holds the controller.
  *
  * Windows are made once and then moved or parked, never added and removed in
@@ -62,14 +64,20 @@ class OverlayHost(
     private val onReadButtonHeld: () -> Unit,
     /** A region dragged out: where, and whether to keep reading it. */
     private val onRegion: (Box, Boolean) -> Unit,
-    private val onHistoryLine: (LookupLine) -> Unit,
-    /** Translate pressed on the panel for this saved line; the answer comes back through [onTranslation]. */
-    private val onTranslate: (lineId: String) -> Unit,
+    /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
+    private val onAsk: (lineId: String, what: Ask) -> Unit,
     private val styles: () -> List<EntryHtml.Style>,
     private val media: (dictionary: String, path: String) -> ByteArray?,
-    /** A note written on a word over the game: the line, the entry, the text, and whether to keep the picture. */
-    private val onSaveNote: (LookupLine, Entry, String, Boolean) -> Unit,
+    /**
+     * A note written over the game: on a word (its line and entry), on a line
+     * alone, or on the game as it is now (neither). Then the text, and whether
+     * to keep the picture.
+     */
+    private val onSaveNote: (LookupLine?, Entry?, String, Boolean) -> Unit,
 ) {
+    /** What the lines' screen can ask the model about a line. */
+    enum class Ask { TRANSLATE, EXPLAIN }
+
     private val displays = service.getSystemService(DisplayManager::class.java)
     private val managers = HashMap<Int, Pair<Context, WindowManager>>()
 
@@ -78,6 +86,15 @@ class OverlayHost(
     private val marks = ArrayList<Win>()
     private var popup: Win? = null
     private var popupView: PopupView? = null
+
+    /** The popup's shadow: a window of its own under it, which no touch lands on. */
+    private var shade: Win? = null
+
+    /** How see-through the popup was made, to make it again when Settings changes it. */
+    private var popupGlass = -1
+
+    /** The word was picked on the lines' screen, so its entry shows there and not over the game. */
+    private var pickedOnPanel = false
     private var focus: Win? = null
     private var panel: Win? = null
     private var panelView: PanelView? = null
@@ -104,8 +121,18 @@ class OverlayHost(
     /** The game of the session still going and its stats, as the top of the panel shows them. */
     private var session: Pair<String, String>? = null
 
-    /** The line and entry a note is being written on, while the note editor shows. */
-    private var noting: Pair<LookupLine, Entry>? = null
+    private var ownApp: Set<Int> = emptySet()
+
+    /** When Open LFG was pressed: the lines' screen is out of the way at once, before the app's page is seen in front. */
+    private var appOpenedAt = 0L
+
+    /** This game's notes show among its lines. */
+    private var notes: List<Note> = emptyList()
+
+    /** What a note is being written on, while the note editor shows: a word of a line, a line alone, or the game as it is now. */
+    private class Noting(val line: LookupLine?, val entry: Entry?)
+
+    private var noting: Noting? = null
 
     val input = ControllerInput(
         controller,
@@ -224,33 +251,54 @@ class OverlayHost(
 
     /**
      * A strip heard a touch outside itself. Every strip hears it, including
-     * for a touch on another strip, so it counts as a tap on the app only
-     * when nothing of ours was touched at the same moment.
+     * for a touch on another strip, so it counts as a tap on the game only
+     * when nothing of ours was touched at the same moment. Such a tap ends a
+     * reading asked for, and lets go of a word picked by touch: its mark is on
+     * the game's screen, and nothing is read from that screen while it is.
      */
     private fun outsideTouch() {
-        if (!asking || elsewhereCheck != null) return
+        if (elsewhereCheck != null || !(asking || pickedByTouch())) return
         val heardAt = android.os.SystemClock.uptimeMillis()
         val check = Runnable {
             elsewhereCheck = null
-            if (asking && lastOwnTouch < heardAt - OWN_TOUCH_SLACK_MS) onTapElsewhere()
+            if (lastOwnTouch < heardAt - OWN_TOUCH_SLACK_MS) {
+                if (asking) onTapElsewhere() else if (pickedByTouch()) controller.clear()
+            }
         }
         elsewhereCheck = check
         handler.postDelayed(check, OUTSIDE_WAIT_MS)
     }
 
+    private fun pickedByTouch() = state.selected && !state.controllerMode && noting == null
+
     fun onState(next: LookupState) {
         val wasController = state.controllerMode
-        // Another word, or none: a note half written on the last one is let go.
-        noting?.let { (line, _) -> if (!next.selected || next.selectedLine?.lineId != line.lineId) endNote() }
+        // Another word, or none: a note half written on the last word is let go. A note on a line or the game stays.
+        noting?.let { written -> if (written.entry != null && (!next.selected || next.selectedLine?.lineId != written.line?.lineId)) endNote() }
+        // The cursor is on the game's own text, so its entry is over the game.
+        if (next.controllerMode && !wasController) pickedOnPanel = false
         state = next
         if (wasController && !next.controllerMode) input.release()
         render()
     }
 
-    /** The newest lines read, of every game; the panel shows the current game's. */
+    /** The newest lines read, of every game; the lines' screen shows the current game's. */
     fun onHistory(lines: List<GameLine>) {
         history = lines
-        panelView?.showHistory()
+        panelView?.refresh()
+    }
+
+    /** The screens this app's own pages are in front on. The lines' screen is not drawn over them. */
+    fun onOwnApp(displays: Set<Int>) {
+        if (displays == ownApp) return
+        ownApp = displays
+        render()
+    }
+
+    /** Every note, newest first; the lines' screen shows the current game's among its lines. */
+    fun onNotes(all: List<Note>) {
+        notes = all
+        panelView?.refresh()
     }
 
     /** The session still going: its game and its stats; null when there is none. */
@@ -260,21 +308,31 @@ class OverlayHost(
     }
 
     private fun moveTo(displayId: Int) {
-        (strips + marks + listOfNotNull(popup, focus)).forEach { it.remove() }
+        (strips + marks + listOfNotNull(popup, shade, focus)).forEach { it.remove() }
         strips.clear()
         marks.clear()
         popup = null
         popupView = null
+        shade = null
         focus = null
         gameDisplay = displayId
     }
 
-    /** The other screen of a two-screen handheld, when the panel is wanted there. */
+    /** The other screen of a two-screen handheld, when the lines are wanted there. */
     private fun otherDisplay(): Int {
         if (!prefs().secondScreenPanel) return Display.INVALID_DISPLAY
         return displays.displays.firstOrNull {
             it.displayId != gameDisplay && it.state != Display.STATE_OFF && it.flags and Display.FLAG_PRIVATE == 0
         }?.displayId ?: Display.INVALID_DISPLAY
+    }
+
+    /** The entry is a popup over the game: always on one screen, and on two unless Settings puts it with the lines. */
+    private fun entryOverGame(other: Int) = other == Display.INVALID_DISPLAY || prefs().entryPlace == Prefs.ENTRY_OVER_GAME
+
+    /** The entry shows on the lines' screen: for a word picked there, for a line no longer on screen, or when Settings says so. */
+    private fun entryOnPanel(): Boolean {
+        if (!state.selected || (state.entry == null && state.message == null)) return false
+        return pickedOnPanel || state.selectedLine?.geometry == null || prefs().entryPlace != Prefs.ENTRY_OVER_GAME
     }
 
     // ── drawing ──────────────────────────────────────────────────────────────
@@ -283,16 +341,25 @@ class OverlayHost(
         if (gameDisplay == Display.INVALID_DISPLAY) return
         // A new scheme, or light and dark swapped: the views take their colours when made, so they are made again.
         val palette = service.palette(prefs())
+        val glass = prefs().popupSeeThrough
         if (palette != Ink.palette) {
             Ink.palette = palette
             noting = null
-            (marks + listOfNotNull(popup, panel)).forEach { it.remove() }
+            (marks + listOfNotNull(popup, shade, panel)).forEach { it.remove() }
             marks.clear()
             popup = null
             popupView = null
+            shade = null
             panel = null
             panelView = null
+        } else if (glass != popupGlass && popupView != null) {
+            // The popup takes its ground when made.
+            listOfNotNull(popup, shade).forEach { it.remove() }
+            popup = null
+            popupView = null
+            shade = null
         }
+        popupGlass = glass
         val host = manager(gameDisplay) ?: return
         val lines = if (gameInFront) state.lines else emptyList()
 
@@ -311,7 +378,7 @@ class OverlayHost(
         }
         for (i in used until strips.size) strips[i].hide()
         // Text to tap: the popup is made now, after this drawing, so the first tap does not wait for its page.
-        if (lines.isNotEmpty() && popupView == null && otherDisplay() == Display.INVALID_DISPLAY) {
+        if (lines.isNotEmpty() && popupView == null && entryOverGame(otherDisplay())) {
             val display = gameDisplay
             handler.post {
                 if (popupView == null && gameDisplay == display) {
@@ -321,7 +388,7 @@ class OverlayHost(
         }
 
         // The mark around the looked-up word: one piece for each row it is on.
-        val spans = if (gameInFront && state.selected) state.selectedLine?.geometry?.spanBoxes(state.spanStart, state.spanEnd) ?: emptyList() else emptyList()
+        val spans = if (gameInFront && state.selected) state.selectedLine?.geometry?.spanBoxes(state.spanStart, state.markEnd) ?: emptyList() else emptyList()
         spans.forEachIndexed { i, piece ->
             val win = marks.getOrNull(i) ?: Win(
                 View(host.first).apply { background = rounded(Ink.WASH, Ink.ACCENT, host.first.dp(3f).toFloat(), host.first.dp(1.5f)) },
@@ -332,15 +399,11 @@ class OverlayHost(
         for (i in spans.size until marks.size) marks[i].hide()
         val span = spans.firstOrNull()
 
-        // The entry: on the other screen if there is one, else beside the word.
+        // The lines, on the other screen if there is one. The entry: beside the word over the game,
+        // unless the word was picked on the lines' screen or Settings puts every entry there.
         val other = otherDisplay()
-        if (other != Display.INVALID_DISPLAY) {
-            popup?.hide()
-            renderPanel(other)
-        } else {
-            panel?.hide()
-            renderPopup(host, span)
-        }
+        if (other != Display.INVALID_DISPLAY) renderPanel(other) else panel?.hide()
+        if (entryOverGame(other) && !(pickedOnPanel && panel?.shown == true)) renderPopup(host, span) else hidePopup()
 
         // Lookup mode: a window that can take focus, and so the controller.
         if (state.controllerMode && gameInFront && noting == null) {
@@ -358,44 +421,79 @@ class OverlayHost(
             panel = null
             panelDisplay = displayId
         }
-        if (!gameInFront) {
+        // Not over the app's own pages, opened from here: they are on this screen to be used.
+        val opening = android.os.SystemClock.uptimeMillis() - appOpenedAt < APP_OPENING_MS
+        if (!gameInFront || displayId in ownApp || opening) {
             panel?.hide()
             return
         }
         val host = manager(displayId) ?: return
         val size = bounds(displayId) ?: return
-        val view = panelView?.takeIf { panel != null } ?: PanelView(host.first).also { panelView = it; it.showSession(session?.first, session?.second) }
+        val view = panelView?.takeIf { panel != null } ?: PanelView(host.first).also { panelView = it }
         val win = panel ?: Win(view, host.second, PANEL_FLAGS).also { panel = it }
-        view.show(state, stripsOn)
+        view.show(stripsOn)
         win.place(0, 0, size.width, size.height)
+    }
+
+    private fun hidePopup() {
+        popup?.hide()
+        shade?.hide()
     }
 
     private fun renderPopup(host: Pair<Context, WindowManager>, span: Box?) {
         if (!state.selected || span == null || (state.entry == null && state.message == null)) {
-            popup?.hide()
+            hidePopup()
             return
         }
         val screen = bounds(gameDisplay) ?: return
         val context = host.first
+        val margin = context.dp(SHADE_DP)
+        val under = shade ?: Win(
+            View(context).apply { background = ShadeDrawable(context.dp(POPUP_RADIUS_DP).toFloat(), margin.toFloat(), Ink.palette.dark) },
+            host.second, PASSIVE_FLAGS,
+        ).also { shade = it }
         val view = popupView ?: PopupView(context).also { popupView = it }
         val win = popup ?: Win(view, host.second, POPUP_FLAGS).also { popup = it }
         view.show(state)
-        // Portrait: near the full width, as Hachidori's popup is. Landscape: Yomitan's
-        // popup beside the word, which is what GameSentenceMiner's overlay shows.
-        val width = if (screen.height > screen.width) screen.width - 2 * context.dp(12f) else minOf(context.dp(360f), screen.width * 45 / 100)
-        // A fixed height, as Yomitan's popup has: the entries scroll inside it. "No entry" needs one line.
-        val height = if (state.entries.isEmpty()) context.dp(56f) else screen.height * 55 / 100
-        val gap = context.dp(10f)
-        // Clear of the line: above it when there is room, else below, else wherever fits.
-        // Clear of the row the word is on; in a tall block the other rows may be covered.
-        val line = state.selectedLine?.geometry?.rows?.firstOrNull { it.intersects(span) } ?: span
-        val y = when {
-            line.top - gap - height >= 0 -> line.top - gap - height
-            line.bottom + gap + height <= screen.height -> line.bottom + gap
-            else -> 0
+        val edge = context.dp(6f)
+        val gap = context.dp(6f)
+        // Portrait: near the full width. Landscape: Hachidori's popup beside the word, which is what
+        // GameSentenceMiner's overlay shows. A fixed height: the entries scroll inside it. "No entry" needs one line.
+        var width = if (screen.height > screen.width) screen.width - 2 * context.dp(10f) else minOf(context.dp(400f), screen.width * 46 / 100)
+        val want = if (state.entries.isEmpty()) context.dp(60f) else minOf(screen.height * 56 / 100, context.dp(460f))
+        val geometry = state.selectedLine?.geometry
+        // Clear of the row the word is on, as Hachidori places its popup; in a tall block the other rows may be covered.
+        val row = geometry?.rows?.firstOrNull { it.intersects(span) } ?: span
+        val x: Int
+        val y: Int
+        val height: Int
+        if (geometry?.vertical == true) {
+            // Beside the column: to its right when there is room, else on the roomier side, no wider than the room there.
+            val right = screen.width - row.right - gap - edge
+            val left = row.left - gap - edge
+            val onRight = right >= width || right >= left
+            width = minOf(width, maxOf(left, right)).coerceAtLeast(context.dp(160f))
+            height = want
+            x = (if (onRight) row.right + gap else row.left - gap - width).coerceIn(edge, (screen.width - width - edge).coerceAtLeast(edge))
+            y = span.top.coerceIn(edge, (screen.height - height - edge).coerceAtLeast(edge))
+        } else {
+            // Above the row when it fits, else below, else on the roomier side and no taller than the room there,
+            // so the word is never covered. Its left edge is on the word's.
+            val above = row.top - gap - edge
+            val below = screen.height - row.bottom - gap - edge
+            val onTop = above >= want || (below < want && above >= below)
+            height = minOf(want, maxOf(above, below)).coerceAtLeast(context.dp(96f))
+            y = (if (onTop) row.top - gap - height else row.bottom + gap).coerceIn(edge, (screen.height - height - edge).coerceAtLeast(edge))
+            x = span.left.coerceIn(edge, (screen.width - width - edge).coerceAtLeast(edge))
         }
-        val x = (span.left + span.width / 2 - width / 2).coerceIn(0, (screen.width - width).coerceAtLeast(0))
+        under.place(x - margin, y - margin, width + 2 * margin, height + 2 * margin)
+        val back = !win.shown
         win.place(x, y, width, height)
+        if (back) {
+            // Parked, its page was a pixel wide and may have scrolled; once it has its size again it starts from the top.
+            view.entry.toTop()
+            handler.postDelayed({ if (popup?.shown == true) view.entry.toTop() }, 80)
+        }
     }
 
     // ── the read button and the region picker ────────────────────────────────
@@ -478,7 +576,7 @@ class OverlayHost(
         notice?.remove()
         picker?.remove()
         readButton?.remove()
-        (strips + marks + listOfNotNull(popup, focus, panel)).forEach { it.remove() }
+        (strips + marks + listOfNotNull(popup, shade, focus, panel)).forEach { it.remove() }
         strips.clear()
         marks.clear()
     }
@@ -506,7 +604,11 @@ class OverlayHost(
             if (event.actionMasked == MotionEvent.ACTION_DOWN) ownTouch()
             if (event.actionMasked == MotionEvent.ACTION_UP) {
                 val geometry = state.lines.getOrNull(line)?.geometry ?: return true
-                geometry.charIndexAt(originX + event.x.toInt(), originY + event.y.toInt(), STRIP_SLOP)?.let { controller.select(line, it) }
+                geometry.charIndexAt(originX + event.x.toInt(), originY + event.y.toInt(), STRIP_SLOP)?.let {
+                    // Picked on the game, so its entry is over the game.
+                    pickedOnPanel = false
+                    controller.select(line, it)
+                }
             }
             return true
         }
@@ -620,24 +722,30 @@ class OverlayHost(
 
     private fun hints(context: Context): TextView {
         val swap = prefs().swapConfirm
-        return context.keyHints(if (swap) "B" else "A", if (swap) "A" else "B", listen = (context.applicationContext as? io.github.beesan.lfg.App)?.wordAudio?.info?.value != null)
+        return context.keyHints(
+            if (swap) "B" else "A", if (swap) "A" else "B",
+            listen = (context.applicationContext as? io.github.beesan.lfg.App)?.wordAudio?.info?.value != null,
+            wholeWord = prefs().picking.wholeWord,
+        )
     }
 
     /**
-     * The popup beside the word: every entry of the lookup in one scrolling
-     * list, each with its own card and audio buttons, drawn with the same HTML
-     * as the app's entry page.
+     * The popup beside the word, over the game: every entry of the lookup in
+     * one scrolling list, each with its own card and audio buttons, drawn with
+     * the same HTML as the app's entry page. Its ground lets a little of the
+     * game through, as Hachidori's popup does, and its shadow is the window
+     * under it ([shade]).
      */
     @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
     private inner class PopupView(context: Context) : LinearLayout(context) {
-        val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }
+        val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }.apply { glass = true }
         private val message = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
         private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
 
         init {
             orientation = VERTICAL
-            background = rounded(Ink.BG, Ink.BORDER_STRONG, context.dp(10f).toFloat())
+            background = rounded(seeThrough(Ink.BG, prefs().popupSeeThrough), Ink.BORDER_STRONG, context.dp(POPUP_RADIUS_DP).toFloat())
             val pad = context.dp(1f)
             setPadding(pad, pad, pad, context.dp(4f))
             clipToOutline = true
@@ -663,12 +771,12 @@ class OverlayHost(
             return super.dispatchTouchEvent(event)
         }
 
-        fun showNote(word: String) {
+        fun showNote(heading: String) {
             entry.visibility = View.GONE
             message.visibility = View.GONE
             hints.visibility = View.GONE
             note.visibility = View.VISIBLE
-            note.open(word)
+            note.open(heading)
         }
 
         fun hideNote() {
@@ -694,24 +802,28 @@ class OverlayHost(
         }
     }
 
-    /** The note button of an entry: the popup, or the panel, becomes a note on its word. */
+    /** The note button of an entry: the lines' screen, or the popup, becomes a note on its word. */
     private fun startNote(index: Int) {
         val entry = state.entries.getOrNull(index) ?: return
         val line = state.selectedLine ?: return
-        noting = line to entry
+        beginNote(Noting(line, entry), "Note on ${entry.expression}")
+    }
+
+    private fun beginNote(next: Noting, heading: String) {
+        noting = next
         if (panel?.shown == true) {
-            panelView?.showNote(entry.expression)
+            panelView?.showNote(heading)
             panel?.setFocusable(true)
         } else {
-            popupView?.showNote(entry.expression)
+            popupView?.showNote(heading)
             popup?.setFocusable(true)
         }
         render()
     }
 
     private fun saveNote(text: String, keepPicture: Boolean) {
-        val (line, entry) = noting ?: return
-        if (text.isNotBlank()) onSaveNote(line, entry, text.trim(), keepPicture)
+        val written = noting ?: return
+        if (text.isNotBlank()) onSaveNote(written.line, written.entry, text.trim(), keepPicture)
         endNote()
         render()
     }
@@ -728,109 +840,126 @@ class OverlayHost(
     private fun showEntries(view: EntryWebView, state: LookupState) =
         view.showList(state.entries, styles(), state.buttons.map { it.htmlState() }, state.entryIndex, state.message, Ink.palette)
 
+    /** A row of the lines' screen: a kept line, text on screen that is not kept, or a note. */
+    private class Row(
+        val key: String,
+        val time: Long,
+        val text: String,
+        val saved: GameLine? = null,
+        /** Its place among the state's lines while it is on screen, else -1. */
+        val onScreen: Int = -1,
+        val note: Note? = null,
+    )
+
     /**
-     * The bottom screen, laid out as the app is: the game and its session at
-     * the top, the line on screen as a card to tap, and under it either the
-     * entry of the word picked or this game's earlier lines with their times.
+     * The lines' screen of a two-screen handheld, laid out as a texthooker
+     * page: the game and its session at the top, then this game's lines as
+     * they are read, oldest first, the one on screen last and largest. Every
+     * character can be tapped. The line last touched (the newest, until
+     * another is) carries its buttons: Translate and Explain once there is an
+     * OpenRouter key, and Note. Notes written while playing sit among the
+     * lines, at their time. A word picked here has its entry here, under the
+     * lines; a word picked on the game has it over the game.
      */
     @SuppressLint("ViewConstructor")
     private inner class PanelView(context: Context) : LinearLayout(context) {
         private val pad = context.dp(16f)
-        private val lines = LinesView(context) { line, index -> controller.select(line, index) }
 
         /** The entry in full: pictures, tables and each dictionary's own styling. */
         val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }
         private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
         private val title = context.label(19f, Ink.TEXT, bold = true)
         private val stats = context.label(13f, Ink.DIM)
-        private val nowLabel = context.label(12f, Ink.ACCENT, bold = true)
-        private val translation = context.label(15f, Ink.DIM)
-        private val translateButton = context.pill("Translate", primary = false) { translateNow() }
-        private val earlierLabel = context.label(12f, Ink.DIM, bold = true)
-        private val historyList = LinearLayout(context)
-        private val historyScroll = ScrollView(context)
+        private val list = LinearLayout(context)
+        private val scroll = ScrollView(context)
+        private val empty = context.label(15f, Ink.DIM)
+        private val sheet = LinearLayout(context)
+        private val sheetBar = LinearLayout(context)
+        private val sheetTitle = context.label(12f, Ink.DIM, bold = true)
         private val message = context.label(12.5f, Ink.DIM)
         private val stripsToggle = context.pill("", primary = false, sizeSp = 12.5f) { onToggleStrips() }
         private val hints = hints(context)
-        private val empty = context.label(15f, Ink.DIM)
-        private val card = LinearLayout(context)
+        private val tip = context.label(12.5f, Ink.DIM)
         private val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
 
-        /** The line Translate is for: the one picked in, else the newest on screen that was saved. */
-        private var translateFor: String? = null
+        private var rows: List<Row> = emptyList()
+        private var views: List<View> = emptyList()
+
+        /** The row carrying the buttons: the one last touched, until a new line is on screen. */
+        private var touched: String? = null
+        private var newest: String? = null
 
         init {
             orientation = VERTICAL
             setBackgroundColor(Ink.BG)
 
-            // The game and its session, as the app's page header.
+            // The game and its session, as the app's page header, with what the page can do beside it.
             val header = LinearLayout(context).apply {
+                orientation = VERTICAL
+                setBackgroundColor(Ink.SURFACE)
+                setPadding(pad, context.dp(10f), context.dp(12f), context.dp(10f))
+            }
+            val top = LinearLayout(context).apply {
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setBackgroundColor(Ink.SURFACE)
-                setPadding(pad, context.dp(12f), context.dp(12f), context.dp(12f))
             }
-            val names = LinearLayout(context).apply { orientation = VERTICAL }
             title.maxLines = 1
             title.ellipsize = TextUtils.TruncateAt.END
             stats.maxLines = 1
             stats.ellipsize = TextUtils.TruncateAt.END
-            names.addView(title)
-            names.addView(stats, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(4f) })
-            header.addView(names, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            header.addView(context.pill("Open LFG", primary = false) { openApp() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
+            top.addView(title, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+            top.addView(context.pill("Note", primary = false, sizeSp = 13f) { beginNote(Noting(newestOnScreen(), null), "Note on " + title.text) }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
+            top.addView(context.pill("Open LFG", primary = false, sizeSp = 13f) { openApp() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
+            header.addView(top)
+            header.addView(stats, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(5f) })
             addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
             addView(divider(context))
 
-            // The line on screen: a card, its text never more than two fifths of the panel, so the entry has the rest.
-            val top = object : ScrollView(context) {
-                override fun onMeasure(widthSpec: Int, heightSpec: Int) {
-                    val most = (this@PanelView.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels) * 2 / 5
-                    super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(most, MeasureSpec.AT_MOST))
-                }
-            }.apply {
-                isFocusable = false
-                addView(lines)
-            }
-            card.orientation = VERTICAL
-            card.background = rounded(Ink.SURFACE, Ink.BORDER, context.dp(14f).toFloat())
-            card.setPadding(pad, context.dp(12f), pad, context.dp(14f))
-            card.addView(nowLabel)
-            card.addView(top, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8f) })
-            translation.setLineSpacing(context.dp(3f).toFloat(), 1f)
-            card.addView(translation, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
-            val cardActions = LinearLayout(context).apply { orientation = HORIZONTAL }
-            cardActions.addView(translateButton, wrap())
-            card.addView(cardActions, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(12f) })
-            addView(card, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { setMargins(context.dp(12f), context.dp(12f), context.dp(12f), context.dp(4f)) })
-            empty.text = "Waiting for text in the game. In an ordinary app, ask with the Read screen tile, the LFG button or the lookup shortcut."
             empty.setLineSpacing(context.dp(3f).toFloat(), 1f)
-            empty.setPadding(pad, context.dp(16f), pad, context.dp(10f))
+            empty.setPadding(pad, context.dp(18f), pad, context.dp(10f))
             addView(empty)
 
-            addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = context.dp(8f) })
-            note.visibility = View.GONE
-            addView(note, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
-            historyList.orientation = VERTICAL
-            earlierLabel.text = "EARLIER"
-            earlierLabel.letterSpacing = 0.08f
-            earlierLabel.setPadding(0, context.dp(14f), 0, context.dp(4f))
-            historyScroll.isFocusable = false
-            historyScroll.addView(historyList)
-            historyScroll.setPadding(pad, 0, pad, 0)
-            addView(historyScroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            list.orientation = VERTICAL
+            list.setPadding(0, context.dp(4f), 0, context.dp(10f))
+            scroll.isFocusable = false
+            scroll.isVerticalScrollBarEnabled = false
+            scroll.addView(list)
+            addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
 
-            message.setPadding(pad, 0, pad, context.dp(6f))
-            addView(message)
+            // The entry of a word picked here, or a note being written, under the lines.
+            sheet.orientation = VERTICAL
+            sheet.setBackgroundColor(Ink.BG)
+            sheet.addView(divider(context))
+            sheetBar.orientation = HORIZONTAL
+            sheetBar.gravity = Gravity.CENTER_VERTICAL
+            sheetBar.setBackgroundColor(Ink.SURFACE)
+            sheetBar.setPadding(pad, context.dp(6f), context.dp(12f), context.dp(6f))
+            sheetTitle.letterSpacing = 0.08f
+            sheetBar.addView(sheetTitle, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+            sheetBar.addView(context.pill("Close", primary = false, sizeSp = 12.5f) { controller.clear() })
+            sheet.addView(sheetBar)
+            sheet.addView(divider(context))
+            sheet.addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            note.visibility = View.GONE
+            sheet.addView(note, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            message.setPadding(pad, context.dp(4f), pad, context.dp(6f))
+            sheet.addView(message)
+            sheet.visibility = View.GONE
+            addView(sheet, LayoutParams(LayoutParams.MATCH_PARENT, 0, SHEET_WEIGHT))
+
             addView(divider(context))
-            val actions = LinearLayout(context).apply {
+            val foot = LinearLayout(context).apply {
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(pad, context.dp(8f), context.dp(12f), context.dp(8f))
-                addView(hints, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-                addView(stripsToggle, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
+                setPadding(pad, context.dp(6f), context.dp(12f), context.dp(6f))
             }
-            addView(actions)
+            val words = android.widget.FrameLayout(context)
+            hints.setPadding(0, 0, 0, 0)
+            words.addView(hints)
+            words.addView(tip)
+            foot.addView(words, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+            foot.addView(stripsToggle, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
+            addView(foot)
         }
 
         private fun divider(context: Context) = View(context).apply {
@@ -843,62 +972,13 @@ class OverlayHost(
             return super.dispatchTouchEvent(event)
         }
 
-        fun show(state: LookupState, stripsOn: Boolean) {
-            lines.show(state)
-            val has = state.lines.isNotEmpty()
-            card.visibility = if (has) View.VISIBLE else View.GONE
-            empty.visibility = if (has) View.GONE else View.VISIBLE
-            val onScreen = state.lines.any { it.geometry != null }
-            nowLabel.text = (if (onScreen) "ON SCREEN" else "EARLIER LINE") + (if (state.controllerMode) "  ·  CONTROLLER" else "")
-            nowLabel.letterSpacing = 0.08f
-            val showEntry = state.selected && (state.entry != null || state.message != null)
-            val writing = note.visibility == View.VISIBLE
-            entry.visibility = if (showEntry && !writing) View.VISIBLE else View.GONE
-            historyScroll.visibility = if (showEntry || writing) View.GONE else View.VISIBLE
-            if (showEntry) showEntries(entry, state)
-            hints.visibility = if (state.controllerMode) View.VISIBLE else View.INVISIBLE
-            message.text = state.message.takeIf { state.entry != null } ?: ""
-            message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
-            stripsToggle.text = if (stripsOn) "Tap strips on" else "Tap strips off"
-            val picked = state.selectedLine?.takeIf { state.selected }
-            translateFor = (picked ?: state.lines.lastOrNull { it.lineId != null })?.lineId
-            showTranslation()
+        fun show(stripsOn: Boolean) {
             showSession(session?.first, session?.second)
-            showHistory()
-        }
-
-        /** The kept or asked-for translation of the line Translate is for, and the button. */
-        fun showTranslation() {
-            val id = translateFor
-            val t = id?.let { translations[it] }
-            val can = id != null && translateReady()
-            translation.text = t?.text ?: t?.error ?: if (t?.busy == true) "Translating…" else ""
-            translation.setTextColor(if (t?.text == null && t?.error != null) Ink.ACCENT else Ink.DIM)
-            translation.visibility = if (translation.text.isEmpty()) View.GONE else View.VISIBLE
-            translateButton.visibility = if (can) View.VISIBLE else View.GONE
-            translateButton.text = if (t?.text != null) "Translate again" else "Translate"
-            translateButton.isEnabled = t?.busy != true
-            translateButton.alpha = if (t?.busy == true) 0.5f else 1f
-            (translateButton.parent as? View)?.visibility = translateButton.visibility
-        }
-
-        private fun translateNow() {
-            val id = translateFor ?: return
-            if (translations[id]?.busy == true) return
-            translations[id] = Translation(translations[id]?.text, busy = true)
-            showTranslation()
-            onTranslate(id)
-        }
-
-        fun showNote(word: String) {
-            entry.visibility = View.GONE
-            historyScroll.visibility = View.GONE
-            note.visibility = View.VISIBLE
-            note.open(word)
-        }
-
-        fun hideNote() {
-            note.visibility = View.GONE
+            stripsToggle.text = if (stripsOn) "Tap strips on" else "Tap strips off"
+            hints.visibility = if (state.controllerMode) View.VISIBLE else View.INVISIBLE
+            tip.visibility = if (state.controllerMode) View.GONE else View.VISIBLE
+            tip.text = "Tap a word, here or on the game."
+            refresh()
         }
 
         fun showSession(game: String?, text: String?) {
@@ -906,41 +986,230 @@ class OverlayHost(
             stats.text = text ?: "No reading yet this session"
         }
 
-        /** While nothing is picked, this game's lines read before, newest first, as on the app's Lines page. */
-        fun showHistory() {
-            val game = state.lines.firstOrNull()?.gameName ?: session?.first
-            val showing = state.lines.mapNotNullTo(HashSet()) { it.lineId }
-            val rows = history.filter { it.gameName == game && it.id !in showing }.take(HISTORY_SHOWN)
-            historyList.removeAllViews()
-            if (rows.isEmpty()) return
-            historyList.addView(earlierLabel)
-            for (row in rows) {
-                val item = LinearLayout(context).apply {
-                    orientation = HORIZONTAL
-                    setPadding(0, context.dp(10f), 0, context.dp(10f))
-                    setOnClickListener { onHistoryLine(LookupLine(row.lineText, row.id, row.screenshotPath, row.gameName)) }
-                }
-                item.addView(context.label(13f, Ink.DIM).apply { text = clock.format(java.util.Date(row.createdAt)); setPadding(0, context.dp(3f), 0, 0) }, LayoutParams(context.dp(54f), LayoutParams.WRAP_CONTENT))
-                val texts = LinearLayout(context).apply { orientation = VERTICAL }
-                texts.addView(context.label(17f, Ink.TEXT).apply { text = row.lineText; setLineSpacing(context.dp(4f).toFloat(), 1f) })
-                (translations[row.id]?.text ?: row.translation)?.let { t ->
-                    texts.addView(context.label(14f, Ink.DIM).apply { text = t; setPadding(0, context.dp(4f), 0, 0) })
-                }
-                if (row.noteIds.isNotEmpty()) {
-                    texts.addView(context.label(11.5f, Ink.ACCENT, bold = true).apply {
-                        text = "CARD"
-                        letterSpacing = 0.08f
-                        setPadding(0, context.dp(5f), 0, 0)
-                    })
-                }
-                item.addView(texts, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-                historyList.addView(item)
-                historyList.addView(divider(context))
+        fun showNote(heading: String) {
+            note.visibility = View.VISIBLE
+            note.open(heading)
+        }
+
+        fun hideNote() {
+            note.visibility = View.GONE
+        }
+
+        /** The line on screen now that a note on the game is hung on: the newest kept one, for its picture. */
+        private fun newestOnScreen(): LookupLine? = state.lines.lastOrNull { it.geometry != null && it.lineId != null }
+
+        /** The lines, the notes among them, and the entry or note under them, as they are now. */
+        fun refresh() {
+            val next = rowsNow()
+            val current = next.lastOrNull { it.onScreen >= 0 }?.key
+            val arrived = current != newest
+            if (arrived) {
+                newest = current
+                touched = null
             }
+            val wasAtEnd = scroll.scrollY + scroll.height >= list.height - context.dp(48f)
+            val same = next.size == rows.size && next.indices.all { next[it].key == rows[it].key }
+            rows = next
+            val active = touched?.takeIf { key -> rows.any { it.key == key } }
+                ?: rows.lastOrNull { it.saved != null && it.onScreen >= 0 }?.key ?: rows.lastOrNull { it.saved != null }?.key
+            if (same) {
+                rows.forEachIndexed { i, row -> (views[i] as? LineRow)?.bind(row, row.key == active) }
+            } else {
+                list.removeAllViews()
+                views = rows.map { row -> if (row.note != null) noteRow(row.note) else LineRow(context).also { it.bind(row, row.key == active) } }
+                views.forEach(list::addView)
+            }
+            empty.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
+            scroll.visibility = if (rows.isEmpty()) View.GONE else View.VISIBLE
+            if (rows.isEmpty()) {
+                empty.text = "Waiting for text in the game. Each line it shows is listed here as it is read." +
+                    if (prefs().aiReady) "" else "\n\nAdd an OpenRouter key in Settings › Translation and each line gets Translate and Explain."
+            }
+
+            val writing = note.visibility == View.VISIBLE
+            val showEntry = entryOnPanel() && !writing
+            val sheetWas = sheet.visibility == View.VISIBLE
+            sheet.visibility = if (showEntry || writing) View.VISIBLE else View.GONE
+            sheetBar.visibility = if (writing) View.GONE else View.VISIBLE
+            entry.visibility = if (showEntry) View.VISIBLE else View.GONE
+            if (showEntry) {
+                showEntries(entry, state)
+                sheetTitle.text = if (state.selectedLine?.geometry == null) "FROM AN EARLIER LINE" else "ON SCREEN NOW"
+            }
+            message.text = state.message.takeIf { showEntry && state.entry != null } ?: ""
+            message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
+
+            // New text, or the list was at its end: stay at the end. The sheet just opened: keep the line picked in sight.
+            val opened = sheet.visibility == View.VISIBLE && !sheetWas
+            if (!same && (arrived || wasAtEnd)) scroll.post { scroll.scrollTo(0, list.height) }
+            else if (opened) scroll.post { marked()?.let { v -> if (v.bottom > scroll.scrollY + scroll.height) scroll.scrollTo(0, v.bottom - scroll.height) } }
+        }
+
+        /** Brings a line's answer into sight: the whole row if it fits, else from its top. */
+        fun reveal(lineId: String) = scroll.post {
+            val row = rows.indexOfFirst { it.key == lineId }.takeIf { it >= 0 }?.let(views::getOrNull) ?: return@post
+            if (row.bottom <= scroll.scrollY + scroll.height && row.top >= scroll.scrollY) return@post
+            scroll.smoothScrollTo(0, if (row.height <= scroll.height) row.bottom - scroll.height else row.top)
+        }
+
+        /** The row the picked word is in, if it is listed. */
+        private fun marked(): View? = rows.indexOfFirst(::picked).takeIf { it >= 0 }?.let(views::getOrNull)
+
+        private fun picked(row: Row): Boolean {
+            val line = state.selectedLine?.takeIf { state.selected } ?: return false
+            return if (row.onScreen >= 0) state.line == row.onScreen else row.saved != null && line.lineId == row.key
+        }
+
+        /** This game's newest lines, oldest first, with its notes among them at their time. */
+        private fun rowsNow(): List<Row> {
+            val screen = state.lines.withIndex().filter { it.value.geometry != null }
+            val game = screen.firstOrNull()?.value?.gameName ?: state.lines.firstOrNull()?.gameName ?: session?.first
+            val kept = history.filter { it.gameName == game }.take(HISTORY_SHOWN)
+            val out = ArrayList<Row>()
+            for (line in kept) {
+                val at = screen.firstOrNull { it.value.lineId == line.id }
+                // On screen: its text as the screen has it, which the picked word's place is counted in.
+                out += Row(line.id, line.createdAt, at?.value?.text ?: line.lineText, saved = line, onScreen = at?.index ?: -1)
+            }
+            val since = kept.lastOrNull()?.createdAt
+            if (since != null) for (n in notes) if (n.gameName == game && n.createdAt >= since) out += Row("n:${n.id}", n.createdAt, n.text, note = n)
+            out.sortBy { it.time }
+            // Text on screen that is not a kept line (a menu, an ordinary app) comes last, while none of it is.
+            if (out.none { it.onScreen >= 0 }) {
+                val now = System.currentTimeMillis()
+                screen.take(UNKEPT_SHOWN).forEach { out += Row("s:${it.index}:${it.value.text}", now, it.value.text, onScreen = it.index) }
+            }
+            return out
+        }
+
+        private fun tapped(row: Row, index: Int) {
+            touched = row.key
+            pickedOnPanel = true
+            if (row.onScreen >= 0) controller.select(row.onScreen, index)
+            else row.saved?.let { controller.lookIn(LookupLine(it.lineText, it.id, picture(it), it.gameName), index) }
+            refresh()
+        }
+
+        /** A line of the list: its time, its text to tap, what was asked about it, and its buttons while it is the one touched. */
+        private inner class LineRow(context: Context) : LinearLayout(context) {
+            private var row: Row? = null
+            private val bar = View(context)
+            private val time = context.label(12f, Ink.DIM)
+            private val line = LineText(context, 17f) { index -> row?.let { tapped(it, index) } }
+            private val translation = context.label(14.5f, Ink.DIM)
+            private val explanation = context.label(14.5f, Ink.TEXT)
+            private val tags = context.label(11f, Ink.ACCENT, bold = true)
+            private val actions = LinearLayout(context)
+            private val translate = context.pill("Translate", primary = false, sizeSp = 12.5f) { row?.saved?.let { ask(it.id, Ask.TRANSLATE) } }
+            private val explain = context.pill("Explain", primary = false, sizeSp = 12.5f) { row?.saved?.let { ask(it.id, Ask.EXPLAIN) } }
+            private val write = context.pill("Note", primary = false, sizeSp = 12.5f) {
+                row?.saved?.let { beginNote(Noting(lookupLine(it), null), "Note on this line") }
+            }
+
+            init {
+                orientation = HORIZONTAL
+                addView(bar, LayoutParams(context.dp(3f), LayoutParams.MATCH_PARENT))
+                time.setPadding(context.dp(11f), context.dp(4f), 0, 0)
+                addView(time, LayoutParams(context.dp(58f), LayoutParams.WRAP_CONTENT))
+                val column = LinearLayout(context).apply { orientation = VERTICAL }
+                column.addView(line)
+                translation.setLineSpacing(context.dp(3f).toFloat(), 1f)
+                column.addView(translation, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(5f) })
+                explanation.setLineSpacing(context.dp(4f).toFloat(), 1f)
+                explanation.background = rounded(Ink.SURFACE, Ink.BORDER, context.dp(10f).toFloat())
+                explanation.setPadding(context.dp(12f), context.dp(10f), context.dp(12f), context.dp(10f))
+                column.addView(explanation, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8f) })
+                tags.letterSpacing = 0.08f
+                column.addView(tags, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6f) })
+                actions.orientation = HORIZONTAL
+                for (button in listOf(translate, explain, write)) {
+                    actions.addView(button, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { rightMargin = context.dp(8f) })
+                }
+                column.addView(actions, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
+                addView(column, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+                setPadding(0, context.dp(9f), pad, context.dp(9f))
+                // A touch beside the text makes this the line with the buttons.
+                setOnClickListener {
+                    val key = row?.key ?: return@setOnClickListener
+                    touched = key
+                    refresh()
+                }
+                // Nothing here takes focus: a window that is never touched would show the first row as focused.
+                isFocusable = false
+            }
+
+            fun bind(next: Row, active: Boolean) {
+                row = next
+                val current = next.onScreen >= 0
+                bar.setBackgroundColor(if (current) Ink.ACCENT else TRANSPARENT)
+                setBackgroundColor(if (current) Ink.SURFACE else TRANSPARENT)
+                time.text = clock.format(java.util.Date(next.time))
+                line.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, if (current) 21f else 17f)
+                val mark = picked(next)
+                line.show(next.text, if (mark) state.spanStart else 0, if (mark) state.markEnd else 0)
+
+                val id = next.saved?.id
+                val translated = id?.let { translations[it] }
+                val explained = id?.let { explanations[it] }
+                val meaning = translated?.text ?: next.saved?.translation
+                translation.text = translated?.error ?: if (translated?.busy == true && meaning == null) "Translating…" else meaning.orEmpty()
+                translation.setTextColor(if (translated?.error != null) Ink.ACCENT else Ink.DIM)
+                translation.visibility = if (translation.text.isEmpty()) View.GONE else View.VISIBLE
+                // An explanation is long: it shows on the line with the buttons, and is a tag on the others.
+                explanation.text = if (!active) "" else explained?.error ?: explained?.text ?: if (explained?.busy == true) "Explaining…" else ""
+                explanation.setTextColor(if (explained?.error != null) Ink.ACCENT else if (explained?.text == null) Ink.DIM else Ink.TEXT)
+                explanation.visibility = if (explanation.text.isEmpty()) View.GONE else View.VISIBLE
+                tags.text = listOfNotNull(
+                    "CARD".takeIf { next.saved?.noteIds?.isNotEmpty() == true },
+                    "EXPLAINED".takeIf { !active && explained?.text != null },
+                ).joinToString("   ")
+                tags.visibility = if (tags.text.isEmpty()) View.GONE else View.VISIBLE
+
+                actions.visibility = if (active && id != null) View.VISIBLE else View.GONE
+                val ai = prefs().aiReady
+                for ((button, answer, name) in listOf(Triple(translate, translated, "Translate"), Triple(explain, explained, "Explain"))) {
+                    button.visibility = if (ai) View.VISIBLE else View.GONE
+                    val had = if (button === translate) meaning != null else answer?.text != null
+                    button.text = if (answer?.busy == true) "$name…" else if (had) "$name again" else name
+                    button.isEnabled = answer?.busy != true
+                    button.alpha = if (answer?.busy == true) 0.5f else 1f
+                }
+            }
+        }
+
+        /** A note written while playing, among the lines at its time. */
+        private fun noteRow(note: Note): View = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            setPadding(context.dp(3f), context.dp(6f), pad, context.dp(6f))
+            addView(context.label(12f, Ink.DIM).apply {
+                text = clock.format(java.util.Date(note.createdAt))
+                setPadding(context.dp(11f), context.dp(11f), 0, 0)
+            }, LayoutParams(context.dp(58f), LayoutParams.WRAP_CONTENT))
+            val card = LinearLayout(context).apply {
+                orientation = VERTICAL
+                background = rounded(Ink.SURFACE, Ink.BORDER, context.dp(10f).toFloat())
+                setPadding(context.dp(12f), context.dp(8f), context.dp(12f), context.dp(10f))
+            }
+            card.addView(context.label(11f, Ink.ACCENT, bold = true).apply {
+                text = if (note.term.isEmpty()) "NOTE" else "NOTE  ·  ${note.term}"
+                letterSpacing = 0.08f
+            })
+            card.addView(context.label(15f, Ink.TEXT).apply {
+                text = note.text
+                setLineSpacing(context.dp(3f).toFloat(), 1f)
+                setPadding(0, context.dp(4f), 0, 0)
+            })
+            addView(card, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         }
     }
 
-    /** The app's own window, on the screen the panel is on. */
+    private fun lookupLine(line: GameLine) = LookupLine(line.lineText, line.id, picture(line), line.gameName)
+
+    /** The screen's picture is cleared after a while; the line's own picture stays and stands in for it. */
+    private fun picture(line: GameLine): String? =
+        line.screenshotPath?.takeIf { java.io.File(it).isFile } ?: line.cropPath?.takeIf { java.io.File(it).isFile }
+
+    /** The app's own window, on the screen the lines are on. */
     private fun openApp() {
         val intent = android.content.Intent(service, io.github.beesan.lfg.ui.MainActivity::class.java)
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -949,21 +1218,36 @@ class OverlayHost(
             service.startActivity(intent, options.toBundle())
         } catch (e: Exception) {
             Log.w(TAG, "open app", e)
+            return
         }
+        // The lines give way now; if the app's page never comes to the front, they are back when the wait is over.
+        appOpenedAt = android.os.SystemClock.uptimeMillis()
+        render()
+        handler.postDelayed({ render() }, APP_OPENING_MS + 50)
     }
 
-    private fun translateReady(): Boolean = prefs().let { it.translate != Prefs.TRANSLATE_OFF && it.openRouterKey.isNotBlank() }
+    /** What was asked about a line on the lines' screen: the answer, that it is being asked for, or what went wrong. */
+    private class Answer(val text: String? = null, val busy: Boolean = false, val error: String? = null)
 
-    /** A line's translation on the panel: kept, being asked for, or what went wrong. */
-    private data class Translation(val text: String? = null, val busy: Boolean = false, val error: String? = null)
+    private val translations = HashMap<String, Answer>()
+    private val explanations = HashMap<String, Answer>()
 
-    private val translations = HashMap<String, Translation>()
+    private fun answers(what: Ask) = if (what == Ask.TRANSLATE) translations else explanations
 
-    /** The answer to Translate, from the service. */
-    fun onTranslation(lineId: String, text: String?, error: String?) {
-        translations[lineId] = Translation(text ?: translations[lineId]?.text, error = error)
-        panelView?.showTranslation()
-        if (text != null) panelView?.showHistory()
+    private fun ask(lineId: String, what: Ask) {
+        val asked = answers(what)
+        if (asked[lineId]?.busy == true) return
+        asked[lineId] = Answer(asked[lineId]?.text, busy = true)
+        panelView?.refresh()
+        onAsk(lineId, what)
+    }
+
+    /** The answer to Translate or Explain, from the service. */
+    fun onAnswer(lineId: String, what: Ask, text: String?, error: String?) {
+        val asked = answers(what)
+        asked[lineId] = Answer(text ?: asked[lineId]?.text, error = error)
+        panelView?.refresh()
+        panelView?.reveal(lineId)
     }
 
     private companion object {
@@ -976,7 +1260,20 @@ class OverlayHost(
         const val PICKER_FLAGS = BASE
 
         const val NOTICE_MS = 3500L
-        const val HISTORY_SHOWN = 15
+
+        /** How many of the game's lines the lines' screen lists, and how much unkept text on screen. */
+        const val HISTORY_SHOWN = 40
+        const val UNKEPT_SHOWN = 12
+
+        /** The entry or note under the lines takes this much to the lines' 1. */
+        const val SHEET_WEIGHT = 1.35f
+
+        /** How long after Open LFG the lines' screen stays away, for the app's page to come to the front. */
+        const val APP_OPENING_MS = 2000L
+
+        /** The popup's corners, as Hachidori's, and the room round it for its shadow. */
+        const val POPUP_RADIUS_DP = 14f
+        const val SHADE_DP = 18f
 
         /** How long after a touch outside the strips to wait for the strip or entry it may have been on. */
         const val OUTSIDE_WAIT_MS = 120L

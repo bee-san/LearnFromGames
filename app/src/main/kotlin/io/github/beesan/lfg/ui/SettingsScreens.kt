@@ -145,10 +145,10 @@ private fun OnOff(on: Boolean, onChange: (Boolean) -> Unit) = Choice(listOf("on"
 fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings", onBack) {
     Card("Appearance", "Colours, and light or dark", { onOpen(Page.APPEARANCE) })
     Card("Backup", "Back up, restore, and back up on a schedule", { onOpen(Page.BACKUP) })
-    Card("Translation", "Translate lines with your OpenRouter key", { onOpen(Page.TRANSLATION) })
+    Card("Translation", "Translate and explain lines with your OpenRouter key", { onOpen(Page.TRANSLATION) })
     Card("Dictionaries", "Add, order and remove dictionaries", { onOpen(Page.DICTIONARIES) })
     Card("Anki", "The note type and deck cards go to", { onOpen(Page.ANKI) })
-    Card("Controls", "The lookup shortcut", { onOpen(Page.CONTROLS) })
+    Card("Controls", "The lookup shortcut, whole words or characters, and where the entry shows", { onOpen(Page.CONTROLS) })
     Card("Text recognition", "ScreenAI, which reads the screen", { onOpen(Page.RECOGNITION) })
     Card("Games and apps", "Rename one, choose when it is read, turn tap strips off", { onOpen(Page.GAMES) })
     Card("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", { onOpen(Page.GAME_NAMES) })
@@ -349,23 +349,25 @@ fun TranslationScreen(
     onTestKey: () -> Unit,
     onBack: () -> Unit,
 ) = Page("Translation", onBack) {
-    val detail = when (prefs.translate) {
-        Prefs.TRANSLATE_ASK -> "A Translate button on each line"
-        Prefs.TRANSLATE_EVERY -> "Each new line, as it is read"
-        else -> "No line is sent anywhere"
+    // With a key, every line has Translate and Explain; without one, no line is sent anywhere.
+    val every = prefs.translate == Prefs.TRANSLATE_EVERY
+    val detail = when {
+        !prefs.aiReady -> "Add a key below and each line gets Translate and Explain"
+        every -> "Each new line is translated as it is read. Explain is on each line"
+        else -> "Translate and Explain are buttons on each line"
     }
     Card("Translate", detail) {
         Choice(
-            listOf(Prefs.TRANSLATE_OFF to "Off", Prefs.TRANSLATE_ASK to "When asked", Prefs.TRANSLATE_EVERY to "Every line"),
-            prefs.translate,
+            listOf(Prefs.TRANSLATE_ASK to "When asked", Prefs.TRANSLATE_EVERY to "Every line"),
+            if (every) Prefs.TRANSLATE_EVERY else Prefs.TRANSLATE_ASK,
         ) { v -> onChange { it.copy(translate = v) } }
     }
-    SettingText("OpenRouter key", "Kept on this device, and never in a backup. Lines, and recaps' lines, go to OpenRouter.", prefs.openRouterKey, secret = true) { v ->
+    SettingText("OpenRouter key", "Kept on this device, and never in a backup. Lines you translate or explain, and recaps' lines, go to OpenRouter.", prefs.openRouterKey, secret = true) { v ->
         onChange { it.copy(openRouterKey = v.trim()) }
     }
-    SettingText("Model", "Also writes recaps", prefs.model) { v -> onChange { it.copy(model = v.trim()) } }
-    SettingText("Into", "The language translations and recaps are in", prefs.translateInto) { v -> onChange { it.copy(translateInto = v) } }
-    Card("Lines before", "Sent with the line, so the translation knows who is speaking") {
+    SettingText("Model", "Also explains lines and writes recaps", prefs.model) { v -> onChange { it.copy(model = v.trim()) } }
+    SettingText("Into", "The language translations, explanations and recaps are in", prefs.translateInto) { v -> onChange { it.copy(translateInto = v) } }
+    Card("Lines before", "Sent with the line, so the answer knows who is speaking") {
         Stepper(if (prefs.translateContext == 0) "None" else "${prefs.translateContext}", prefs.translateContext, Prefs.CONTEXT_STEPS) { v ->
             onChange { it.copy(translateContext = v) }
         }
@@ -406,10 +408,34 @@ fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: (
     Card("Add card button", "Which face button adds the card; the other one closes. As Android names them.") {
         Choice(listOf("a" to "A adds, B closes", "b" to "B adds, A closes"), if (prefs.swapConfirm) "b" else "a") { v -> onChange { it.copy(swapConfirm = v == "b") } }
     }
-    Card("Entry on the other screen", "On a two-screen handheld the entry shows on the screen the game is not on.") {
+    val word = prefs.selection != Prefs.SELECT_CHARACTER
+    Card(
+        "Selection",
+        if (word) "A lookup marks the whole word it found, and ▶ goes past that word." else "A lookup marks the one character it starts from, and ▶ goes one character.",
+    ) {
+        Choice(listOf(Prefs.SELECT_WORD to "Whole word", Prefs.SELECT_CHARACTER to "Character"), if (word) Prefs.SELECT_WORD else Prefs.SELECT_CHARACTER) { v ->
+            onChange { it.copy(selection = v) }
+        }
+    }
+    Card("Japanese characters only", "The cursor and a tap land only on kana and kanji, never on digits or Latin letters. Punctuation is always passed over.") {
+        OnOff(prefs.japaneseOnly) { v -> onChange { it.copy(japaneseOnly = v) } }
+    }
+    Card("Lines on the other screen", "On a two-screen handheld, the screen the game is not on lists the game's lines as they are read.") {
         OnOff(prefs.secondScreenPanel) { v -> onChange { it.copy(secondScreenPanel = v) } }
     }
-    Text("In lookup: D-pad ◀ ▶ word, ▲ ▼ line, left stick one character, L1 R1 entry, Y listen to the word, right stick scroll.", color = Lfg.Dim, fontSize = 14.sp)
+    Card("Dictionary entry", "On a two-screen handheld: a popup beside the word over the game, or on the lines' screen. A word picked in the lines always shows there.") {
+        Choice(listOf(Prefs.ENTRY_OVER_GAME to "Over the game", Prefs.ENTRY_OTHER_SCREEN to "Other screen"), prefs.entryPlace) { v -> onChange { it.copy(entryPlace = v) } }
+    }
+    Card("Popup see-through", "How much of the game shows through the popup over it.") {
+        Stepper(if (prefs.popupSeeThrough == 0) "Solid" else "${prefs.popupSeeThrough}%", prefs.popupSeeThrough, Prefs.SEE_THROUGH_STEPS) { v ->
+            onChange { it.copy(popupSeeThrough = v) }
+        }
+    }
+    Text(
+        "In lookup: D-pad ◀ ▶ " + (if (word) "word" else "character") + ", ▲ ▼ row. Left stick: the same four ways, one character at a time, " +
+            "faster while held. L1 R1 entry, Y listen to the word, right stick scroll.",
+        color = Lfg.Dim, fontSize = 14.sp,
+    )
 }
 
 private fun modelStatus(state: ModelState, ready: String) = when (state) {

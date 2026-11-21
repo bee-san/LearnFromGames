@@ -49,6 +49,11 @@ class EntryWebView(
     private val media: (dictionary: String, path: String) -> ByteArray?,
     private val onLink: ((EntryLink, Int) -> Unit)? = null,
 ) : WebView(context) {
+    /**
+     * The popup over a game: the page is clear, so the popup's own see-through
+     * ground shows behind the entries. Set before the first page is shown.
+     */
+    var glass = false
     private var shown: String? = null
     private var entry: Entry? = null
     private val audio = (context.applicationContext as? App)?.wordAudio
@@ -104,8 +109,8 @@ class EntryWebView(
     fun show(entry: Entry?, styles: List<EntryHtml.Style>, message: String?, palette: Palette) {
         this.entry = entry
         listHead = null
-        setBackgroundColor(palette.bg)
-        val html = EntryHtml.page(entry, styles, message, audio = entry != null && audio?.has(entry) == true, palette = palette)
+        ground(palette)
+        val html = EntryHtml.page(entry, styles, message, audio = entry != null && audio?.has(entry) == true, palette = palette, glass = glass)
         load(html)
     }
 
@@ -120,16 +125,16 @@ class EntryWebView(
         entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, message: String?, palette: Palette,
         notes: Boolean = true,
     ) {
-        setBackgroundColor(palette.bg)
+        ground(palette)
         val scroll = entries === listed && current != listedCurrent
         listed = entries
         listedCurrent = current
         if (entries.isEmpty()) {
             listHead = null
-            load(EntryHtml.page(null, styles, message, palette = palette))
+            load(EntryHtml.page(null, styles, message, palette = palette, glass = glass))
             return
         }
-        val head = Perf.measure("entry.head") { EntryHtml.listHead(styles, palette) }
+        val head = Perf.measure("entry.head") { EntryHtml.listHead(styles, palette, glass) }
         val body = Perf.measure("entry.html") { EntryHtml.listBody(entries, notes) { audio?.has(it) == true } }
         val state = "lfgState([" + states.joinToString(",") { "'$it'" } + "],$current,$scroll)"
         val script = when {
@@ -167,13 +172,21 @@ class EntryWebView(
      */
     fun prewarm(styles: List<EntryHtml.Style>, palette: Palette) {
         if (shown != null) return
-        setBackgroundColor(palette.bg)
-        val head = Perf.measure("entry.head") { EntryHtml.listHead(styles, palette) }
+        ground(palette)
+        val head = Perf.measure("entry.head") { EntryHtml.listHead(styles, palette, glass) }
         listHead = head
         listBody = ""
         pageBody = ""
         load(head + EntryHtml.LIST_END)
     }
+
+    /** Back to the top of the page: when the popup comes back from being parked, where its page was laid out one pixel wide. */
+    fun toTop() {
+        scrollTo(0, 0)
+        if (loaded) evaluateJavascript("window.scrollTo(0,0)", null)
+    }
+
+    private fun ground(palette: Palette) = setBackgroundColor(if (glass) android.graphics.Color.TRANSPARENT else palette.bg)
 
     private var listHead: String? = null
     private var listBody: String? = null

@@ -13,9 +13,10 @@ import io.github.beesan.lfg.lookup.Move
 
 /**
  * The controller in lookup mode, after Rubi for Vita and Kimochi: the D-pad
- * steps words and lines, the left stick steps characters, one face button adds
- * the card and the other gives the controller back to the game, the shoulder
- * buttons change entry and the right stick scrolls it.
+ * steps words (or characters, in Character selection) and rows, the left stick
+ * goes the same four ways a character at a time and faster while held, one
+ * face button adds the card and the other gives the controller back to the
+ * game, the shoulder buttons change entry and the right stick scrolls it.
  *
  * A D-pad reaches a focused window either as keys or as the HAT axes, depending
  * on the pad; both are handled, and a held direction repeats on Rubi's timings
@@ -30,8 +31,8 @@ class ControllerInput(
     private val chordActive: () -> Boolean,
 ) {
     private val handler = Handler(Looper.getMainLooper())
-    private val pad = Repeater()
-    private val stick = Repeater()
+    private val pad = Repeater(KeyRepeat(), stick = false)
+    private val stick = Repeater(KeyRepeat.stick(), stick = true)
     private var scrollSpeed = 0f
     private val scroller = object : Runnable {
         override fun run() {
@@ -41,8 +42,7 @@ class ControllerInput(
         }
     }
 
-    private inner class Repeater : Runnable {
-        private val repeat = KeyRepeat()
+    private inner class Repeater(private val repeat: KeyRepeat, private val stick: Boolean) : Runnable {
         private var move: Move? = null
 
         fun hold(next: Move?) {
@@ -56,7 +56,7 @@ class ControllerInput(
         override fun run() {
             val current = move ?: return
             val now = SystemClock.uptimeMillis()
-            if (repeat.press(current.ordinal, now)) controller.move(current)
+            if (repeat.press(current.ordinal, now)) controller.move(current, stick)
             handler.postDelayed(this, (repeat.nextRepeatAt - now).coerceAtLeast(1))
         }
     }
@@ -65,10 +65,10 @@ class ControllerInput(
     fun onKey(event: KeyEvent): Boolean {
         val down = event.action == KeyEvent.ACTION_DOWN
         val move = when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_LEFT -> Move.WORD_PREVIOUS
-            KeyEvent.KEYCODE_DPAD_RIGHT -> Move.WORD_NEXT
-            KeyEvent.KEYCODE_DPAD_UP -> Move.LINE_UP
-            KeyEvent.KEYCODE_DPAD_DOWN -> Move.LINE_DOWN
+            KeyEvent.KEYCODE_DPAD_LEFT -> Move.LEFT
+            KeyEvent.KEYCODE_DPAD_RIGHT -> Move.RIGHT
+            KeyEvent.KEYCODE_DPAD_UP -> Move.UP
+            KeyEvent.KEYCODE_DPAD_DOWN -> Move.DOWN
             else -> null
         }
         if (move != null) {
@@ -96,10 +96,10 @@ class ControllerInput(
         val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
         pad.hold(
             when {
-                hatX <= -0.5f -> Move.WORD_PREVIOUS
-                hatX >= 0.5f -> Move.WORD_NEXT
-                hatY <= -0.5f -> Move.LINE_UP
-                hatY >= 0.5f -> Move.LINE_DOWN
+                hatX <= -0.5f -> Move.LEFT
+                hatX >= 0.5f -> Move.RIGHT
+                hatY <= -0.5f -> Move.UP
+                hatY >= 0.5f -> Move.DOWN
                 else -> null
             },
         )
@@ -107,10 +107,11 @@ class ControllerInput(
         val y = event.getAxisValue(MotionEvent.AXIS_Y)
         stick.hold(
             when {
-                x <= -STICK && -x >= kotlin.math.abs(y) -> Move.CHARACTER_PREVIOUS
-                x >= STICK && x >= kotlin.math.abs(y) -> Move.CHARACTER_NEXT
-                y <= -STICK -> Move.LINE_UP
-                y >= STICK -> Move.LINE_DOWN
+                // A diagonal counts as the way pushed farther, a tie as left or right.
+                x <= -STICK && -x >= kotlin.math.abs(y) -> Move.LEFT
+                x >= STICK && x >= kotlin.math.abs(y) -> Move.RIGHT
+                y <= -STICK -> Move.UP
+                y >= STICK -> Move.DOWN
                 else -> null
             },
         )

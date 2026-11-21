@@ -145,7 +145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsState())
 
     /** Lookup in a stored line, for a card made after the session. */
-    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) }, matchLength = { app.dictionaries.matchLength(it) })
+    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) }, selection = { app.settings.prefs.value.picking })
 
     private val _styles = MutableStateFlow<List<EntryHtml.Style>>(emptyList())
     val styles: StateFlow<List<EntryHtml.Style>> = _styles
@@ -299,6 +299,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openLine(line: GameLine) {
         opened = line
         _translation.value = TranslationState(line.translation)
+        _explanation.value = TranslationState(app.explainer.kept(line.id))
         lineLookup.setLines(listOf(LookupLine(line.lineText, line.id, picture(line), line.gameName)))
     }
 
@@ -324,6 +325,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: OpenRouter.Failure) {
                 TranslationState(_translation.value.text, error = e.message)
             }
+        }
+    }
+
+    /** The open line's explanation: kept since the app started, being asked for, or what went wrong. */
+    private val _explanation = MutableStateFlow(TranslationState())
+    val explanation: StateFlow<TranslationState> = _explanation
+
+    fun explainLine() {
+        val line = opened ?: return
+        if (_explanation.value.busy) return
+        _explanation.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch {
+            val answer = try {
+                TranslationState(app.explainer.explain(line))
+            } catch (e: OpenRouter.Failure) {
+                TranslationState(_explanation.value.text, error = e.message)
+            }
+            // Another line may have been opened while this one was asked about.
+            if (opened?.id == line.id) _explanation.value = answer
         }
     }
 

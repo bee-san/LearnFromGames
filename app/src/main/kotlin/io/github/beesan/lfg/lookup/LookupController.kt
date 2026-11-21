@@ -7,7 +7,8 @@ import io.github.beesan.lfg.anki.CardContent
 import io.github.beesan.lfg.anki.CardMaker
 import io.github.beesan.lfg.anki.CardResult
 import io.github.beesan.lfg.core.CursorPos
-import io.github.beesan.lfg.core.Segmenter
+import io.github.beesan.lfg.core.Selectable
+import io.github.beesan.lfg.core.Selection
 import io.github.beesan.lfg.core.TextCursor
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.data.LineStore
@@ -46,8 +47,15 @@ data class LookupState(
     val lines: List<LookupLine> = emptyList(),
     /** -1 when nothing is selected. */
     val line: Int = -1,
+    /** The word looked up: where the lookup started, and where its match ends. A card marks this in its sentence. */
     val spanStart: Int = 0,
     val spanEnd: Int = 0,
+    /**
+     * Where the mark drawn from [spanStart] ends: the match in Whole word
+     * selection, the one character in Character selection, and the one
+     * character while there is no entry.
+     */
+    val markEnd: Int = 0,
     val entries: List<Entry> = emptyList(),
     /** The entry the controller is on: what A adds and Y says. */
     val entryIndex: Int = 0,
@@ -63,7 +71,7 @@ data class LookupState(
     val selectedLine: LookupLine? get() = lines.getOrNull(line)
 }
 
-enum class Move { WORD_NEXT, WORD_PREVIOUS, LINE_UP, LINE_DOWN, CHARACTER_NEXT, CHARACTER_PREVIOUS }
+enum class Move { LEFT, RIGHT, UP, DOWN }
 
 /**
  * Lookup from a character of a line, by touch or by controller, and the card
@@ -85,8 +93,8 @@ class LookupController(
      * card needs the line it quotes.
      */
     private val prepare: suspend (LookupLine) -> LookupLine = { it },
-    /** How many characters the word at the start of a text covers, for the controller's word steps. */
-    private val matchLength: suspend (String) -> Int = { lookup(it).firstOrNull()?.matched?.length ?: 0 },
+    /** Whole word or Character, and whether only Japanese characters can be picked: Settings › Controls. */
+    private val selection: () -> Selection = { Selection() },
 ) {
     private val _state = MutableStateFlow(LookupState())
     val state: StateFlow<LookupState> = _state
@@ -97,34 +105,78 @@ class LookupController(
     private var selecting: Job? = null
     private var resting: Job? = null
 
+    /**
+     * A line read earlier that is being looked into beside the ones on screen
+     * ([lookIn]). It is the last of the state's lines and has no place on
+     * screen; the lines on screen keep theirs, and their tap strips.
+     */
+    private var away: LookupLine? = null
+
+    private fun onScreen(state: LookupState) = if (away != null) state.lines.dropLast(1) else state.lines
+
     /** New text on screen. The selection belongs to the old text, so it goes. */
     fun setLines(lines: List<LookupLine>) {
-        if (lines.map { it.text } == _state.value.lines.map { it.text } && lines.map { it.lineId } == _state.value.lines.map { it.lineId }) {
+        val shown = onScreen(_state.value)
+        if (lines.map { it.text } == shown.map { it.text } && lines.map { it.lineId } == shown.map { it.lineId }) {
             // The same lines read again (their boxes may have shifted by a pixel): keep the selection.
-            _state.update { it.copy(lines = lines) }
+            _state.update { it.copy(lines = lines + listOfNotNull(away)) }
             return
         }
         val controller = _state.value.controllerMode
         selecting?.cancel()
+        resting?.cancel()
         cursor = null
+        away = null
         _state.value = LookupState(lines = lines, controllerMode = controller)
         if (controller) enterControllerMode()
     }
 
-    /** Looks up the longest word starting at [index] of line [line]. */
+    /**
+     * Looks a word up in [line], which was read earlier, from [index]. The
+     * lines on screen stay as they are; if [line] is one of them, the word is
+     * picked there.
+     */
+    fun lookIn(line: LookupLine, index: Int) {
+        val state = _state.value
+        val shown = onScreen(state)
+        val here = shown.indexOfFirst { it.lineId != null && it.lineId == line.lineId }
+        if (here >= 0) {
+            select(here, index)
+            return
+        }
+        if (away?.lineId != line.lineId || away?.text != line.text) {
+            selecting?.cancel()
+            resting?.cancel()
+            away = line
+            _state.value = LookupState(lines = shown + line, controllerMode = state.controllerMode)
+            if (state.controllerMode) cursor = cursorOver(_state.value.lines)
+        }
+        select(shown.size, index)
+    }
+
+    /** Looks up the longest word starting at [index] of line [line]: a tap, or the cursor put there. */
     fun select(line: Int, index: Int) {
+        val target = _state.value.lines.getOrNull(line) ?: return
+        if (!Selectable.at(target.text, index, selection().japaneseOnly)) return
+        cursor?.forget()
+        resting?.cancel()
+        lookUp(line, index)
+    }
+
+    private fun lookUp(line: Int, index: Int) {
         val target = _state.value.lines.getOrNull(line) ?: return
         if (index !in target.text.indices) return
         selecting?.cancel()
         selecting = scope.launch {
             val entries = decorate(io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index)) })
             val first = entries.firstOrNull()
-            val length = first?.matched?.length ?: Character.charCount(target.text.codePointAt(index))
-            val end = (index + length).coerceAtMost(target.text.length)
+            val character = (index + Character.charCount(target.text.codePointAt(index))).coerceAtMost(target.text.length)
+            val end = if (first == null) character else (index + first.matched.length).coerceAtMost(target.text.length)
             _state.update {
                 if (it.lines.getOrNull(line)?.text != target.text) return@update it
                 it.copy(
-                    line = line, spanStart = index, spanEnd = end, entries = entries, entryIndex = 0,
+                    line = line, spanStart = index, spanEnd = end, markEnd = if (selection().wholeWord) end else character,
+                    entries = entries, entryIndex = 0,
                     buttons = entries.map { e -> done[target.lineId to e.expression] ?: CardButton.ADD },
                     message = if (first == null) "No entry" else null,
                 )
@@ -241,28 +293,34 @@ class LookupController(
     fun clear() {
         selecting?.cancel()
         resting?.cancel()
-        _state.update { it.copy(line = -1, spanStart = 0, spanEnd = 0, entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList()) }
+        _state.update {
+            // The earlier line looked into goes with its word: the lines are the screen's again.
+            it.copy(
+                lines = onScreen(it), line = -1, spanStart = 0, spanEnd = 0, markEnd = 0,
+                entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList(),
+            )
+        }
+        if (away != null) {
+            away = null
+            if (cursor != null) cursor = cursorOver(_state.value.lines)
+        }
     }
 
+    private fun cursorOver(lines: List<LookupLine>) = TextCursor(
+        lines.map { it.geometry ?: TextLine(it.text, io.github.beesan.lfg.core.Box(0, 0, 0, 0), emptyList()) },
+        selection().japaneseOnly,
+    )
+
     /**
-     * The shortcut was pressed. The cursor starts on the first word with that
-     * word already looked up.
+     * The shortcut was pressed. The cursor starts on the first character of
+     * the dialogue, with the word there already looked up.
      */
     fun enterControllerMode() {
         _state.update { it.copy(controllerMode = true) }
-        scope.launch {
-            val lines = _state.value.lines
-            val geometry = lines.map { it.geometry ?: TextLine(it.text, io.github.beesan.lfg.core.Box(0, 0, 0, 0), emptyList()) }
-            val starts = lines.map { line ->
-                io.github.beesan.lfg.core.Perf.measure("segment") { Segmenter.wordStarts(line.text) { rest -> matchLength(rest) } }
-            }
-            if (_state.value.lines !== lines || !_state.value.controllerMode) return@launch
-            val built = TextCursor(geometry, starts)
-            cursor = built
-            val current = _state.value
-            // A word already chosen by touch stays chosen.
-            if (!current.selected) built.first()?.let { select(it.line, it.index) }
-        }
+        val built = cursorOver(_state.value.lines)
+        cursor = built
+        // A word already chosen by touch stays chosen.
+        if (!_state.value.selected) built.first()?.let { lookUp(it.line, it.index) }
     }
 
     fun exitControllerMode() {
@@ -271,39 +329,47 @@ class LookupController(
         clear()
     }
 
-    fun move(move: Move) {
+    /**
+     * A step of the cursor, by Rubi for Vita's rules ([TextCursor]). The
+     * D-pad's is looked up at once. The [stick]'s goes a character at a time
+     * and is looked up once the cursor has rested [STICK_REST_MS], so a held
+     * stick crosses a line without a lookup at each character.
+     */
+    fun move(move: Move, stick: Boolean = false) {
         val cursor = cursor ?: return
         val state = _state.value
         if (!state.selected) {
-            cursor.first()?.let { select(it.line, it.index) }
+            cursor.first()?.let { lookUp(it.line, it.index) }
             return
         }
         val from = CursorPos(state.line, state.spanStart)
+        // Right goes past the word shown: in Whole word selection, once that word's lookup is in.
+        val matchedEnd = if (selection().wholeWord && state.entries.isNotEmpty()) state.spanEnd else 0
         val to = when (move) {
-            Move.WORD_NEXT -> cursor.nextWord(from)
-            Move.WORD_PREVIOUS -> cursor.previousWord(from)
-            Move.LINE_UP -> cursor.lineUp(from)
-            Move.LINE_DOWN -> cursor.lineDown(from)
-            Move.CHARACTER_NEXT -> cursor.nextCharacter(from)
-            Move.CHARACTER_PREVIOUS -> cursor.previousCharacter(from)
+            Move.RIGHT -> if (stick) cursor.stickRight(from) else cursor.right(from, matchedEnd)
+            Move.LEFT -> if (stick) cursor.stickLeft(from) else cursor.left(from)
+            Move.UP -> cursor.up(from)
+            Move.DOWN -> cursor.down(from)
         }
         if (to == from) return
         resting?.cancel()
-        if (move == Move.CHARACTER_NEXT || move == Move.CHARACTER_PREVIOUS) {
-            // Show the cursor at once; look the word up when the stick has rested.
-            val text = state.lines[to.line].text
-            _state.update {
-                it.copy(
-                    line = to.line, spanStart = to.index, spanEnd = to.index + Character.charCount(text.codePointAt(to.index)),
-                    entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList(),
-                )
-            }
-            resting = scope.launch {
-                delay(STICK_REST_MS)
-                select(to.line, to.index)
-            }
-        } else {
-            select(to.line, to.index)
+        if (!stick) {
+            lookUp(to.line, to.index)
+            return
+        }
+        // Show the cursor at once; look the word up when the stick has rested.
+        val text = state.lines[to.line].text
+        val character = to.index + Character.charCount(text.codePointAt(to.index))
+        selecting?.cancel()
+        _state.update {
+            it.copy(
+                line = to.line, spanStart = to.index, spanEnd = character, markEnd = character,
+                entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList(),
+            )
+        }
+        resting = scope.launch {
+            delay(STICK_REST_MS)
+            lookUp(to.line, to.index)
         }
     }
 

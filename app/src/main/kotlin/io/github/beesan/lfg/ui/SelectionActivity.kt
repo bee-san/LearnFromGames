@@ -68,11 +68,12 @@ class SelectionActivity : ComponentActivity() {
         controller = LookupController(
             lifecycleScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) },
             prepare = ::saveLine,
-            matchLength = { app.dictionaries.matchLength(it) },
+            selection = { app.settings.prefs.value.picking },
         )
         val title = titleOf(source)
         controller.setLines(listOf(LookupLine(text, null, null, title, fromApp = true, source = LineStore.SOURCE_SELECTION)))
-        controller.select(0, 0)
+        // The first character that can be picked: a selection may open with a bracket or a space.
+        controller.select(0, text.indices.firstOrNull { io.github.beesan.lfg.core.Selectable.at(text, it, app.settings.prefs.value.japaneseOnly) } ?: 0)
         lifecycleScope.launch { styles.value = withContext(Dispatchers.IO) { app.dictionaries.styles() } }
 
         setContent {
@@ -120,7 +121,7 @@ class SelectionActivity : ComponentActivity() {
                 while (i < text.length) {
                     val index = i
                     val width = Character.charCount(text.codePointAt(i))
-                    val inWord = state.selected && index >= state.spanStart && index < state.spanEnd
+                    val inWord = state.selected && index >= state.spanStart && index < state.markEnd
                     Text(
                         text.substring(index, index + width),
                         color = if (inWord) Lfg.Accent else Lfg.Text,

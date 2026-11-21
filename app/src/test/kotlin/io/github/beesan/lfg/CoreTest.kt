@@ -28,6 +28,10 @@ class CoreTest {
         val page = EntryHtml.page(null, emptyList(), "No entry", palette = Palette.of(Palette.PINK, Palette.THEME_LIGHT, systemDark = true))
         assertTrue(page.contains(":root{color-scheme:light;--bg:#f8f2f5;"))
         assertFalse(EntryHtml.BASE_CSS.contains("#22232c"))
+        // The popup over a game is see-through: its page is clear and its cards let some of the ground through.
+        assertTrue(page.contains(";--page:#f8f2f5;--card:#ffffff}"))
+        val glass = EntryHtml.colours(Palette.of(Palette.PINK, Palette.THEME_LIGHT, systemDark = true), glass = true)
+        assertTrue(glass.contains(";--page:transparent;--card:rgba(255,255,255,.62)}"))
     }
 
     /** Four 20 px characters with 4 px gaps, starting at x=100. */
