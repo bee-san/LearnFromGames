@@ -431,6 +431,9 @@ fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: (
     Card("Lines on the other screen", "On a two-screen handheld, the screen the game is not on lists the game's lines as they are read.") {
         OnOff(prefs.secondScreenPanel) { v -> onChange { it.copy(secondScreenPanel = v) } }
     }
+    Card("LFG on the second screen", "On a two-screen handheld, LFG's own pages always open on the second screen, so the first is left to the game.") {
+        OnOff(prefs.appOnSecondScreen) { v -> onChange { it.copy(appOnSecondScreen = v) } }
+    }
     Card("Dictionary entry", "On a two-screen handheld: a popup beside the word over the game, or on the lines' screen. A word picked in the lines always shows there.") {
         Choice(listOf(Prefs.ENTRY_OVER_GAME to "Over the game", Prefs.ENTRY_OTHER_SCREEN to "Other screen"), prefs.entryPlace) { v -> onChange { it.copy(entryPlace = v) } }
     }

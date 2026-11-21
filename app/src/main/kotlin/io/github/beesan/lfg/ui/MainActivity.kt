@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) toSecondScreen()
         if (savedInstanceState == null) take(intent)
         setContent {
             val setup by model.setup.collectAsStateWithLifecycle()
@@ -348,7 +349,35 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
+        toSecondScreen()
         take(intent)
+    }
+
+    /**
+     * On a two-screen handheld the app's pages belong on the second screen:
+     * the first is the game's. Started on the first (a launcher there, a
+     * widget), the app starts itself again on the other and this one goes.
+     */
+    private fun toSecondScreen(): Boolean {
+        // Asked once for each start: if the other screen sends it back here, here it stays.
+        if (intent?.getBooleanExtra(EXTRA_MOVED, false) == true) return false
+        if (!(application as io.github.beesan.lfg.App).settings.prefs.value.appOnSecondScreen) return false
+        val here = display?.displayId ?: return false
+        if (here != android.view.Display.DEFAULT_DISPLAY) return false
+        val other = getSystemService(android.hardware.display.DisplayManager::class.java).displays.firstOrNull {
+            it.displayId != here && it.state != android.view.Display.STATE_OFF && it.flags and android.view.Display.FLAG_PRIVATE == 0
+        } ?: return false
+        val again = Intent(intent).setClass(this, MainActivity::class.java).putExtra(EXTRA_MOVED, true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+        return try {
+            // The one task is carried to the other screen, with this page in it.
+            startActivity(again, android.app.ActivityOptions.makeBasic().setLaunchDisplayId(other.displayId).toBundle())
+            false
+        } catch (_: Exception) {
+            // The other screen will not take it: the page stays where it is.
+            false
+        }
     }
 
     /** The note page was opened from over a game: saving or leaving it goes back to the game's lines. */
@@ -415,5 +444,6 @@ class MainActivity : ComponentActivity() {
         const val ACTION_NOTE = "io.github.beesan.lfg.action.NOTE"
         const val EXTRA_LINE = "line"
         const val EXTRA_AT = "at"
+        private const val EXTRA_MOVED = "moved"
     }
 }

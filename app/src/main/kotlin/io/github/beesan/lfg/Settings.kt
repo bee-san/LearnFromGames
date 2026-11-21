@@ -19,6 +19,8 @@ data class Prefs(
     val wifiOnly: Boolean = false,
     /** On a two-screen handheld, the screen the game is not on shows the game's lines as they are read. */
     val secondScreenPanel: Boolean = true,
+    /** On a two-screen handheld, the app's own pages open on the second screen, wherever they were started from. */
+    val appOnSecondScreen: Boolean = true,
     /**
      * Where a looked-up word's entry shows on a two-screen handheld: [ENTRY_OVER_GAME], a
      * popup beside the word, or [ENTRY_OTHER_SCREEN], on the lines' screen. One screen always has the popup.
@@ -142,6 +144,7 @@ class Settings(context: Context) {
             keepScreensDays = store.getInt("keepScreensDays", d.keepScreensDays),
             wifiOnly = store.getBoolean("wifiOnly", d.wifiOnly),
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
+            appOnSecondScreen = store.getBoolean("appOnSecondScreen", d.appOnSecondScreen),
             entryPlace = store.getString("entryPlace", d.entryPlace) ?: d.entryPlace,
             popupSeeThrough = store.getInt("popupSeeThrough", d.popupSeeThrough),
             selection = store.getString("selection", d.selection) ?: d.selection,
@@ -188,6 +191,7 @@ class Settings(context: Context) {
             .putInt("keepScreensDays", next.keepScreensDays)
             .putBoolean("wifiOnly", next.wifiOnly)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)
+            .putBoolean("appOnSecondScreen", next.appOnSecondScreen)
             .putString("entryPlace", next.entryPlace)
             .putInt("popupSeeThrough", next.popupSeeThrough)
             .putString("selection", next.selection)
