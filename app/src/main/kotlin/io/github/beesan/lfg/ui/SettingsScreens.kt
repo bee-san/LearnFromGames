@@ -433,12 +433,6 @@ fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: (
     ) {
         Choice(listOf("pad" to "D-pad by word", "stick" to "Stick by word"), if (prefs.stickWords) "stick" else "pad") { v -> onChange { it.copy(stickWords = v == "stick") } }
     }
-    Card(
-        "Cover the game during lookup",
-        "While lookup is open, no tap or button can reach the game, so a slip does not move the story on. A game that pauses when something covers it pauses.",
-    ) {
-        OnOff(prefs.coverGame) { on -> onChange { it.copy(coverGame = on) } }
-    }
     Card("Add card button", "Which face button adds the card; the other one closes. As Android names them.") {
         Choice(listOf("a" to "A adds, B closes", "b" to "B adds, A closes"), if (prefs.swapConfirm) "b" else "a") { v -> onChange { it.copy(swapConfirm = v == "b") } }
     }
