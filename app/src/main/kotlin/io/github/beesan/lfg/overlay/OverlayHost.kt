@@ -927,6 +927,8 @@ class OverlayHost(
             EntryLink.CARD -> controller.addCard(index)
             EntryLink.AUDIO -> controller.playAudio(index)
             EntryLink.NOTE -> startNote(index)
+            EntryLink.VN_YES -> controller.answerVn(true)
+            EntryLink.VN_NO -> controller.answerVn(false)
         }
     }
 
@@ -976,7 +978,7 @@ class OverlayHost(
     }
 
     private fun showEntries(view: EntryWebView, state: LookupState) =
-        view.showList(state.entries, styles(), state.buttons.map { it.htmlState() }, state.entryIndex, state.message, Ink.palette)
+        view.showList(state.entries, styles(), state.buttons.map { it.htmlState() }, state.entryIndex, state.message, Ink.palette, askVn = state.vnQuestion?.title)
 
     /** A row of the lines' screen: a kept line, text on screen that is not kept, or a note. */
     private class Row(
@@ -1225,7 +1227,7 @@ class OverlayHost(
             touched = row.key
             pickedOnPanel = true
             if (row.onScreen >= 0) controller.select(row.onScreen, index)
-            else row.saved?.let { controller.lookIn(LookupLine(it.lineText, it.id, picture(it), it.gameName), index) }
+            else row.saved?.let { controller.lookIn(LookupLine(it.lineText, it.id, picture(it), it.gameName, gameId = it.gameId), index) }
             refresh()
         }
 
@@ -1342,7 +1344,7 @@ class OverlayHost(
         }
     }
 
-    private fun lookupLine(line: GameLine) = LookupLine(line.lineText, line.id, picture(line), line.gameName)
+    private fun lookupLine(line: GameLine) = LookupLine(line.lineText, line.id, picture(line), line.gameName, gameId = line.gameId)
 
     /** The screen's picture is cleared after a while; the line's own picture stays and stands in for it. */
     private fun picture(line: GameLine): String? =

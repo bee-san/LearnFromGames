@@ -3,6 +3,7 @@ package io.github.beesan.lfg.ocr
 
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.CharBox
+import io.github.beesan.lfg.core.GlyphBoxes
 import io.github.beesan.lfg.core.TextLine
 import java.io.File
 import java.io.InputStream
@@ -82,7 +83,7 @@ class ScreenAi private constructor() {
             val trimmed = content.trimEnd()
             val vertical = direction == 3L
             val (fixed, boxes) = ellipses(trimmed, chars.filter { it.start < trimmed.length }, vertical, bounds)
-            return TextLine(fixed, bounds, boxes, vertical = vertical)
+            return TextLine(fixed, bounds, GlyphBoxes.even(fixed, boxes, vertical), vertical = vertical)
         }
 
         private const val DOTS = "…・.‥･·⋯"

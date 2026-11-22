@@ -135,6 +135,13 @@ interface GameDao {
     @Query("SELECT id FROM games WHERE app = 1")
     fun appIds(): Flow<List<String>>
 
+    /** Every row linked to a visual novel, or offered one: what character names are built for. */
+    @Query("SELECT * FROM games WHERE vndb NOT IN ('', 'none') OR vndb_suggested != ''")
+    suspend fun withVn(): List<Game>
+
+    @Query("UPDATE games SET vndb = :vndb, vndb_how = :how, vndb_suggested = :suggested, vndb_asked = :asked WHERE id = :id")
+    suspend fun setVn(id: String, vndb: String, how: String, suggested: String, asked: Boolean)
+
     @Query("UPDATE game_lines SET game_name = :title WHERE game_id = :gameId")
     suspend fun renameLines(gameId: String, title: String)
 }
@@ -211,14 +218,15 @@ interface RecapDao {
 /** Schema changes add a numbered migration; nothing here is ever rebuilt destructively. */
 @Database(
     entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class],
-    version = 5,
+    version = 6,
     exportSchema = true,
     // 2: a crop and a translation for each line, notes, and recaps. Room writes it from the exported schemas.
     // 3: a row for each game named inside an emulator.
     // 4: whether a row is an ordinary app, read on demand.
     // 5: whether a line is interface text (a menu label, a name plate), and an index to find a line's text in a game.
+    // 6: the visual novel on VNDB a game is linked to, for its character names.
     autoMigrations = [
-        AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5),
+        AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6),
     ],
 )
 abstract class LfgDatabase : RoomDatabase() {

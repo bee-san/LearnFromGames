@@ -27,6 +27,11 @@ data class InstalledDictionary(
     val pitches: Long = 0,
     val kanji: Long = 0,
     val installedAt: Long,
+    /**
+     * A visual novel's character names, by its VNDB ID (`v17`): searched only for
+     * games linked to it, and first there. Null for an ordinary dictionary.
+     */
+    val vndb: String? = null,
 ) {
     /** What the dictionary holds, for its row: `Japanese–English terms`-style detail is not stored, so counts are shown. */
     val summary: String
@@ -61,7 +66,12 @@ class DictionaryRepository(private val context: Context) {
     private val native = Dispatchers.IO.limitedParallelism(1)
     private val installing = Mutex()
     private val fetchingDefaults = Mutex()
-    private var session = 0L
+    /**
+     * Open hoshidicts sessions: "" holds the ordinary dictionaries, a VNDB ID
+     * that visual novel's names before them. At most [MAX_SESSIONS], as the
+     * Thor can show one game on a screen and another game's lines on the other.
+     */
+    private val sessions = LinkedHashMap<String, Long>(4, 0.75f, true)
 
     private val _state = MutableStateFlow<DictState>(installed().let { if (it.isEmpty()) DictState.Missing else DictState.Ready(it) })
     val state: StateFlow<DictState> = _state
@@ -82,10 +92,13 @@ class DictionaryRepository(private val context: Context) {
         }
     }?.filter { File(it.path).isDirectory } ?: emptyList()
 
-    /** Entries for the longest words starting at the first character of [text], best first. */
-    suspend fun lookup(text: String, maxResults: Int = 8): List<Entry> = withContext(native) {
+    /**
+     * Entries for the longest words starting at the first character of [text], best first.
+     * [vndb] is the visual novel the text is from, whose character names lead; null for none.
+     */
+    suspend fun lookup(text: String, vndb: String? = null, maxResults: Int = 8): List<Entry> = withContext(native) {
         if (text.isEmpty()) return@withContext emptyList()
-        val handle = openSession()
+        val handle = openSession(vndb)
         if (handle == 0L) return@withContext emptyList()
         // The engine scans at most this many characters ahead; no word is longer.
         val scan = text.take(SCAN_LENGTH)
@@ -94,31 +107,47 @@ class DictionaryRepository(private val context: Context) {
     }
 
     /** How many characters of [text] its best match covers; 0 when none. For stepping word by word. */
-    suspend fun matchLength(text: String): Int = withContext(native) {
+    suspend fun matchLength(text: String, vndb: String? = null): Int = withContext(native) {
         if (text.isEmpty()) return@withContext 0
-        val handle = openSession()
+        val handle = openSession(vndb)
         if (handle == 0L) 0 else io.github.beesan.lfg.core.Perf.measure("match") { Hoshidicts.matchLength(handle, text.take(SCAN_LENGTH), SCAN_LENGTH) }
     }
 
-    private fun openSession(): Long {
-        if (session != 0L) return session
-        val dictionaries = installed()
-        if (dictionaries.isEmpty()) return 0L
+    /**
+     * The session for [vndb]'s names and the ordinary dictionaries, or the
+     * ordinary ones alone when [vndb] is null or its names are not installed.
+     */
+    private fun openSession(vndb: String? = null): Long {
+        val dictionaries = listed ?: installed().also { listed = it }
+        val names = vndb?.let { id -> dictionaries.firstOrNull { it.vndb == id } }
+        val key = names?.vndb ?: ""
+        sessions[key]?.let { return it }
+        val chosen = listOfNotNull(names) + dictionaries.filter { it.vndb == null }
+        if (chosen.isEmpty()) return 0L
         val handle = Hoshidicts.open()
         if (handle == 0L) return 0L
-        for (d in dictionaries) {
+        for (d in chosen) {
             if (d.terms > 0) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_TERM)
             if (d.frequencies > 0) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_FREQUENCY)
             if (d.pitches > 0) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_PITCH)
             if (d.kanji > 0) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_KANJI)
         }
-        session = handle
+        while (sessions.size >= MAX_SESSIONS) {
+            val eldest = sessions.entries.first()
+            Hoshidicts.close(eldest.value)
+            sessions.remove(eldest.key)
+        }
+        sessions[key] = handle
         return handle
     }
 
+    /** [installed] as the sessions last saw it, so a lookup does not read the list each time. */
+    private var listed: List<InstalledDictionary>? = null
+
     private suspend fun closeSession() = withContext(native) {
-        if (session != 0L) Hoshidicts.close(session)
-        session = 0L
+        for (handle in sessions.values) Hoshidicts.close(handle)
+        sessions.clear()
+        listed = null
         cachedStyles = null
     }
 
@@ -144,7 +173,8 @@ class DictionaryRepository(private val context: Context) {
 
     /** A picture a dictionary ships, or null. Called from the WebView's own thread, so it blocks. */
     fun mediaBlocking(dictionary: String, path: String): ByteArray? = kotlinx.coroutines.runBlocking(native) {
-        val handle = openSession()
+        // A character's portrait is in its own visual novel's session.
+        val handle = openSession((listed ?: installed().also { listed = it }).firstOrNull { it.title == dictionary }?.vndb)
         if (handle == 0L) null else Hoshidicts.media(handle, dictionary, path).takeIf { it.isNotEmpty() }
     }
 
@@ -152,15 +182,23 @@ class DictionaryRepository(private val context: Context) {
      * Imports a Yomitan zip the user picked. Returns null on success, or what
      * went wrong in words.
      */
-    suspend fun addFromZip(zip: File): String? = installing.withLock {
+    suspend fun addFromZip(zip: File, vndb: String? = null): String? = installing.withLock {
         try {
+            if (vndb != null) {
+                // A rebuild replaces the old one, which may have had another title.
+                val old = installed().filter { it.vndb == vndb }
+                if (old.isNotEmpty()) {
+                    save(installed() - old.toSet())
+                    withContext(Dispatchers.IO) { old.forEach { File(it.path).deleteRecursively() } }
+                }
+            }
             val outcome = importZip(zip)
             if (!outcome.success || outcome.title.isEmpty()) return outcome.error.ifEmpty { "This is not a Yomitan dictionary." }
             if (outcome.terms + outcome.frequencies + outcome.pitches + outcome.kanji == 0L) {
                 File(root, outcome.title).deleteRecursively()
                 return "The dictionary is empty."
             }
-            register(outcome)
+            register(outcome, vndb)
             null
         } catch (e: Exception) {
             e.message ?: "The dictionary could not be imported."
@@ -199,15 +237,20 @@ class DictionaryRepository(private val context: Context) {
         }
     }
 
-    /** Entries show in this order. */
+    /** Entries show in this order. Character dictionaries keep their places: they always lead for their own game. */
     suspend fun move(title: String, up: Boolean) {
         val all = installed().toMutableList()
         val from = all.indexOfFirst { it.title == title }
-        val to = if (up) from - 1 else from + 1
-        if (from < 0 || to !in all.indices) return
+        if (from < 0 || all[from].vndb != null) return
+        var to = if (up) from - 1 else from + 1
+        while (to in all.indices && all[to].vndb != null) to += if (up) -1 else 1
+        if (to !in all.indices) return
         all.add(to, all.removeAt(from))
         save(all)
     }
+
+    /** The character dictionary of a visual novel, if it is installed. */
+    fun names(vndb: String): InstalledDictionary? = installed().firstOrNull { it.vndb == vndb }
 
     suspend fun remove(title: String) {
         val all = installed()
@@ -332,7 +375,7 @@ class DictionaryRepository(private val context: Context) {
         DictJson.decodeFromString<ImportOutcome>(Hoshidicts.import(zip.path, root.path, lowRam = false))
     }
 
-    private suspend fun register(outcome: ImportOutcome) {
+    private suspend fun register(outcome: ImportOutcome, vndb: String? = null) {
         val added = InstalledDictionary(
             title = outcome.title,
             path = File(root, outcome.title).path,
@@ -341,6 +384,7 @@ class DictionaryRepository(private val context: Context) {
             pitches = outcome.pitches,
             kanji = outcome.kanji,
             installedAt = System.currentTimeMillis(),
+            vndb = vndb,
         )
         save(installed().filter { it.title != added.title } + added)
     }
@@ -382,5 +426,6 @@ class DictionaryRepository(private val context: Context) {
         private const val KEY_INSTALLED = "installed"
         private const val KEY_DEFAULTS_PENDING = "defaults_pending"
         private const val SCAN_LENGTH = 16
+        private const val MAX_SESSIONS = 3
     }
 }

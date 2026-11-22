@@ -110,6 +110,12 @@ data class Prefs(
      * list, the stats and the lines file. Turned off, every line is back.
      */
     val interfaceApart: Boolean = true,
+    /** A game is linked to its visual novel on VNDB by itself when the match is certain, for its character names. */
+    val namesAuto: Boolean = true,
+    /** Character names also match with each honorific after them (七瀬さん). */
+    val namesHonorifics: Boolean = true,
+    /** Character cards keep what VNDB marks as spoilers. */
+    val namesSpoilers: Boolean = false,
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
@@ -202,6 +208,9 @@ class Settings(context: Context) {
             readButton = store.getBoolean("readButton", d.readButton),
             appsInReadingTime = store.getBoolean("appsInReadingTime", d.appsInReadingTime),
             interfaceApart = store.getBoolean("interfaceApart", d.interfaceApart),
+            namesAuto = store.getBoolean("namesAuto", d.namesAuto),
+            namesHonorifics = store.getBoolean("namesHonorifics", d.namesHonorifics),
+            namesSpoilers = store.getBoolean("namesSpoilers", d.namesSpoilers),
         )
     }
 
@@ -249,6 +258,9 @@ class Settings(context: Context) {
             .putBoolean("readButton", next.readButton)
             .putBoolean("appsInReadingTime", next.appsInReadingTime)
             .putBoolean("interfaceApart", next.interfaceApart)
+            .putBoolean("namesAuto", next.namesAuto)
+            .putBoolean("namesHonorifics", next.namesHonorifics)
+            .putBoolean("namesSpoilers", next.namesSpoilers)
             .apply()
         secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
         _prefs.value = next

@@ -113,7 +113,7 @@ fun SetupScreen(
             )
             else -> SetupRow(
                 name = name,
-                status = (dictionary as DictState.Ready).dictionaries.joinToString { it.title } + " and text recognition installed",
+                status = (dictionary as DictState.Ready).dictionaries.filter { it.vndb == null }.joinToString { it.title } + " and text recognition installed",
                 done = true,
             )
         }
