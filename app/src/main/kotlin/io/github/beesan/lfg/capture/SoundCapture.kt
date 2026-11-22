@@ -2,6 +2,7 @@
 package io.github.beesan.lfg.capture
 
 import android.annotation.SuppressLint
+import android.app.ActivityOptions
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -57,6 +58,27 @@ object SoundCapture {
         }
     }
 
+    /** Whether Android has been asked by itself since LFG last listened: once is enough, a "no" is not asked again. */
+    @Volatile
+    private var asked = false
+
+    /**
+     * Asks Android to let LFG listen, over the game on screen [displayId],
+     * unless it is listening or has asked already. Called when a game comes to
+     * the front, so nobody has to go to Settings to press Start; after a "no"
+     * the Start there, and on the Lines page, is how to begin.
+     */
+    fun askOnce(context: Context, displayId: Int) {
+        if (_running.value || asked) return
+        asked = true
+        val intent = Intent(context, io.github.beesan.lfg.ui.ListenActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(intent, ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle())
+        } catch (e: Exception) {
+            Log.w("LfgSound", "could not ask to listen", e)
+        }
+    }
+
     fun start(context: Context, resultCode: Int, data: Intent) {
         context.startForegroundService(
             Intent(context, SoundService::class.java).putExtra(SoundService.EXTRA_CODE, resultCode).putExtra(SoundService.EXTRA_DATA, data),
@@ -73,6 +95,8 @@ object SoundCapture {
     internal fun onSamples(samples: ShortArray, count: Int, endMs: Long) = ring.write(samples, count, endMs)
 
     internal fun setRunning(value: Boolean) {
+        // Once it has listened, the next game opened after it stops may ask again.
+        if (value) asked = false
         _running.value = value
     }
 

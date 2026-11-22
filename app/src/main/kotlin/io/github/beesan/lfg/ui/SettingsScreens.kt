@@ -600,11 +600,11 @@ fun GameNamesScreen(
 
 @Composable
 fun MediaScreen(prefs: Prefs, recording: Boolean, onChange: ((Prefs) -> Prefs) -> Unit, onStartRecording: () -> Unit, onBack: () -> Unit) = Page("Sound and pictures", onBack) {
-    Card("Sentence audio", "The voice in the game’s sound between a line and the next, added to the card. Android asks for screen recording each session.") {
+    Card("Sentence audio", "The voice in the game’s sound between a line and the next, added to the card. Android asks to let LFG record when you open a game, once a session.") {
         OnOff(prefs.sentenceAudio) { v -> onChange { it.copy(sentenceAudio = v) } }
     }
     if (prefs.sentenceAudio) {
-        Card("This session", if (recording) "Listening to game sound" else "Not listening yet") {
+        Card("This session", if (recording) "Listening to game sound" else "Not listening yet. Open a game, or start it here.") {
             if (!recording) LfgButton("Start", onStartRecording, primary = true)
         }
     }

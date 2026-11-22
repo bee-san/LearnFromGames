@@ -187,8 +187,9 @@ class MainActivity : ComponentActivity() {
                             lines = lines,
                             shortcut = shortcutLabel(prefs),
                             loaded = linesLoaded,
-                            problem = null,
-                            onProblem = {},
+                            // Sentence audio is on from the start, and Android has to be asked each session before it can listen.
+                            problem = ("Sentence audio is not listening to game sound yet" to "Start").takeIf { prefs.sentenceAudio && !recording },
+                            onProblem = { microphone.launch(android.Manifest.permission.RECORD_AUDIO) },
                             onOpenLine = {
                                 model.openLine(it)
                                 page = Page.LINE
