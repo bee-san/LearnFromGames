@@ -25,7 +25,7 @@ LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSent
 
 - **Reads the game for you.** An accessibility service pictures the screen, notices when new text has stopped moving, and reads it. No screen-recording prompt, no setup per game.
 - **Tap a word on the game.** Each line of text becomes tappable where it is drawn. A wrapped sentence is one sentence, and a word cut by the line break is still one word.
-- **Or never let go of the controller.** L3 + R3 turns the pad into a text cursor: by word, by line, by character. The game receives nothing until you leave.
+- **Or never let go of the controller.** L3 + R3 turns the pad into a text cursor: by word, by line, by character. The game receives nothing until you leave. The shortcut can be one button instead (L3, R3, Select or Start), which is then kept from the game, and the left stick can go word by word where the stick is under your thumb.
 - **Uses the second screen.** On a two-screen handheld the entry opens on the screen the game is not on. On one screen it is a popup.
 - **One press to Anki.** Cards go to AnkiDroid with the sentence, the word marked, the definition and a picture of the game. Kiku, Lapis and Senren note types are found by themselves; without one, the app makes its own.
 - **Sentence audio**: the game's own voice for the line, with the music around it cut away. Android has to ask before LFG may listen, so its question comes up by itself when you open a game: one tap, once a session. Say no and it is not asked again; Start on the Lines page begins it later. A line the game does not speak is read by Android's voice instead.
@@ -55,7 +55,7 @@ Reading and lookup run on the device. The network is used for the first-run down
 | Stage | What works on the emulator |
 | --- | --- |
 | Tap, read, mine | First run from a clean install. Background reading. Tap strips, the second-screen panel, the one-screen popup. Add card with the picture. Lines saved. |
-| Controller | L3 + R3 lookup mode: word, line and character steps, held repeat, entry change, add, close. |
+| Controller | L3 + R3 lookup mode: word, line and character steps, held repeat, entry change, add, close. A one-button shortcut the game never receives. The stick and the D-pad changing places. |
 | Dictionaries and lines | Add, order and remove Yomitan dictionaries; Rubi's .vjdict files can be added too. Full entry rendering with pitch accent and frequency. Word audio from local-audio-yomichan's `android.db`: a play button, Y in a game, and the card's ExpressionAudio field. Cards from a stored line after the session. |
 | Sound, then motion | Sentence audio added to a card when the next line appears, trimmed to the voice by Silero VAD. Android's voice for a card without one. Animated WebP of the line appearing. |
 | Stats | Reading time, characters, speed and streak over 7 days, 30 days, 12 months or all time, against the period before, and a bar for each day or month. Daily goals for hours and characters: today against each, the days that met them, a goal streak, and a goal line on the chart. Two home screen widgets: today against the goals as rings (time, characters and, with a cards-a-day goal, cards; at 4 × 4 the week as small rings too), and the last seven days as bars ([picture](docs/widgets.png)). On [Rubi](https://github.com/bee-san/Rubi_for_vita)'s reading-time rule. |
