@@ -16,6 +16,9 @@ package io.github.beesan.lfg.core
  * - it is short ([SHORT] characters or fewer) and stays: it has stayed on
  *   screen while the text around it changed [STAYS] times, as a HUD label or
  *   a speaker's name plate does;
+ * - it is short and is scenery: set in type far smaller than the story's
+ *   ([small]), as the words on a book or a sign in the picture are, or one
+ *   character alone ([lone]), as an icon read as a character is;
  * - it is short and comes back: it has been read on [OCCASIONS] separate
  *   occasions, each starting [OCCASION_GAP_MS] or more after the last began,
  *   as a menu opened now and then is.
@@ -67,6 +70,14 @@ class InterfaceText {
         const val OCCASION_GAP_MS = 10 * 60 * 1000L
 
         fun short(text: String): Boolean = text.codePointCount(0, text.length) <= SHORT
+
+        /**
+         * Whether type of size [type] is small beside the story's, of size
+         * [story]: under six tenths of it, as a book's spine, a shop's sign
+         * or a poster in the picture is. A name plate and a choice are set
+         * nearer the story's own size.
+         */
+        fun small(type: Int, story: Int): Boolean = type > 0 && story > 0 && type * 10 < story * 6
 
         /**
          * One kana, kanji, letter or digit with nothing beside it: an icon or

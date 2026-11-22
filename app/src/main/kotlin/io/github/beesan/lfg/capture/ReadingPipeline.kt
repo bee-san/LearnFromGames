@@ -2,6 +2,7 @@
 package io.github.beesan.lfg.capture
 
 import android.graphics.Bitmap
+import android.util.Log
 import io.github.beesan.lfg.core.Blocks
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.Held
@@ -78,6 +79,12 @@ class ReadingPipeline(
 
         /** The interface text kept in this run, by its text: a menu opened again adds no rows. */
         val menus = HashMap<String, GameLine>()
+
+        /** The size of the type of the last few long lines kept: the story's, which scenery is small beside. */
+        val types = ArrayDeque<Int>()
+
+        /** The story's type size, once a few of its lines have been seen; 0 before. */
+        fun storyType(): Int = if (types.size < STORY_LINES) 0 else types.sorted()[types.size / 2]
     }
 
     /** By game: going to another app and back does not make the line on screen a new one. */
@@ -254,6 +261,9 @@ class ReadingPipeline(
                 } ?: run {
                     val isInterface = telling && (
                         (part as? Part.New)?.interfaceText == true || InterfaceText.lone(line.text) || (alone && line.text in found) ||
+                            // Words in the picture: short, and set far smaller than the story is.
+                            (alone && !long(line) && InterfaceText.small(line.typeSize, memory.storyType()))
+                                .also { if (it) Log.i(TAG, "scenery: type of ${line.typeSize} px beside the story's ${memory.storyType()}") } ||
                             (alone && InterfaceText.short(line.text) && InterfaceText.comesBack(line.text, store.savedTimes(game, line.text), nowMs))
                                 .also { if (it) newly += line.text }
                         )
@@ -268,6 +278,10 @@ class ReadingPipeline(
                         } else {
                             recent.addFirst(it)
                             while (recent.size > LineSorter.RECENT) recent.removeLast()
+                            if (long(line) && line.typeSize > 0) {
+                                memory.types.addLast(line.typeSize)
+                                while (memory.types.size > TYPE_LINES) memory.types.removeFirst()
+                            }
                         }
                     }
                 }
@@ -363,6 +377,15 @@ class ReadingPipeline(
         return file.path
     }
 }
+
+private const val TAG = "LfgLines"
+
+/** Whether a line is long enough to be told from a label by its length alone. */
+private fun long(line: TextLine) = line.text.codePointCount(0, line.text.length) >= LineSorter.LONG
+
+/** How many long lines must have been kept before the story's type size is known, and how many it is taken from. */
+private const val STORY_LINES = 3
+private const val TYPE_LINES = 9
 
 /** Pixels kept around a line's box when it is cut out, so no stroke at its edge is lost. */
 private const val CROP_PAD = 4
