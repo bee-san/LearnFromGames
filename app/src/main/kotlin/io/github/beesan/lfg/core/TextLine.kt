@@ -112,6 +112,17 @@ data class TextLine(
         )
     }
 
+    /**
+     * The size of its type in pixels: the middle one of its letters' larger
+     * sides. 0 when no letter of it has a place.
+     */
+    val typeSize: Int
+        get() {
+            val sizes = chars.filter { it.start < text.length && Character.isLetterOrDigit(text.codePointAt(it.start)) }
+                .map { maxOf(it.box.width, it.box.height) }.sorted()
+            return if (sizes.isEmpty()) 0 else sizes[sizes.size / 2]
+        }
+
     /** One box around the whole span, whatever rows it is on. */
     fun spanBox(start: Int, end: Int): Box? = spanBoxes(start, end).reduceOrNull(Box::union)
 }
