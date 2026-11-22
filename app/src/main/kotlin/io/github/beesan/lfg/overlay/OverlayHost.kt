@@ -66,7 +66,7 @@ class OverlayHost(
     private val onRegion: (Box, Boolean) -> Unit,
     /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
     private val onAsk: (lineId: String, what: Ask) -> Unit,
-    /** Taps a point of a screen, as a finger would: only ever our own focus window. */
+    /** Taps a point of a screen, as a finger would, once a window of ours is on top there: only ever our own focus window. */
     private val tapOn: (displayId: Int, x: Int, y: Int) -> Unit,
     private val styles: () -> List<EntryHtml.Style>,
     private val media: (dictionary: String, path: String) -> ByteArray?,
@@ -441,10 +441,11 @@ class OverlayHost(
         bringing = true
         render()
         handler.postDelayed({ tapOn(gameDisplay, FOCUS_PX / 2, FOCUS_PX / 2) }, 60)
+        // Long enough for the tap, which waits until the window is seen to be up.
         handler.postDelayed({
             bringing = false
             render()
-        }, 450)
+        }, 600)
     }
 
     private fun renderPanel(displayId: Int) {

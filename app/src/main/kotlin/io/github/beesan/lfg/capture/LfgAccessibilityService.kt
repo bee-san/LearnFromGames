@@ -114,14 +114,7 @@ class LfgAccessibilityService : AccessibilityService() {
             controller = controller,
             prefs = { app.settings.prefs.value },
             chordActive = { chordFired },
-            tapOn = { display, x, y ->
-                val path = android.graphics.Path().apply { moveTo(x.toFloat(), y.toFloat()) }
-                val tap = android.accessibilityservice.GestureDescription.Builder()
-                    .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 30))
-                    .setDisplayId(display)
-                    .build()
-                if (!dispatchGesture(tap, null, null)) Log.w(TAG, "the tap that brings the controller back was refused")
-            },
+            tapOn = ::tapOwnWindow,
             onToggleStrips = ::toggleStrips,
             onTapElsewhere = { if (asked?.continuous == false) endAsked() },
             // While a reading is up, the button takes it away, a region kept reading included.
@@ -316,6 +309,44 @@ class LfgAccessibilityService : AccessibilityService() {
             if (first !in down && second !in down) chordFired = false
         }
         return false
+    }
+
+    /**
+     * Taps a point of a screen as a finger would, once the window on top
+     * there is one of ours. The tap is for the lookup window in the corner of
+     * the game's screen; sent a moment before that window was up, it reached
+     * the game under it, and a visual novel takes a tap as "next line". If the
+     * window never comes, nothing is tapped.
+     */
+    private fun tapOwnWindow(display: Int, x: Int, y: Int) {
+        scope.launch {
+            repeat(TAP_TRIES) {
+                if (ownWindowAt(display, x, y)) {
+                    val path = android.graphics.Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+                    val tap = android.accessibilityservice.GestureDescription.Builder()
+                        .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 30))
+                        .setDisplayId(display)
+                        .build()
+                    if (!dispatchGesture(tap, null, null)) Log.w(TAG, "the tap that brings the controller back was refused")
+                    return@launch
+                }
+                delay(TAP_RETRY_MS)
+            }
+            Log.w(TAG, "the lookup window was not up to be tapped")
+        }
+    }
+
+    /** Whether a finger at this point of the screen would touch a window of ours, not the app under it. */
+    private fun ownWindowAt(display: Int, x: Int, y: Int): Boolean {
+        val windows = try {
+            windowsOnAllDisplays.get(display)
+        } catch (e: Exception) {
+            null
+        } ?: return false
+        val bounds = Rect()
+        // Front to back, and only windows a touch can land on: the first one holding the point takes it.
+        val top = windows.firstOrNull { w -> w.getBoundsInScreen(bounds).let { bounds.contains(x, y) } } ?: return false
+        return top.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
     }
 
     private fun toggleStrips() {
@@ -1027,6 +1058,10 @@ class LfgAccessibilityService : AccessibilityService() {
         /** Text items that make a window an ordinary app's: a game's own menus seldom show this many as items. */
         private const val TEXT_ITEMS = 5
         private const val TEXT_ITEMS_MS = 5_000L
+
+        /** How often, and how many times, the lookup window is looked for before its tap: a third of a second in all. */
+        private const val TAP_RETRY_MS = 30L
+        private const val TAP_TRIES = 12
 
         private val DPAD = setOf(
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
