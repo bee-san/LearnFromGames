@@ -114,14 +114,7 @@ class LfgAccessibilityService : AccessibilityService() {
             controller = controller,
             prefs = { app.settings.prefs.value },
             chordActive = { chordFired },
-            tapOn = { display, x, y ->
-                val path = android.graphics.Path().apply { moveTo(x.toFloat(), y.toFloat()) }
-                val tap = android.accessibilityservice.GestureDescription.Builder()
-                    .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 30))
-                    .setDisplayId(display)
-                    .build()
-                if (!dispatchGesture(tap, null, null)) Log.w(TAG, "the tap that brings the controller back was refused")
-            },
+            tapOn = ::tapOwnWindow,
             onToggleStrips = ::toggleStrips,
             onTapElsewhere = { if (asked?.continuous == false) endAsked() },
             // While a reading is up, the button takes it away, a region kept reading included.
@@ -281,8 +274,10 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /**
      * Button presses, heard whatever window has focus. The shortcut starts and
-     * stops lookup mode. Android cannot hide a chord from the game, which is
-     * why the default is the two stick clicks: emulators leave them unbound.
+     * stops lookup mode. Android cannot hide a pair of buttons from the game,
+     * which is why the default is the two stick clicks: emulators leave them
+     * unbound. A shortcut of one button is kept from the game instead
+     * ([oneButton]).
      */
     override fun onKeyEvent(event: KeyEvent): Boolean {
         // Back first takes away the strips of a reading asked for, before it reaches the app.
@@ -290,22 +285,23 @@ class LfgAccessibilityService : AccessibilityService() {
             if (event.action == KeyEvent.ACTION_UP) endAsked()
             return true
         }
-        if (!KeyEvent.isGamepadButton(event.keyCode) && event.keyCode !in DPAD) return false
         val (first, second) = when (app.settings.prefs.value.shortcut) {
             Prefs.SHORTCUT_L1_R1 -> KeyEvent.KEYCODE_BUTTON_L1 to KeyEvent.KEYCODE_BUTTON_R1
             Prefs.SHORTCUT_L2_R2 -> KeyEvent.KEYCODE_BUTTON_L2 to KeyEvent.KEYCODE_BUTTON_R2
             Prefs.SHORTCUT_SELECT_START -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_START
+            Prefs.SHORTCUT_SELECT -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_SELECT
+            Prefs.SHORTCUT_START -> KeyEvent.KEYCODE_BUTTON_START to KeyEvent.KEYCODE_BUTTON_START
+            Prefs.SHORTCUT_L3 -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBL
+            Prefs.SHORTCUT_R3 -> KeyEvent.KEYCODE_BUTTON_THUMBR to KeyEvent.KEYCODE_BUTTON_THUMBR
             else -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBR
         }
+        if (first == second && event.keyCode == first) return oneButton(event)
+        if (!KeyEvent.isGamepadButton(event.keyCode) && event.keyCode !in DPAD) return false
         if (event.action == KeyEvent.ACTION_DOWN) {
             down += event.keyCode
-            if (first in down && second in down && !chordFired) {
+            if (first != second && first in down && second in down && !chordFired) {
                 chordFired = true
-                val state = controller.state.value
-                if (state.controllerMode) controller.exitControllerMode()
-                else if ((front != null || asked != null) && state.lines.isNotEmpty()) controller.enterControllerMode()
-                // An ordinary app, read on demand: read it now, then hand the controller the cursor.
-                else if (front == null) ask(thenController = true)
+                toggleLookup(anyApp = true)
             } else if (event.keyCode != first && event.keyCode != second && event.repeatCount == 0) {
                 // A button meant for the game: the word looked up by touch is done with.
                 val state = controller.state.value
@@ -316,6 +312,78 @@ class LfgAccessibilityService : AccessibilityService() {
             if (first !in down && second !in down) chordFired = false
         }
         return false
+    }
+
+    /** Whether the press of the one-button shortcut now held is ours, so its release is too. */
+    private var oneButtonOurs = false
+
+    /**
+     * The button of a one-button shortcut. While a game is in front, or lookup
+     * is on, it starts and stops lookup and the game never receives it;
+     * anywhere else it is the app's as ever.
+     */
+    private fun oneButton(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            oneButtonOurs = controller.state.value.controllerMode || front != null || asked != null
+            if (oneButtonOurs) toggleLookup(anyApp = false)
+        } else if (event.action == KeyEvent.ACTION_UP) {
+            return oneButtonOurs.also { oneButtonOurs = false }
+        }
+        return oneButtonOurs
+    }
+
+    /**
+     * Starts lookup mode, or stops it. With [anyApp], an ordinary app in front
+     * is read first; without it, a press where there is nothing to look up
+     * says so, since the game did not get the button either.
+     */
+    private fun toggleLookup(anyApp: Boolean) {
+        val state = controller.state.value
+        when {
+            state.controllerMode -> controller.exitControllerMode()
+            (front != null || asked != null) && state.lines.isNotEmpty() -> controller.enterControllerMode()
+            // An ordinary app, read on demand: read it now, then hand the controller the cursor.
+            front == null -> if (anyApp) ask(thenController = true)
+            !anyApp -> front?.let { overlays.notice(it.displayId, "LFG has read no text on this screen yet.") }
+        }
+    }
+
+    /**
+     * Taps a point of a screen as a finger would, once the window on top
+     * there is one of ours. The tap is for the lookup window in the corner of
+     * the game's screen; sent a moment before that window was up, it reached
+     * the game under it, and a visual novel takes a tap as "next line". If the
+     * window never comes, nothing is tapped.
+     */
+    private fun tapOwnWindow(display: Int, x: Int, y: Int) {
+        scope.launch {
+            repeat(TAP_TRIES) {
+                if (ownWindowAt(display, x, y)) {
+                    val path = android.graphics.Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+                    val tap = android.accessibilityservice.GestureDescription.Builder()
+                        .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 30))
+                        .setDisplayId(display)
+                        .build()
+                    if (!dispatchGesture(tap, null, null)) Log.w(TAG, "the tap that brings the controller back was refused")
+                    return@launch
+                }
+                delay(TAP_RETRY_MS)
+            }
+            Log.w(TAG, "the lookup window was not up to be tapped")
+        }
+    }
+
+    /** Whether a finger at this point of the screen would touch a window of ours, not the app under it. */
+    private fun ownWindowAt(display: Int, x: Int, y: Int): Boolean {
+        val windows = try {
+            windowsOnAllDisplays.get(display)
+        } catch (e: Exception) {
+            null
+        } ?: return false
+        val bounds = Rect()
+        // Front to back, and only windows a touch can land on: the first one holding the point takes it.
+        val top = windows.firstOrNull { w -> w.getBoundsInScreen(bounds).let { bounds.contains(x, y) } } ?: return false
+        return top.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
     }
 
     private fun toggleStrips() {
@@ -655,6 +723,7 @@ class LfgAccessibilityService : AccessibilityService() {
 
     private suspend fun captureLoop() {
         var lastFront: String? = null
+        var missed = 0
         var ticks = 0
         var stillLooks = 0
         while (scope.isActive) {
@@ -667,10 +736,15 @@ class LfgAccessibilityService : AccessibilityService() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // A database error naming the game: this look is skipped, the next tries again.
+                // A database error naming the game: this look is skipped, the next tries again. The game
+                // that was in front still is, for all this look can tell.
                 Log.w(TAG, "finding the game in front failed", e)
-                null
+                continue
             }
+            // While a word is looked up the controller is ours. One look that misses the game, as a window
+            // changes hands, must not hand the buttons back to it mid-press: it takes a few in a row.
+            if (now == null && front != null && controller.state.value.controllerMode && ++missed < LOST_LOOKS) continue
+            missed = 0
             front = now
             overlays.onOwnApp(ownAppOn)
             val prefs = app.settings.prefs.value
@@ -1028,6 +1102,13 @@ class LfgAccessibilityService : AccessibilityService() {
         /** Text items that make a window an ordinary app's: a game's own menus seldom show this many as items. */
         private const val TEXT_ITEMS = 5
         private const val TEXT_ITEMS_MS = 5_000L
+
+        /** How often, and how many times, the lookup window is looked for before its tap: a third of a second in all. */
+        /** Looks in a row that must miss the game before lookup mode gives it up: about a second. */
+        private const val LOST_LOOKS = 3
+
+        private const val TAP_RETRY_MS = 30L
+        private const val TAP_TRIES = 12
 
         private val DPAD = setOf(
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
