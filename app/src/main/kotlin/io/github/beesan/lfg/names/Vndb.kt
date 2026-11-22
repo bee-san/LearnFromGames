@@ -334,13 +334,7 @@ class Vndb(
         private fun unsignedOf(p: JsonPrimitive): Long? =
             if (p is JsonNull || p.isString) null else p.longOrNull?.takeIf { it >= 0 }
 
-        /** As contains_japanese in kana.rs: any kanji (with 々), hiragana or katakana, by code point. */
-        internal fun containsJapanese(text: String): Boolean = text.codePoints().anyMatch { c ->
-            c in 0x4E00..0x9FFF || c in 0x3400..0x4DBF || c in 0x20000..0x2A6DF || c in 0x2A700..0x2B73F ||
-                c in 0x2B740..0x2B81F || c in 0x2B820..0x2CEAF || c in 0x2CEB0..0x2EBEF || c in 0x30000..0x3134F ||
-                c in 0x31350..0x323AF || c in 0xF900..0xFAFF || c in 0x2F800..0x2FA1F || c == 0x3005 ||
-                c in 0x3041..0x3096 || c in 0x30A1..0x30F6 || c == 0x30FC
-        }
+        internal fun containsJapanese(text: String): Boolean = Kana.containsJapanese(text)
     }
 }
 

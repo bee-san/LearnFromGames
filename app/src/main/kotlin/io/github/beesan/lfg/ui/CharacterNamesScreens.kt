@@ -215,7 +215,7 @@ fun CharacterNamesScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onB
         "Find visual novels by themselves",
         "Links a game when its Steam ID matches, or its title, platform and a Japanese release all do. Anything less is asked once, in a lookup, and kept on the game's page.",
     ) { Switch(prefs.namesAuto) { v -> onChange { it.copy(namesAuto = v) } } }
-    Card("Names with honorifics", "七瀬さん, 湊くん and about 320 more endings look up as one word. Most of a dictionary's size.") {
+    Card("Names with honorifics", "七瀬さん, 湊くん and about 270 more endings look up as one word. Most of a dictionary's size.") {
         Switch(prefs.namesHonorifics) { v -> onChange { it.copy(namesHonorifics = v) } }
     }
     Card("Show spoilers", "Descriptions and traits VNDB marks as spoilers.") {
