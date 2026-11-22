@@ -900,7 +900,7 @@ class LfgAccessibilityService : AccessibilityService() {
                 } || showsTextItems(top)
                 // Everything in front of the game that is not ours: its text must not be read as the game's.
                 val covered = windows.takeWhile { it.id != top.id }
-                    .filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY && !isCover(it, all.keyAt(i)) }
+                    .filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
                     .map { w -> Rect().also(w::getBoundsInScreen) }
                     .filter { !it.isEmpty }
                     .map { Box(it.left, it.top, it.right, it.bottom) }
