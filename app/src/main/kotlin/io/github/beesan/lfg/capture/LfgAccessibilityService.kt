@@ -1258,13 +1258,10 @@ class LfgAccessibilityService : AccessibilityService() {
         /** Looks in a row that must miss the game before lookup mode gives it up: about a second. */
         private const val LOST_LOOKS = 3
 
-        /** How often, and how many times, the lookup window is looked for before its tap: a third of a second in all. */
-        /** Looks in a row that must miss the game before lookup mode gives it up: about a second. */
-        private const val LOST_LOOKS = 3
-
         /** How long after a dialogue box is drawn from lookup its first lines may bring lookup back: three looks. */
         private const val LOOKUP_AFTER_BOX_MS = 2000L
 
+        /** How often, and how many times, the lookup window is looked for before its tap: a third of a second in all. */
         private const val TAP_RETRY_MS = 30L
         private const val TAP_TRIES = 12
 
