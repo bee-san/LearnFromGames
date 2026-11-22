@@ -35,10 +35,8 @@ class ControllerInput(
     private val chordActive: () -> Boolean,
 ) {
     private val handler = Handler(Looper.getMainLooper())
-    private val words = Repeater(KeyRepeat(), stick = false)
-    private val characters = Repeater(KeyRepeat.stick(), stick = true)
-    private val pad: Repeater get() = if (stickWords()) characters else words
-    private val stick: Repeater get() = if (stickWords()) words else characters
+    private val pad = Repeater(characters = { stickWords() })
+    private val stick = Repeater(characters = { !stickWords() }, fast = KeyRepeat.stick())
     private var scrollSpeed = 0f
     private val scroller = object : Runnable {
         override fun run() {
@@ -48,8 +46,14 @@ class ControllerInput(
         }
     }
 
-    /** A held direction: with [stick] false it steps by word at the D-pad's pace, with true by character at the left stick's. */
-    private inner class Repeater(private val repeat: KeyRepeat, private val stick: Boolean) : Runnable {
+    /**
+     * A held direction of the D-pad or the left stick, stepping by word or, with [characters], by
+     * character. A stick going by character repeats at Rubi's quicker stick pace ([fast]); a button,
+     * and anything going by word, at the button's, so one press is one step.
+     */
+    private inner class Repeater(private val characters: () -> Boolean, private val fast: KeyRepeat? = null) : Runnable {
+        private val slow = KeyRepeat()
+        private var repeat = slow
         private var move: Move? = null
 
         fun hold(next: Move?) {
@@ -57,13 +61,14 @@ class ControllerInput(
             handler.removeCallbacks(this)
             move = next
             repeat.release()
+            repeat = fast?.takeIf { characters() } ?: slow
             if (next != null) run()
         }
 
         override fun run() {
             val current = move ?: return
             val now = SystemClock.uptimeMillis()
-            if (repeat.press(current.ordinal, now)) controller.move(current, stick)
+            if (repeat.press(current.ordinal, now)) controller.move(current, characters())
             handler.postDelayed(this, (repeat.nextRepeatAt - now).coerceAtLeast(1))
         }
     }
@@ -135,8 +140,8 @@ class ControllerInput(
 
     /** Lookup mode ended: nothing may keep repeating. */
     fun release() {
-        words.hold(null)
-        characters.hold(null)
+        pad.hold(null)
+        stick.hold(null)
         scrollSpeed = 0f
         handler.removeCallbacks(scroller)
     }
