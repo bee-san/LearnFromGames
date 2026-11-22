@@ -53,11 +53,13 @@ class Sorted(val parts: List<List<Part>>, val menu: Boolean)
  *   a save slot cuts it, is that line; and so is what is left showing of the
  *   line that was on screen when a toast or a prompt hides part of it
  *   ([LEFT] characters or more, at least half of it, in its order);
- * - read differently: in the place of a piece of the reading before, with
- *   no more than a third of its [MISREAD] or more characters changed, while
- *   a longer piece of this reading is new. So are the words of a sign or a
- *   book in the picture, which a reader takes a little differently at each
- *   look; the story's line is the piece that changed;
+ * - read differently: in the place of a piece of the reading before, while
+ *   a line of [LONG] characters or more is new on this one. So are the words
+ *   of a sign or a book in the picture, which a reader takes differently at
+ *   each look, and a name plate or a counter that changes with the line. A
+ *   piece shorter than [LONG] is that piece whatever was read of it; a
+ *   longer one must keep two thirds of its characters. The story's line is
+ *   the piece that changed;
  * - grown: it starts with a piece of [BASE] characters or more that was on
  *   screen. If that piece ended a sentence the page has grown by a sentence,
  *   as a box that fills click by click does: the old part keeps its row and
@@ -170,27 +172,27 @@ class LineSorter {
             if (parts[i] == null) open += i
         }
 
-        // Words in the picture itself (a book's spine, a sign) and labels are read a little differently
-        // from one look to the next. A piece in the place of one on the reading before, with most of its
-        // characters, is that piece again when a longer piece of this reading is new: the story's line is
-        // the one that changed, and it does not come back a character or two off in the same place.
+        // Words in the picture itself (a book's spine, a sign) and labels are read differently from one look
+        // to the next, the small ones as quite other characters. When a line of the story is new on this
+        // reading, a piece in the place of one on the reading before is that piece again: a short one
+        // whatever was read of it, a long one with most of its characters. The story's line is the piece
+        // that changed, and nothing else of the story changes with it in the place it had.
         if (places != null && open.size >= 2) {
             val again = HashMap<Int, Held>()
             for (i in open) {
                 val text = texts[i]
-                if (text.size < MISREAD) continue
                 val limit = text.size / 3
                 val was = last.firstOrNull { shown ->
-                    shown.place != null && shown.parts.size == 1 && samePlace(places[i], shown.place) &&
-                        apart(text.points, 0, text.size, shown.squeezed.points, 0, shown.squeezed.size, limit) <= limit
+                    shown.place != null && shown.parts.size == 1 && samePlace(places[i], shown.place) && (
+                        text.size < LONG || apart(text.points, 0, text.size, shown.squeezed.points, 0, shown.squeezed.size, limit) <= limit
+                        )
                 } ?: continue
                 again[i] = was.parts[0]
             }
-            for ((i, held) in again) {
-                if (open.none { it !in again && (texts[it].size >= LONG || texts[it].size > texts[i].size) }) continue
-                parts[i] = listOf(Part.Same(0, pieces[i].length, held.id))
+            if (open.any { it !in again && texts[it].size >= LONG }) {
+                for ((i, held) in again) parts[i] = listOf(Part.Same(0, pieces[i].length, held.id))
+                open.removeAll { parts[it] != null }
             }
-            open.removeAll { parts[it] != null }
         }
 
         // One of the game's last lines, shown again. While the story moves on, the line kept last being the
@@ -418,9 +420,6 @@ class LineSorter {
 
         /** The fewest characters left showing of a line partly hidden that are still taken for it. */
         const val LEFT = 6
-
-        /** The fewest characters of a piece that may be one read differently in the same place: a third of them may differ. */
-        const val MISREAD = 5
 
         /** Whether two pieces are in the same place: each covers at least half of the other. */
         private fun samePlace(a: Box, b: Box): Boolean {
