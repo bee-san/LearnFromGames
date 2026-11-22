@@ -35,6 +35,24 @@ class BlocksTest {
     }
 
     @Test
+    fun aNameAsLargeAsTheDialogueAndAtItsEdgeIsStillApart() {
+        // Same size, same left edge, the usual gap: it would join as the first row.
+        val bracketed = Blocks.group(listOf(row("【七瀬】", 100, 700), row("今夜も放送、聴いてくれるかな。", 100, 786)))
+        assertEquals(listOf("【七瀬】", "今夜も放送、聴いてくれるかな。"), bracketed.map { it.text })
+        val quoted = Blocks.group(listOf(row("七瀬", 100, 700), row("「今夜も放送、聴いてくれる？」", 100, 786)))
+        assertEquals(listOf("七瀬", "「今夜も放送、聴いてくれる？」"), quoted.map { it.text })
+        // Neither, but set apart by more than its own height's worth of the gap.
+        val spaced = Blocks.group(listOf(row("七瀬", 100, 700), row("今夜も放送、聴いてくれるかな。", 100, 800)))
+        assertEquals(listOf("七瀬", "今夜も放送、聴いてくれるかな。"), spaced.map { it.text })
+    }
+
+    @Test
+    fun aShortFirstRowAtTheUsualGapIsNotTakenForAName() {
+        val rows = listOf(row("あいう", 100, 100), row("かきくけこさしすせそ", 100, 186), row("たちつてとなにぬねの", 100, 272))
+        assertEquals(listOf("あいうかきくけこさしすせそたちつてとなにぬねの"), Blocks.group(rows).map { it.text })
+    }
+
+    @Test
     fun aTapLandsInTheRowItIsOn() {
         val block = Blocks.group(listOf(row("あいうえお", 100, 100), row("かきくけこ", 100, 190))).single()
         assertEquals(1, block.charIndexAt(170, 130))

@@ -25,8 +25,48 @@ object Blocks {
             if (home != null) home += line else blocks += mutableListOf(line)
         }
         // Reading order: top to bottom, then left to right, by where each piece starts.
-        return blocks.map(::join).sortedWith(compareBy({ it.rows[0].top }, { it.rows[0].left }))
+        return blocks.flatMap(::nameApart).map(::join).sortedWith(compareBy({ it.rows[0].top }, { it.rows[0].left }))
     }
+
+    /**
+     * A speaker's name set just above the dialogue, at its left edge, joins it
+     * as its first row; it is taken off again as a piece of its own, so the
+     * cursor starts on the dialogue and a card's sentence does not begin with
+     * the name. The test is GameSentenceMiner's overlay's: a short row, not a
+     * sentence, much narrower than the dialogue, and set apart from it by a
+     * smaller size or a wider gap than the dialogue's own; or a name in 【】,
+     * or one over dialogue that opens with 「 when the name has none.
+     */
+    private fun nameApart(block: MutableList<TextLine>): List<MutableList<TextLine>> {
+        if (block.size < 2 || block[0].vertical) return listOf(block)
+        val name = block[0]
+        val body = block.subList(1, block.size)
+        return if (isName(name, body)) listOf(mutableListOf(name), body.toMutableList()) else listOf(block)
+    }
+
+    internal fun isName(name: TextLine, body: List<TextLine>): Boolean {
+        val text = name.text.trim()
+        val symbols = text.codePoints().filter { !Character.isWhitespace(it) }.count()
+        if (symbols < 2 || symbols > 16 || text.last() in SENTENCE_END) return false
+        val widest = body.maxOf { it.box.width }
+        val heights = body.map { it.box.height }.sorted()
+        val bodyHeight = heights[heights.size / 2].toFloat()
+        if (widest <= 0 || bodyHeight <= 0) return false
+        val n = name.box
+        if (n.width > 0.65f * widest || n.height > 1.15f * bodyHeight) return false
+        if (text.startsWith('【') && text.endsWith('】')) return true
+        val opens = body[0].text.trimStart().firstOrNull()
+        if (opens != null && opens in QUOTES && text.none { it in QUOTES }) return true
+        if (n.height <= 0.9f * bodyHeight) return true
+        val gap = body[0].box.top - n.bottom
+        if (body.size == 1) return n.width <= 0.35f * widest && gap >= 0.6f * maxOf(n.height.toFloat(), bodyHeight)
+        val gaps = body.zipWithNext { a, b -> b.box.top - a.box.bottom }.sorted()
+        val usual = gaps[gaps.size / 2]
+        return gap >= 0.35f * bodyHeight && gap >= 1.35f * usual
+    }
+
+    private const val SENTENCE_END = "。！？!?…‥.,，、：:；;」』）)"
+    private const val QUOTES = "「『（(“\""
 
     /**
      * Whether [small] is furigana for [base]: kana in much smaller type,
