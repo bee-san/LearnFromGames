@@ -186,8 +186,10 @@ class ReadingPipeline(
             .filter { line -> covered.none { it.intersects(line.box) } }
         // A reader returns rows; the game shows sentences. From here on a piece is a whole piece of text.
         val pieces = Perf.measure("group") { Blocks.group(rows) }
-        val found = interfaceText.onReading(pieces.map { it.text })
-        if (pieces.isEmpty()) return still
+        if (pieces.isEmpty()) {
+            interfaceText.onReading(emptyList())
+            return still
+        }
         val telling = apart()
         if (!telling) {
             interfaceKnown.clear()
@@ -205,10 +207,17 @@ class ReadingPipeline(
         recent.forEach { byId[it.id] = it }
         // Each piece is a line still on screen, one read before, more of one, a menu's text, or new: only the new is saved.
         val sorted = Perf.measure("sort") {
-            memory.sorter.sort(pieces.map { it.text }, recent.map { KeptLine(it.id, it.lineText, it.createdAt) }, interfaceKnown, telling) { text ->
+            memory.sorter.sort(
+                pieces.map { it.text }, recent.map { KeptLine(it.id, it.lineText, it.createdAt) }, interfaceKnown, telling, pieces.map { it.box },
+            ) { text ->
                 store.lineOf(game, text)?.let { byId[it.id] = it; KeptLine(it.id, it.lineText, it.createdAt) }
             }
         }
+        // What stays on screen while the text around it changes is told by the text it is kept as: a sign in
+        // the picture read a little differently at each look is still the one piece staying.
+        val found = interfaceText.onReading(
+            pieces.zip(sorted.parts).map { (piece, parts) -> (parts.singleOrNull() as? Part.Same)?.let { byId[it.id]?.lineText } ?: piece.text },
+        )
         // The frame is taken before any mark is drawn on the game, so it is the card's picture as is.
         val framePath = Perf.measure("save.picture") { saveFrame(bitmap) }
         val appearedNow = detector.changeStartedMs.takeIf { it in 1..nowMs } ?: nowMs
@@ -269,7 +278,7 @@ class ReadingPipeline(
         }
         // What was marked just now is interface text to the sorter too.
         val shown = if (newly.isEmpty()) held else held.map { parts -> parts.map { if (it.text in newly) it.copy(interfaceText = true) else it } }
-        memory.sorter.shown(pieces.map { it.text }, shown, sorted.menu)
+        memory.sorter.shown(pieces.map { it.text }, shown, sorted.menu, pieces.map { it.box })
         saved.forEachIndexed { i, row ->
             memory.rows[row.id] = row
             memory.appeared[row.id] = appeared[i]
