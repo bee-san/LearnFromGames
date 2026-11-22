@@ -597,7 +597,7 @@ fun GamesScreen(
                 Column(Modifier.weight(1f)) {
                     Text("Dialogue box", color = Lfg.Text, fontSize = 15.sp)
                     Text(
-                        if (box == null) "The whole screen is read. To read only the dialogue, start lookup in the game and press Select, then draw a box around it."
+                        if (box == null) "The whole screen is read. To read only the dialogue, press Crop on the lines' screen (or Select in lookup) and draw a box around it."
                         else "Only the box you drew is read (${box.box.width} × ${box.box.height}). Menus and words in the picture outside it are left alone.",
                         color = Lfg.Dim, fontSize = 13.sp,
                     )

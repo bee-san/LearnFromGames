@@ -134,7 +134,7 @@ class OverlayHost(
 
     private var ownApp: Set<Int> = emptySet()
 
-    /** When Open LFG was pressed: the lines' screen is out of the way at once, before the app's page is seen in front. */
+    /** When LFG was pressed: the lines' screen is out of the way at once, before the app's page is seen in front. */
     private var appOpenedAt = 0L
 
     /** This game's notes show among its lines. */
@@ -1048,8 +1048,10 @@ class OverlayHost(
             stats.maxLines = 1
             stats.ellipsize = TextUtils.TruncateAt.END
             top.addView(title, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            top.addView(context.pill("Note", primary = false, sizeSp = 13f) { beginNote(Noting(newestOnScreen(), null), "Note on " + title.text) }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
-            top.addView(context.pill("Open LFG", primary = false, sizeSp = 13f) { openApp() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
+            // Crop: draw the box the game is read in, so only its dialogue goes to the reader.
+            top.addView(context.pill("Crop", primary = false, sizeSp = 13f) { if (gameInFront) onPickBox() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
+            top.addView(context.pill("Note", primary = false, sizeSp = 13f) { beginNote(Noting(newestOnScreen(), null), "Note on " + title.text) }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
+            top.addView(context.pill("LFG", primary = false, sizeSp = 13f) { openApp() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
             header.addView(top)
             header.addView(stats, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(5f) })
             addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
@@ -1409,7 +1411,7 @@ class OverlayHost(
         /** The entry or note under the lines takes this much to the lines' 1. */
         const val SHEET_WEIGHT = 1.35f
 
-        /** How long after Open LFG the lines' screen stays away, for the app's page to come to the front. */
+        /** How long after LFG is pressed the lines' screen stays away, for the app's page to come to the front. */
         const val APP_OPENING_MS = 2000L
 
         /** The popup's corners, as Hachidori's, and the room round it for its shadow. */
