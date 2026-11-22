@@ -9,10 +9,15 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** The few choices the app has. Every one has a default, so none is ever asked for. */
 data class Prefs(
-    /** [SHORTCUT_L3_R3], [SHORTCUT_L1_R1], [SHORTCUT_L2_R2], [SHORTCUT_SELECT_START], [SHORTCUT_SELECT] or [SHORTCUT_START]. */
+    /** One of the SHORTCUT_ values: a pair of buttons pressed together, or one button alone. */
     val shortcut: String = SHORTCUT_L3_R3,
     /** Swap which face button adds a card and which closes, for pads printed the other way round. */
     val swapConfirm: Boolean = false,
+    /**
+     * The left stick steps by word and the D-pad by character, not the other way
+     * round: for a handheld whose stick is where the thumb rests, as the AYN Thor's is.
+     */
+    val stickWords: Boolean = false,
     /** Days a line's screen is kept, unless a card or a recap took it; 0 keeps every one. */
     val keepScreensDays: Int = 14,
     /** The first run's downloads wait for an unmetered network. */
@@ -115,6 +120,8 @@ data class Prefs(
         const val SHORTCUT_SELECT_START = "selectstart"
 
         /** One button alone, which the game then never receives. */
+        const val SHORTCUT_L3 = "l3"
+        const val SHORTCUT_R3 = "r3"
         const val SHORTCUT_SELECT = "select"
         const val SHORTCUT_START = "start"
         const val ENTRY_OVER_GAME = "game"
@@ -144,6 +151,7 @@ class Settings(context: Context) {
         Prefs(
             shortcut = store.getString("shortcut", d.shortcut) ?: d.shortcut,
             swapConfirm = store.getBoolean("swapConfirm", d.swapConfirm),
+            stickWords = store.getBoolean("stickWords", d.stickWords),
             keepScreensDays = store.getInt("keepScreensDays", d.keepScreensDays),
             wifiOnly = store.getBoolean("wifiOnly", d.wifiOnly),
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
@@ -190,6 +198,7 @@ class Settings(context: Context) {
         store.edit()
             .putString("shortcut", next.shortcut)
             .putBoolean("swapConfirm", next.swapConfirm)
+            .putBoolean("stickWords", next.stickWords)
             .putInt("keepScreensDays", next.keepScreensDays)
             .putBoolean("wifiOnly", next.wifiOnly)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)

@@ -270,6 +270,8 @@ fun shortcutLabel(prefs: Prefs) = when (prefs.shortcut) {
     Prefs.SHORTCUT_SELECT_START -> "Select + Start"
     Prefs.SHORTCUT_SELECT -> "Select"
     Prefs.SHORTCUT_START -> "Start"
+    Prefs.SHORTCUT_L3 -> "L3"
+    Prefs.SHORTCUT_R3 -> "R3"
     else -> "L3 + R3"
 }
 
@@ -413,8 +415,20 @@ private fun SettingText(name: String, detail: String, value: String, secret: Boo
 
 @Composable
 fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Controls", onBack) {
-    Card("Lookup shortcut", "Starts and stops lookup with the controller. The game sees a pair's buttons too, so pick one it does not use. Select or Start alone is kept from the game.") {
-        Choice(listOf(Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2", Prefs.SHORTCUT_SELECT_START to "Select + Start", Prefs.SHORTCUT_SELECT to "Select", Prefs.SHORTCUT_START to "Start"), prefs.shortcut) { v -> onChange { it.copy(shortcut = v) } }
+    Card("Lookup shortcut", "Starts and stops lookup with the controller. One button alone is kept from the game while you play, so the game cannot use that button. A pair reaches the game as well, so pick one it does not use.") {
+        Choice(
+            listOf(
+                Prefs.SHORTCUT_L3 to "L3", Prefs.SHORTCUT_R3 to "R3", Prefs.SHORTCUT_SELECT to "Select", Prefs.SHORTCUT_START to "Start",
+                Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2", Prefs.SHORTCUT_SELECT_START to "Select + Start",
+            ),
+            prefs.shortcut,
+        ) { v -> onChange { it.copy(shortcut = v) } }
+    }
+    Card(
+        "Stick and D-pad",
+        if (prefs.stickWords) "In lookup, the left stick goes word by word and the D-pad a character at a time." else "In lookup, the D-pad goes word by word and the left stick a character at a time.",
+    ) {
+        Choice(listOf("pad" to "D-pad by word", "stick" to "Stick by word"), if (prefs.stickWords) "stick" else "pad") { v -> onChange { it.copy(stickWords = v == "stick") } }
     }
     Card("Add card button", "Which face button adds the card; the other one closes. As Android names them.") {
         Choice(listOf("a" to "A adds, B closes", "b" to "B adds, A closes"), if (prefs.swapConfirm) "b" else "a") { v -> onChange { it.copy(swapConfirm = v == "b") } }

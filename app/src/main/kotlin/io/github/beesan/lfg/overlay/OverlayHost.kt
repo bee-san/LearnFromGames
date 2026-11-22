@@ -139,6 +139,7 @@ class OverlayHost(
     val input = ControllerInput(
         controller,
         swapConfirm = { prefs().swapConfirm },
+        stickWords = { prefs().stickWords },
         onClose = { controller.exitControllerMode() },
         onNote = { startNote(state.entryIndex) },
         onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(0, dy) },
@@ -765,6 +766,7 @@ class OverlayHost(
             if (swap) "B" else "A", if (swap) "A" else "B",
             listen = (context.applicationContext as? io.github.beesan.lfg.App)?.wordAudio?.info?.value != null,
             wholeWord = prefs().picking.wholeWord,
+            stickWords = prefs().stickWords,
         )
     }
 
