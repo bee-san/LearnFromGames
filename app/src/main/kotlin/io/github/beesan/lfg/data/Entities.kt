@@ -77,8 +77,29 @@ data class Game(
      * get neither sentence audio nor a moving picture.
      */
     @ColumnInfo(name = "app", defaultValue = "0") val app: Boolean = false,
+    /**
+     * The visual novel on VNDB whose character names this game's lookups use:
+     * an ID such as `v17`, [VNDB_NONE] when the user said it is not one, or
+     * empty when none has been found.
+     */
+    @ColumnInfo(defaultValue = "") val vndb: String = "",
+    /** How [vndb] was chosen: [HOW_STEAM], [HOW_TITLE], [HOW_SUGGESTED] or [HOW_HAND]. */
+    @ColumnInfo(name = "vndb_how", defaultValue = "") val vndbHow: String = "",
+    /** A visual novel found when the match was not certain enough to use by itself; empty for none. */
+    @ColumnInfo(name = "vndb_suggested", defaultValue = "") val vndbSuggested: String = "",
+    /** The lookup popup has asked once whether [vndbSuggested] is this game. */
+    @ColumnInfo(name = "vndb_asked", defaultValue = "0") val vndbAsked: Boolean = false,
 ) {
+    /** The linked visual novel, or null. */
+    val linkedVn: String? get() = vndb.takeIf { it.isNotEmpty() && it != VNDB_NONE }
+
     companion object {
+        const val VNDB_NONE = "none"
+        const val HOW_STEAM = "steam"
+        const val HOW_TITLE = "title"
+        const val HOW_SUGGESTED = "suggested"
+        const val HOW_HAND = "hand"
+
         const val READ_AUTO = 0
         const val READ_ON = 1
         const val READ_OFF = 2

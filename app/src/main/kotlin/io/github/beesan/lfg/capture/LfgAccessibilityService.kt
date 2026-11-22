@@ -106,8 +106,10 @@ class LfgAccessibilityService : AccessibilityService() {
         app = application as App
         pipeline = ReadingPipeline(app.lines, File(filesDir, "frames"), apart = { app.settings.prefs.value.interfaceApart })
         controller = LookupController(
-            scope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) }, ::prepareLine,
+            scope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) }, ::prepareLine,
             selection = { app.settings.prefs.value.picking },
+            vnQuestion = { app.characterNames.question(it) },
+            vnAnswer = { question, yes -> app.characterNames.answer(question, yes) },
         )
         overlays = OverlayHost(
             service = this,
@@ -187,7 +189,7 @@ class LfgAccessibilityService : AccessibilityService() {
                     reading.lines.mapIndexed { i, line ->
                         LookupLine(
                             line.text, reading.saved.getOrNull(i)?.id, reading.framePath, reading.game.title, line,
-                            reading.appearedAtMs.getOrNull(i),
+                            reading.appearedAtMs.getOrNull(i), gameId = reading.game.id,
                         )
                     },
                 )
@@ -470,7 +472,7 @@ class LfgAccessibilityService : AccessibilityService() {
             lines.mapIndexed { i, line ->
                 LookupLine(
                     line.text, saved?.getOrNull(i)?.id, now.framePath, game.title, line,
-                    fromApp = true, source = if (line in fromTree) LineStore.SOURCE_TREE else LineStore.SOURCE_OCR,
+                    fromApp = true, source = if (line in fromTree) LineStore.SOURCE_TREE else LineStore.SOURCE_OCR, gameId = game.id,
                 )
             },
         )
@@ -488,7 +490,7 @@ class LfgAccessibilityService : AccessibilityService() {
                 if (r == null || asked?.continuous != true) return@collect
                 controller.setLines(
                     r.lines.mapIndexed { i, line ->
-                        LookupLine(line.text, r.saved.getOrNull(i)?.id, r.framePath, r.game.title, line, fromApp = true)
+                        LookupLine(line.text, r.saved.getOrNull(i)?.id, r.framePath, r.game.title, line, fromApp = true, gameId = r.game.id)
                     },
                 )
                 overlays.onScreen(r.displayId, true, true, asking = true)
@@ -870,11 +872,14 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** In an emulator or a Steam player, the game a front-end, Eden or Steam says it has open; else the app's own row. */
     private suspend fun namedInside(host: Game): Game {
-        val named = app.gameFinder.nameFor(host.packageName) ?: return host
+        val named = app.gameFinder.nameFor(host.packageName) ?: return host.also { app.characterNames.onGameSeen(it.id, "") }
         val key = host.packageName + "\n" + named.key
         return (namedGames[key] ?: withContext(Dispatchers.IO) {
             app.lines.namedGame(host, named.key, named.title, named.source)
-        }.also { namedGames[key] = it }).also { game -> coverFor(game, named.steamAppId) }
+        }.also { namedGames[key] = it }).also { game ->
+            coverFor(game, named.steamAppId)
+            app.characterNames.onGameSeen(game.id, named.steamAppId)
+        }
     }
 
     /** Steam games whose header has been asked for since the service started: each once. */

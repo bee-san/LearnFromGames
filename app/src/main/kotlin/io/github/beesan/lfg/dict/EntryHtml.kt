@@ -28,6 +28,10 @@ object EntryHtml {
     /** The link of an entry's note button in a list, with `/<index>` after it: starts a note on the word. */
     const val NOTE_URL = "$MEDIA_SCHEME://note"
 
+    /** The answers to "Is this the visual novel…?" under a list, each with `/0` after it. */
+    const val VN_YES_URL = "$MEDIA_SCHEME://vn-yes"
+    const val VN_NO_URL = "$MEDIA_SCHEME://vn-no"
+
     private val TAGS = setOf(
         "br", "ruby", "rt", "rp", "table", "thead", "tbody", "tfoot", "tr", "td", "th",
         "span", "div", "ol", "ul", "li", "details", "summary", "a", "img",
@@ -71,7 +75,7 @@ object EntryHtml {
      */
     /** [notes] off leaves out each entry's note button, where there is no game's line to hang a note on. */
     fun list(entries: List<Entry>, styles: List<Style>, palette: Palette, notes: Boolean = true, audio: (Entry) -> Boolean): String =
-        listHead(styles, palette) + listBody(entries, notes, audio) + LIST_END
+        listHead(styles, palette) + listBody(entries, notes, audio = audio) + LIST_END
 
     /**
      * The list's page up to its body: the styles and the script. It changes only
@@ -86,12 +90,21 @@ object EntryHtml {
         append("</style><script>").append(STATE_SCRIPT).append("</script></head><body>")
     }
 
-    /** The entries of a lookup, the inside of the list's body. */
-    fun listBody(entries: List<Entry>, notes: Boolean = true, audio: (Entry) -> Boolean): String = buildString {
+    /**
+     * The entries of a lookup, the inside of the list's body. [askVn] is a visual
+     * novel's title to ask about once under them, or null.
+     */
+    fun listBody(entries: List<Entry>, notes: Boolean = true, askVn: String? = null, audio: (Entry) -> Boolean): String = buildString {
         entries.forEachIndexed { i, entry ->
             append("<section class=\"lfg-entry\" id=\"e").append(i).append("\">")
             append(body(entry, audio(entry), index = i, notes = notes))
             append("</section>")
+        }
+        if (askVn != null) {
+            append("<div class=\"lfg-ask\"><span>Is this the visual novel <b lang=\"ja\">").append(escape(askVn))
+            append("</b>? <span class=\"lfg-ask-why\">Then its characters' names get their own cards.</span></span>")
+            append("<a class=\"lfg-ask-button lfg-ask-yes\" href=\"").append(VN_YES_URL).append("/0\">Yes</a>")
+            append("<a class=\"lfg-ask-button\" href=\"").append(VN_NO_URL).append("/0\">No</a></div>")
         }
     }
 
@@ -461,6 +474,11 @@ body{margin:0;padding:10px 12px 14px;overflow-wrap:anywhere}
 .lfg-tags{margin-right:.35em}
 .lfg-tag{display:inline-block;font-size:.66em;font-weight:700;line-height:1.5;color:#ffffff;background:#6f6f78;border-radius:4px;padding:0 .45em;margin-right:.25em;vertical-align:middle}
 .lfg-message{color:var(--dim)}
+.lfg-ask{display:flex;align-items:center;gap:10px;margin-top:16px;padding:10px 12px;border-radius:10px;background:var(--chip);font-size:.88em}
+.lfg-ask>span{flex:1}
+.lfg-ask-why{color:var(--dim)}
+.lfg-ask-button{display:inline-flex;min-height:42px;min-width:56px;padding:0 14px;box-sizing:border-box;align-items:center;justify-content:center;border-radius:8px;border:1px solid var(--border-strong);color:var(--text);text-decoration:none;font-weight:600;-webkit-tap-highlight-color:transparent}
+.lfg-ask-yes{border-color:var(--accent);color:var(--accent)}
 .gloss-text,.gloss-list>li{white-space:pre-line}
 .gloss-list,.gloss-sc-ul,.gloss-sc-ol{margin:0;padding-left:1.3em}
 ul[data-sc-content="glossary"]{display:inline;padding:0}

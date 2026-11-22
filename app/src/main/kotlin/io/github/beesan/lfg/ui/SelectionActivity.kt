@@ -66,7 +66,7 @@ class SelectionActivity : ComponentActivity() {
             return
         }
         controller = LookupController(
-            lifecycleScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) },
+            lifecycleScope, { text, _ -> app.dictionaries.lookup(text) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) },
             prepare = ::saveLine,
             selection = { app.settings.prefs.value.picking },
         )
@@ -143,7 +143,7 @@ class SelectionActivity : ComponentActivity() {
                             EntryLink.CARD -> controller.addCard(index)
                             EntryLink.AUDIO -> controller.playAudio(index)
                             // Not shown here: a note belongs to a game's line.
-                            EntryLink.NOTE -> Unit
+                            EntryLink.NOTE, EntryLink.VN_YES, EntryLink.VN_NO -> Unit
                         }
                     },
                     Modifier.fillMaxWidth().weight(1f),

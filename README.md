@@ -31,6 +31,7 @@ LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSent
 - **Sentence audio**: the game's own voice for the line, with the music around it cut away. Android has to ask before LFG may listen, so its question comes up by itself when you open a game: one tap, once a session. Say no and it is not asked again; Start on the Lines page begins it later. A line the game does not speak is read by Android's voice instead.
 - **Moving pictures**, if you switch them on: an animated picture of the line appearing.
 - **Your dictionaries.** Hachidori's starter set is fetched at first run: Jitendex, JMnedict, Bee's Ultimate Kanji Dictionary, Jiten's frequencies and Bee's Ultimate Grammar Dictionary. Add any Yomitan dictionary zip and it is shown with its own styling. Pitch accent dictionaries draw the accent over the reading, frequency dictionaries show their ranks, and local-audio-yomichan's `android.db` lets you hear the word.
+- **Character names for visual novels.** LFG finds the game on [VNDB](https://vndb.org) (by its Steam ID, or by its title, platform and a Japanese release; anything less it asks about once, in a lookup) and builds a dictionary of its cast on the device, honorifics included. Tapping 七瀬さん then shows that character's card, portrait and all, in that game only. It is a port of the VNDB path of [Japanese Character Name Dictionary](https://github.com/bee-san/Japanese_Character_Name_Dictionary).
 - **Every line is kept**, so you can mine after the session and see reading time, characters, speed and your streak.
 
 ## How it works
@@ -97,6 +98,8 @@ Reading and lookup run on the device. The network is used for the first-run down
   battery and heat. The emulator answered the others (see below).
 - No speed figures for ScreenAI on a handheld: the OCR bench below
   ran on the x86_64 emulator.
+- Character names have not yet been measured on the Thor: build time,
+  import time and disk size for a large cast, and how the card looks in the popup.
 - A text hook as a second source of lines (the plan's "after that, if wanted")
   is not built. The intent is for the app to be the texthooker itself, not to
   listen to another one.
@@ -396,6 +399,6 @@ The app is GPL-3.0-or-later, as hoshidicts is.
 
 ## Thanks
 
-LFG stands on [GameSentenceMiner](https://github.com/bpwhelan/GameSentenceMiner), [hoshidicts](https://github.com/bee-san/hoshidicts), [VOCR](https://github.com/bee-san/vita-vn-ocr), [screenai_ocr](https://github.com/AuroraWright/screenai_ocr), [AnkiDroid](https://github.com/ankidroid/Anki-Android), [Silero VAD](https://github.com/snakers4/silero-vad), [Jitendex](https://jitendex.org), JMdict, JMnedict, [Jiten](https://jiten.moe), [Bee's Ultimate Kanji Dictionary](https://github.com/bee-san/bees-ultimate-kanji-dictionary), [Bee's Ultimate Grammar Dictionary](https://github.com/bee-san/bees-ultimate-grammar-dictionary) and [Hachidori](https://github.com/bee-san/hachidori), and on the Kiku, Lapis and Senren note types.
+LFG stands on [GameSentenceMiner](https://github.com/bpwhelan/GameSentenceMiner), [hoshidicts](https://github.com/bee-san/hoshidicts), [VOCR](https://github.com/bee-san/vita-vn-ocr), [screenai_ocr](https://github.com/AuroraWright/screenai_ocr), [AnkiDroid](https://github.com/ankidroid/Anki-Android), [Silero VAD](https://github.com/snakers4/silero-vad), [Jitendex](https://jitendex.org), JMdict, JMnedict, [Jiten](https://jiten.moe), [Bee's Ultimate Kanji Dictionary](https://github.com/bee-san/bees-ultimate-kanji-dictionary), [Bee's Ultimate Grammar Dictionary](https://github.com/bee-san/bees-ultimate-grammar-dictionary), [VNDB](https://vndb.org), [Japanese Character Name Dictionary](https://github.com/bee-san/Japanese_Character_Name_Dictionary) and [Hachidori](https://github.com/bee-san/hachidori), and on the Kiku, Lapis and Senren note types.
 
 The plan and screen designs this was built from: <https://claude.ai/artifact/PahaxprErjPmLGocbz6pPW>

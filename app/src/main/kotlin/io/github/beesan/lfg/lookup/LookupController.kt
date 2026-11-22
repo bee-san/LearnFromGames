@@ -41,6 +41,8 @@ data class LookupLine(
     val fromApp: Boolean = false,
     /** [LineStore.SOURCE_OCR], [LineStore.SOURCE_TREE] or another source, for the row it is saved as. */
     val source: String = LineStore.SOURCE_OCR,
+    /** The game's row, whose visual novel's character names are looked in first; null for none. */
+    val gameId: String? = null,
 )
 
 data class LookupState(
@@ -64,6 +66,8 @@ data class LookupState(
     val message: String? = null,
     /** The controller drives the app and the game receives nothing. */
     val controllerMode: Boolean = false,
+    /** Asked once under the entries: whether the game is this visual novel. */
+    val vnQuestion: VnQuestion? = null,
 ) {
     val entry: Entry? get() = entries.getOrNull(entryIndex)
     val button: CardButton get() = buttons.getOrNull(entryIndex) ?: CardButton.ADD
@@ -73,6 +77,9 @@ data class LookupState(
 
 enum class Move { LEFT, RIGHT, UP, DOWN }
 
+/** "Is this the visual novel [title]?" for the game of [gameId], about VNDB's [vnId]. */
+data class VnQuestion(val gameId: String, val vnId: String, val title: String)
+
 /**
  * Lookup from a character of a line, by touch or by controller, and the card
  * made from it. One instance serves the game overlays; the Lines screen has
@@ -80,7 +87,8 @@ enum class Move { LEFT, RIGHT, UP, DOWN }
  */
 class LookupController(
     private val scope: CoroutineScope,
-    private val lookup: suspend (String) -> List<Entry>,
+    /** Entries for the text, in the game of the given id (null for none). */
+    private val lookup: suspend (String, String?) -> List<Entry>,
     private val cards: CardMaker,
     private val anki: AnkiBridge,
     private val store: LineStore,
@@ -95,6 +103,13 @@ class LookupController(
     private val prepare: suspend (LookupLine) -> LookupLine = { it },
     /** Whole word or Character, and whether only Japanese characters can be picked: Settings › Controls. */
     private val selection: () -> Selection = { Selection() },
+    /**
+     * The question to ask once under a game's entries, if its visual novel is
+     * uncertain; marks it asked. Null for most games, and always for none.
+     */
+    private val vnQuestion: suspend (String) -> VnQuestion? = { null },
+    /** The answer to a [VnQuestion]. */
+    private val vnAnswer: suspend (VnQuestion, Boolean) -> Unit = { _, _ -> },
 ) {
     private val _state = MutableStateFlow(LookupState())
     val state: StateFlow<LookupState> = _state
@@ -168,7 +183,7 @@ class LookupController(
         if (index !in target.text.indices) return
         selecting?.cancel()
         selecting = scope.launch {
-            val entries = decorate(io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index)) })
+            val entries = decorate(io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index), target.gameId) })
             val first = entries.firstOrNull()
             val character = (index + Character.charCount(target.text.codePointAt(index))).coerceAtMost(target.text.length)
             val end = if (first == null) character else (index + first.matched.length).coerceAtMost(target.text.length)
@@ -179,13 +194,25 @@ class LookupController(
                     entries = entries, entryIndex = 0,
                     buttons = entries.map { e -> done[target.lineId to e.expression] ?: CardButton.ADD },
                     message = if (first == null) "No entry" else null,
+                    vnQuestion = null,
                 )
             }
             if (first == null) return@launch
+            target.gameId?.let { gameId ->
+                val question = withContext(Dispatchers.IO) { vnQuestion(gameId) }
+                if (question != null) _state.update { if (it.entries === entries) it.copy(vnQuestion = question) else it }
+            }
             target.lineId?.let { store.recordLookup(it, first.expression, first.reading) }
             // Every entry shows its own button, so each is checked; the first is looked at first.
             for (entry in entries.distinctBy { it.expression }) checkDuplicate(target, entry)
         }
+    }
+
+    /** Yes or No to the visual novel asked about under the entries. */
+    fun answerVn(yes: Boolean) {
+        val question = _state.value.vnQuestion ?: return
+        _state.update { it.copy(vnQuestion = null) }
+        scope.launch { withContext(Dispatchers.IO) { vnAnswer(question, yes) } }
     }
 
     private suspend fun checkDuplicate(line: LookupLine, entry: Entry) {

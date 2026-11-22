@@ -90,6 +90,8 @@ class MainActivity : ComponentActivity() {
             val dictionaries by model.dictionaries.collectAsStateWithLifecycle()
             val sources by model.sources.collectAsStateWithLifecycle()
             val wordAudio by model.wordAudio.collectAsStateWithLifecycle()
+            val nameBuilds by model.nameBuilds.collectAsStateWithLifecycle()
+            val vnSearch by model.vnSearch.collectAsStateWithLifecycle()
             val recording by SoundCapture.running.collectAsStateWithLifecycle()
             // The colours Settings picked, light or dark as the theme says, "Match system" following the system.
             val palette = Palette.of(prefs.colours, prefs.theme, isSystemInDarkTheme())
@@ -143,6 +145,7 @@ class MainActivity : ComponentActivity() {
                     Page.LINE, Page.NOTES, Page.RECAP, Page.STATS, Page.SETTINGS -> Page.HOME
                     Page.NOTE_NEW -> Page.NOTES
                     Page.SOURCES -> Page.DICTIONARIES
+                    Page.VN_SEARCH -> Page.GAMES
                     Page.GOALS, Page.GAME_STATS -> Page.STATS
                     Page.HOME -> Page.HOME
                     else -> Page.SETTINGS
@@ -244,6 +247,8 @@ class MainActivity : ComponentActivity() {
                                         model.noteFromLine(index)
                                         page = Page.NOTE_NEW
                                     }
+                                    EntryLink.VN_YES -> model.lineLookup.answerVn(true)
+                                    EntryLink.VN_NO -> model.lineLookup.answerVn(false)
                                 }
                             },
                             translation = translation,
@@ -276,6 +281,7 @@ class MainActivity : ComponentActivity() {
                             onMove = { title, up -> model.moveDictionary(title, up) },
                             onRemove = { model.removeDictionary(it) },
                             onSources = { page = Page.SOURCES },
+                            onRemoveNames = { model.removeNames(it) },
                             wordAudio = wordAudio,
                             onAddAudio = { pickAudio.launch(arrayOf("*/*")) },
                             onRemoveAudio = { model.removeWordAudio() },
@@ -319,7 +325,39 @@ class MainActivity : ComponentActivity() {
                             LaunchedEffect(Unit) { model.gatherDiagnostics() }
                             HelpScreen(report, onCopy = { report?.let(::copyReport) }, onShare = { report?.let(::shareReport) }, onBack = ::back)
                         }
-                        page == Page.GAMES -> GamesScreen(games, packageName, { model.updateGame(it) }, ::back)
+                        page == Page.GAMES -> GamesScreen(
+                            games, packageName, { model.updateGame(it) }, ::back,
+                            names = (dictionary as? DictState.Ready)?.dictionaries.orEmpty().filter { it.vndb != null },
+                            builds = nameBuilds,
+                            namesActions = NamesRowActions(
+                                title = model::vnTitle,
+                                onSearch = { game ->
+                                    model.startVnSearch(game)
+                                    page = Page.VN_SEARCH
+                                },
+                                onAccept = { model.acceptVn(it) },
+                                onDecline = { model.declineVn(it) },
+                                onBuild = model::buildNames,
+                                onStop = model::stopNames,
+                                onRemove = { model.removeNames(it) },
+                            ),
+                        )
+                        page == Page.VN_SEARCH -> {
+                            val game = games.firstOrNull { it.id == vnSearch.gameId }
+                            VnSearchScreen(
+                                game, vnSearch, model::searchVn,
+                                onPick = {
+                                    model.pickVn(it)
+                                    page = Page.GAMES
+                                },
+                                onDecline = {
+                                    game?.let(model::declineVn)
+                                    page = Page.GAMES
+                                },
+                                onBack = ::back,
+                            )
+                        }
+                        page == Page.CHARACTER_NAMES -> CharacterNamesScreen(prefs, model::updatePrefs, ::back)
                         page == Page.GAME_NAMES -> GameNamesScreen(
                             prefs = prefs,
                             status = gameNameStatus,

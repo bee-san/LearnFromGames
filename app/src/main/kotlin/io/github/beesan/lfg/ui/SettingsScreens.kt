@@ -75,6 +75,7 @@ import io.github.beesan.lfg.games.RetroArchHistory
 import io.github.beesan.lfg.data.PictureKeeper
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
+import io.github.beesan.lfg.dict.InstalledDictionary
 import io.github.beesan.lfg.dict.WordAudio
 import io.github.beesan.lfg.ocr.ModelState
 import java.text.SimpleDateFormat
@@ -152,6 +153,7 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Card("Text recognition", "ScreenAI, which reads the screen", { onOpen(Page.RECOGNITION) })
     Card("Games and apps", "Rename one, choose when it is read, turn tap strips off", { onOpen(Page.GAMES) })
     Card("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", { onOpen(Page.GAME_NAMES) })
+    Card("Character names", "A visual novel's cast from VNDB, so its names look up as its characters", { onOpen(Page.CHARACTER_NAMES) })
     Card("Sound and pictures", "Sentence audio, spoken lines and animated pictures", { onOpen(Page.MEDIA) })
     Card("Other apps", "Read browsers, chat and ebooks when you ask", { onOpen(Page.APPS) })
     Card("Practice line", "Try a lookup and a card without a game", { onOpen(Page.PRACTICE) })
@@ -168,6 +170,8 @@ fun DictionariesScreen(
     onMove: (String, Boolean) -> Unit,
     onRemove: (String) -> Unit,
     onSources: () -> Unit,
+    /** Removes a visual novel's character names, by its VNDB ID. */
+    onRemoveNames: (String) -> Unit,
     wordAudio: WordAudio.Info?,
     onAddAudio: () -> Unit,
     onRemoveAudio: () -> Unit,
@@ -188,7 +192,9 @@ fun DictionariesScreen(
         is DictState.Installing -> Text("Installing ${fetching.name}…", color = Lfg.Dim, fontSize = 14.sp)
         else -> {}
     }
-    val list = (state as? DictState.Ready)?.dictionaries ?: emptyList()
+    val all = (state as? DictState.Ready)?.dictionaries ?: emptyList()
+    val list = all.filter { it.vndb == null }
+    val names = all.filter { it.vndb != null }
     if (list.isEmpty()) Text("No dictionary is installed.", color = Lfg.Dim, fontSize = 15.sp)
     if (starterMissing.isNotEmpty() && fetching == null) {
         Card("Starter set", "Hachidori's five: meanings, names, kanji, frequencies (which put the commoner word first) and grammar. Missing: " + starterMissing.joinToString(", ") + ". About 105 MB in all.") {
@@ -205,6 +211,19 @@ fun DictionariesScreen(
     Row {
         Text("Entries show in this order. ", color = Lfg.Dim, fontSize = 14.sp)
         Text("Show sources", color = Lfg.Accent, fontSize = 14.sp, modifier = Modifier.clickable(onClick = onSources))
+    }
+    if (names.isNotEmpty()) {
+        Text("Character names", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            "From VNDB, one for each visual novel. Each comes first in its own game's lookups and nowhere else. " +
+                "Removing one marks its games as not visual novels, so it is not built again.",
+            color = Lfg.Dim, fontSize = 14.sp,
+        )
+        for (d in names) {
+            Card(d.title, listOf(d.summary, date.format(Date(d.installedAt))).filter { it.isNotEmpty() }.joinToString(" · ")) {
+                LfgButton("Remove", { d.vndb?.let(onRemoveNames) })
+            }
+        }
     }
     HorizontalDivider(color = Lfg.Border)
     if (wordAudio == null) {
@@ -481,7 +500,15 @@ fun RecognitionScreen(
 }
 
 @Composable
-fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit, onBack: () -> Unit) = Page("Games and apps", onBack) {
+fun GamesScreen(
+    games: List<Game>,
+    ownPackage: String,
+    onUpdate: (Game) -> Unit,
+    onBack: () -> Unit,
+    names: List<InstalledDictionary> = emptyList(),
+    builds: Map<String, io.github.beesan.lfg.names.CharacterNames.Build> = emptyMap(),
+    namesActions: NamesRowActions? = null,
+) = Page("Games and apps", onBack) {
     val list = games.filter { it.packageName != ownPackage }
     if (list.isEmpty()) Text("Nothing has been read yet. A game is the app in front when it is fullscreen; other apps are listed once you ask for one to be read.", color = Lfg.Dim, fontSize = 15.sp)
     val apps = list.filter { it.detected.isEmpty() }.associate { it.packageName to it.title }
@@ -531,6 +558,12 @@ fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit,
                     Text("Off for touch-driven games: taps then always reach the game.", color = Lfg.Dim, fontSize = 13.sp)
                 }
                 OnOff(game.tapStrips) { onUpdate(game.copy(tapStrips = it)) }
+            }
+            // Ordinary apps have no cast to name.
+            if (namesActions != null && !game.app) {
+                HorizontalDivider(color = Lfg.Border)
+                val vn = game.linkedVn
+                GameNamesRow(game, vn?.let { id -> names.firstOrNull { it.vndb == id } }, vn?.let { builds[it] }, namesActions)
             }
         }
     }
@@ -960,7 +993,7 @@ internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { STORAGE, HELP, HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, MEDIA, APPS, PRACTICE }
+enum class Page { STORAGE, HELP, HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE }
 
 @Composable
 fun StorageScreen(

@@ -145,7 +145,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsState())
 
     /** Lookup in a stored line, for a card made after the session. */
-    val lineLookup = LookupController(viewModelScope, { app.dictionaries.lookup(it) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) }, selection = { app.settings.prefs.value.picking })
+    val lineLookup = LookupController(viewModelScope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) }, selection = { app.settings.prefs.value.picking },
+        vnQuestion = { app.characterNames.question(it) }, vnAnswer = { question, yes -> app.characterNames.answer(question, yes) },
+    )
 
     private val _styles = MutableStateFlow<List<EntryHtml.Style>>(emptyList())
     val styles: StateFlow<List<EntryHtml.Style>> = _styles
@@ -308,7 +310,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         opened = line
         _translation.value = TranslationState(line.translation)
         _explanation.value = TranslationState(app.explainer.kept(line.id))
-        lineLookup.setLines(listOf(LookupLine(line.lineText, line.id, picture(line), line.gameName)))
+        lineLookup.setLines(listOf(LookupLine(line.lineText, line.id, picture(line), line.gameName, gameId = line.gameId)))
     }
 
     /** The screen's picture is cleared after two weeks; the line's own picture stays and stands in for it. */
@@ -697,6 +699,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _diagnostics.value = null
         _diagnostics.value = Diagnostics.report(app)
     }
+
+    // ── character names ──────────────────────────────────────────────────
+
+    /** Character-name builds under way or failed, by VNDB ID. */
+    val nameBuilds: StateFlow<Map<String, io.github.beesan.lfg.names.CharacterNames.Build>> = app.characterNames.builds
+
+    /** The search on a game's page for its visual novel. */
+    data class VnSearch(
+        val gameId: String? = null,
+        val searching: Boolean = false,
+        val results: List<io.github.beesan.lfg.names.VnResult> = emptyList(),
+        val error: String? = null,
+        val searched: Boolean = false,
+    )
+
+    private val _vnSearch = MutableStateFlow(VnSearch())
+    val vnSearch: StateFlow<VnSearch> = _vnSearch
+
+    fun vnTitle(vnId: String): String? = app.characterNames.title(vnId)
+
+    fun startVnSearch(game: Game) {
+        _vnSearch.value = VnSearch(gameId = game.id)
+        searchVn(game.title)
+    }
+
+    fun searchVn(query: String) {
+        val gameId = _vnSearch.value.gameId
+        if (query.isBlank()) return
+        _vnSearch.update { it.copy(searching = true, error = null) }
+        viewModelScope.launch {
+            val game = gameId?.let { withContext(Dispatchers.IO) { app.database.games().byId(it) } }
+            val result = runCatching { app.characterNames.search(query, game) }
+            _vnSearch.update {
+                it.copy(
+                    searching = false, searched = true, results = result.getOrDefault(emptyList()),
+                    error = result.exceptionOrNull()?.let { e -> e.message ?: "VNDB could not be searched." },
+                )
+            }
+        }
+    }
+
+    /** Links the searched game to the visual novel picked, by hand: it is never changed by itself after. */
+    fun pickVn(result: io.github.beesan.lfg.names.VnResult) = viewModelScope.launch {
+        val game = _vnSearch.value.gameId?.let { withContext(Dispatchers.IO) { app.database.games().byId(it) } } ?: return@launch
+        app.characterNames.link(game, result.id, Game.HOW_HAND, result.alttitle ?: result.title)
+    }
+
+    fun acceptVn(game: Game) = viewModelScope.launch { app.characterNames.accept(game) }
+    fun declineVn(game: Game) = viewModelScope.launch { app.characterNames.decline(game) }
+    fun buildNames(vnId: String) = app.characterNames.build(vnId)
+    fun stopNames(vnId: String) = app.characterNames.stop(vnId)
+    fun removeNames(vnId: String) = viewModelScope.launch { app.characterNames.remove(vnId) }
 
     fun updateGame(game: Game) = viewModelScope.launch {
         withContext(Dispatchers.IO) {

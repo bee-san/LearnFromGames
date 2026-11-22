@@ -65,6 +65,7 @@ class App : Application() {
     val pictures by lazy { PictureKeeper(database, filesDir) }
     val notes by lazy { Notes(database, File(filesDir, "notes")) }
     val gameFinder by lazy { GameFinder(this, scope) { settings.prefs.value } }
+    val characterNames by lazy { io.github.beesan.lfg.names.CharacterNames(this, database, dictionaries, scope, { settings.prefs.value }) }
 
     override fun onCreate() {
         super.onCreate()
