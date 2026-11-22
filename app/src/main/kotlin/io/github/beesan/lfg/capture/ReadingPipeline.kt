@@ -4,7 +4,11 @@ package io.github.beesan.lfg.capture
 import android.graphics.Bitmap
 import io.github.beesan.lfg.core.Blocks
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.core.Held
 import io.github.beesan.lfg.core.InterfaceText
+import io.github.beesan.lfg.core.KeptLine
+import io.github.beesan.lfg.core.LineSorter
+import io.github.beesan.lfg.core.Part
 import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.core.SettleDetector
 import io.github.beesan.lfg.core.TextLine
@@ -40,6 +44,10 @@ data class Reading(
  * Frame in, lines out. Every picture goes through the cheap probe; only a
  * frame whose text has changed and then held still is read properly. The text
  * is therefore ready before a word is asked for.
+ *
+ * A line is kept once: what was read is sorted ([LineSorter]) into lines
+ * still on screen, lines read before and shown again, more of a line already
+ * kept, a menu's text, and what is new; only the new is saved.
  */
 class ReadingPipeline(
     private val store: LineStore,
@@ -56,6 +64,24 @@ class ReadingPipeline(
     private var lastGame = ""
 
     private val interfaceText = InterfaceText()
+
+    /** What is remembered of one game between readings, so that a line is kept once. */
+    private class Kept {
+        val sorter = LineSorter()
+
+        /** The game's last lines, newest first; null until read from the store, and again when the game comes back to the front. */
+        var recent: ArrayDeque<GameLine>? = null
+
+        /** The rows on screen lately, which the sorter may name, and when each began to appear. */
+        val rows = HashMap<String, GameLine>()
+        val appeared = HashMap<String, Long>()
+
+        /** The interface text kept in this run, by its text: a menu opened again adds no rows. */
+        val menus = HashMap<String, GameLine>()
+    }
+
+    /** By game: going to another app and back does not make the line on screen a new one. */
+    private val kept = HashMap<String, Kept>()
 
     /** The texts found to be interface text in [knownFor]'s game, loaded the first time it is read. */
     private val interfaceKnown = HashSet<String>()
@@ -93,6 +119,8 @@ class ReadingPipeline(
         interfaceText.reset()
         lastSignature = null
         _latest.value = null
+        // The lines may have been changed meanwhile, in the app's own screens.
+        kept.values.forEach { it.recent = null }
     }
 
     /**
@@ -122,6 +150,7 @@ class ReadingPipeline(
             interfaceText.reset()
             lastSignature = null
             lastGame = game.id
+            kept[game.id]?.recent = null
         }
         val fingerprint = if (hash != 0L) hash else picture()?.let { Perf.measure("same?") { Pixels.rowsHash(it, 4) } } ?: return false
         val still = unchanged(fingerprint)
@@ -155,53 +184,102 @@ class ReadingPipeline(
             .mapNotNull(TextClean::line).filter { it.text.isNotBlank() }.map { it.moved(offsetX, offsetY) }
             // Text under another window (a system dialog on a whole-screen picture) is not the game's.
             .filter { line -> covered.none { it.intersects(line.box) } }
-        // A reader returns rows; the game shows sentences. From here on a line is a whole piece of text.
-        val lines = Perf.measure("group") { Blocks.group(rows) }
-        val found = interfaceText.onReading(lines.map { it.text })
-        if (lines.isEmpty()) return still
+        // A reader returns rows; the game shows sentences. From here on a piece is a whole piece of text.
+        val pieces = Perf.measure("group") { Blocks.group(rows) }
+        val found = interfaceText.onReading(pieces.map { it.text })
+        if (pieces.isEmpty()) return still
         val telling = apart()
         if (!telling) {
             interfaceKnown.clear()
             knownFor = ""
+            // Turned off, every row is a line again: none is a menu's to use again.
+            kept.values.forEach { it.menus.clear() }
         } else if (knownFor != game.id) {
             interfaceKnown.clear()
             interfaceKnown += store.interfaceTexts(game)
             knownFor = game.id
         }
-        // A line still on screen from the last reading keeps its row; only new text is saved.
-        val carried = _latest.value?.takeIf { it.game.id == game.id }
-            ?.let { old -> old.lines.map { it.text }.zip(old.saved).toMap() }
-            // Nothing remembered (the app restarted, or the game came back to the front): the line
-            // on screen may be one already saved a moment ago, and must not be counted twice.
-            ?: store.recent(game).associateBy { it.lineText }
+        val memory = kept.getOrPut(game.id) { Kept() }
+        val recent = memory.recent ?: ArrayDeque(store.recentLines(game, LineSorter.RECENT)).also { memory.recent = it }
+        val byId = HashMap(memory.rows)
+        recent.forEach { byId[it.id] = it }
+        // Each piece is a line still on screen, one read before, more of one, a menu's text, or new: only the new is saved.
+        val sorted = Perf.measure("sort") {
+            memory.sorter.sort(pieces.map { it.text }, recent.map { KeptLine(it.id, it.lineText, it.createdAt) }, interfaceKnown, telling) { text ->
+                store.lineOf(game, text)?.let { byId[it.id] = it; KeptLine(it.id, it.lineText, it.createdAt) }
+            }
+        }
         // The frame is taken before any mark is drawn on the game, so it is the card's picture as is.
         val framePath = Perf.measure("save.picture") { saveFrame(bitmap) }
         val appearedNow = detector.changeStartedMs.takeIf { it in 1..nowMs } ?: nowMs
-        val carriedTimes = _latest.value?.takeIf { it.game.id == game.id }
-            ?.let { old -> old.lines.map { it.text }.zip(old.appearedAtMs).toMap() } ?: emptyMap()
         val fresh = ArrayList<Pair<GameLine, Box>>()
-        // Interface text found on this reading: on screen as a menu, a label that stayed, or one come back again.
+        // Interface text found on this reading: a label that stayed, or one come back again.
         val newly = if (telling) found.filterTo(LinkedHashSet()) { it !in interfaceKnown } else LinkedHashSet()
-        val saved = lines.map { line ->
-            carried[line.text] ?: run {
-                val isInterface = telling && (
-                    line.text in interfaceKnown || line.text in found ||
-                        (InterfaceText.short(line.text) && InterfaceText.comesBack(line.text, store.savedTimes(game, line.text), nowMs))
-                            .also { if (it) newly += line.text }
-                    )
-                store.saveLine(
-                    game = game, text = line.text, source = LineStore.SOURCE_OCR, engine = engine.name,
-                    screenshotPath = framePath, displayId = displayId, box = line.box, nowMs = nowMs, interfaceText = isInterface,
-                ).also { fresh += it to line.box }
+        val lines = ArrayList<TextLine>()
+        val saved = ArrayList<GameLine>()
+        val appeared = ArrayList<Long>()
+        val held = ArrayList<List<Held>>()
+        for ((piece, parts) in pieces.zip(sorted.parts)) {
+            held += parts.map { part ->
+                // A page that has grown by a sentence is several lines, each with its own row.
+                val line = if (part.from == 0 && part.to == piece.text.length) piece else piece.slice(part.from, part.to)
+                val alone = parts.size == 1
+                var began = appearedNow
+                val row = when (part) {
+                    is Part.Same -> (byId[part.id] ?: store.line(part.id))?.also { began = memory.appeared[it.id] ?: it.createdAt }
+                    is Part.Grown -> (byId[part.id] ?: store.line(part.id))?.let { old ->
+                        began = memory.appeared[old.id] ?: appearedNow
+                        store.grow(old, line.text, line.box, framePath, nowMs).also { grown ->
+                            fresh += grown to line.box
+                            recent.indexOfFirst { it.id == grown.id }.takeIf { it >= 0 }?.let { recent[it] = grown }
+                        }
+                    }
+                    is Part.New -> null
+                } ?: run {
+                    val isInterface = telling && (
+                        (part as? Part.New)?.interfaceText == true || (alone && line.text in found) ||
+                            (alone && InterfaceText.short(line.text) && InterfaceText.comesBack(line.text, store.savedTimes(game, line.text), nowMs))
+                                .also { if (it) newly += line.text }
+                        )
+                    (if (isInterface) memory.menus[line.text] else null) ?: store.saveLine(
+                        game = game, text = line.text, source = LineStore.SOURCE_OCR, engine = engine.name,
+                        screenshotPath = framePath, displayId = displayId, box = line.box, nowMs = nowMs, interfaceText = isInterface,
+                    ).also {
+                        fresh += it to line.box
+                        if (isInterface) {
+                            memory.menus[line.text] = it
+                            interfaceKnown += line.text
+                        } else {
+                            recent.addFirst(it)
+                            while (recent.size > LineSorter.RECENT) recent.removeLast()
+                        }
+                    }
+                }
+                lines += line
+                saved += row
+                appeared += began
+                Held(part.from, part.to, row.id, row.lineText, row.interfaceText)
             }
         }
         // Found once, it is interface text in this game before and after: the lines saved of it already go too.
         for (text in newly) {
             store.markInterface(game, text, nowMs)
             interfaceKnown += text
+            recent.removeAll { it.lineText == text }
         }
+        // What was marked just now is interface text to the sorter too.
+        val shown = if (newly.isEmpty()) held else held.map { parts -> parts.map { if (it.text in newly) it.copy(interfaceText = true) else it } }
+        memory.sorter.shown(pieces.map { it.text }, shown, sorted.menu)
+        saved.forEachIndexed { i, row ->
+            memory.rows[row.id] = row
+            memory.appeared[row.id] = appeared[i]
+        }
+        // Only what the sorter may still name is remembered.
+        val named = memory.sorter.held()
+        memory.rows.keys.retainAll(named)
+        memory.appeared.keys.retainAll(named)
         Perf.measure("save.crops") { saveCrops(bitmap, fresh, offsetX, offsetY) }
-        _latest.value = Reading(game, displayId, lines, saved, framePath, nowMs, lines.map { carriedTimes[it.text] ?: appearedNow })
+        _latest.value = Reading(game, displayId, lines, saved, framePath, nowMs, appeared)
         return still
     }
 
