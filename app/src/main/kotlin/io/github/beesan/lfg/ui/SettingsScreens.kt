@@ -443,6 +443,12 @@ fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: (
     ) {
         Choice(listOf(Prefs.TAP_AUTO to "Automatic", Prefs.TAP_SHORTCUT to "After the shortcut", Prefs.TAP_ALWAYS to "Always"), prefs.tapLookup) { v -> onChange { it.copy(tapLookup = v) } }
     }
+    Card(
+        "Cover the game during lookup",
+        "While lookup is open, no tap or button can reach the game, so a slip does not move the story on. A game that pauses when something covers it pauses.",
+    ) {
+        OnOff(prefs.coverGame) { on -> onChange { it.copy(coverGame = on) } }
+    }
     Card("Add card button", "Which face button adds the card; the other one closes. As Android names them.") {
         Choice(listOf("a" to "A adds, B closes", "b" to "B adds, A closes"), if (prefs.swapConfirm) "b" else "a") { v -> onChange { it.copy(swapConfirm = v == "b") } }
     }

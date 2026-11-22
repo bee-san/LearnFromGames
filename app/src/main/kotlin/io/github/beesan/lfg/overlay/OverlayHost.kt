@@ -294,6 +294,12 @@ class OverlayHost(
         render()
     }
 
+    /** A button that reached the cover over the game ([io.github.beesan.lfg.ui.CoverActivity]) and not the lookup window. */
+    fun key(event: KeyEvent): Boolean = input.onKey(event)
+
+    /** A stick or the D-pad, likewise. */
+    fun motion(event: MotionEvent): Boolean = input.onMotion(event)
+
     /** The newest lines read, of every game; the lines' screen shows the current game's. */
     fun onHistory(lines: List<GameLine>) {
         history = lines
