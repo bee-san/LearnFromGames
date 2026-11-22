@@ -723,6 +723,7 @@ class LfgAccessibilityService : AccessibilityService() {
 
     private suspend fun captureLoop() {
         var lastFront: String? = null
+        var missed = 0
         var ticks = 0
         var stillLooks = 0
         while (scope.isActive) {
@@ -734,10 +735,15 @@ class LfgAccessibilityService : AccessibilityService() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // A database error naming the game: this look is skipped, the next tries again.
+                // A database error naming the game: this look is skipped, the next tries again. The game
+                // that was in front still is, for all this look can tell.
                 Log.w(TAG, "finding the game in front failed", e)
-                null
+                continue
             }
+            // While a word is looked up the controller is ours. One look that misses the game, as a window
+            // changes hands, must not hand the buttons back to it mid-press: it takes a few in a row.
+            if (now == null && front != null && controller.state.value.controllerMode && ++missed < LOST_LOOKS) continue
+            missed = 0
             front = now
             overlays.onOwnApp(ownAppOn)
             val prefs = app.settings.prefs.value
@@ -1097,6 +1103,9 @@ class LfgAccessibilityService : AccessibilityService() {
         private const val TEXT_ITEMS_MS = 5_000L
 
         /** How often, and how many times, the lookup window is looked for before its tap: a third of a second in all. */
+        /** Looks in a row that must miss the game before lookup mode gives it up: about a second. */
+        private const val LOST_LOOKS = 3
+
         private const val TAP_RETRY_MS = 30L
         private const val TAP_TRIES = 12
 
