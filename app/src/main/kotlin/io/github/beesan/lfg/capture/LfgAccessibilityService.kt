@@ -683,6 +683,8 @@ class LfgAccessibilityService : AccessibilityService() {
                 // The game went behind something else, or came back: the overlays follow at once.
                 val reading = pipeline.latest.value
                 if (now == null) controller.clear()
+                // A game has come to the front: its sound is wanted from here on, and Android has to be asked first.
+                else if (prefs.sentenceAudio && !now.game.app) SoundCapture.askOnce(this, now.displayId)
                 overlays.onScreen(now?.displayId ?: reading?.displayId ?: Display.INVALID_DISPLAY, now?.game?.tapStrips ?: true, now != null)
             }
             // No reader, no picture: nothing is captured until something can read it.

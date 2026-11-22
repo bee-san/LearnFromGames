@@ -31,7 +31,7 @@ data class Prefs(
     /** The cursor and a tap land only on kana and kanji. Off, on Latin letters and digits too; punctuation is always passed over. */
     val japaneseOnly: Boolean = false,
     /** Sentence audio from a rolling buffer of game sound. Needs screen recording consent each session. */
-    val sentenceAudio: Boolean = false,
+    val sentenceAudio: Boolean = true,
     /** Android's voice reads the line onto a card the game gave no voice. */
     val spokenLines: Boolean = true,
     /** An animated picture of the moments before the card was made, instead of a still. */
