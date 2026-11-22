@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import io.github.beesan.lfg.capture.DialogueSamples
 import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
@@ -690,6 +691,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val freed = before?.let { (it - usage.screens).coerceAtLeast(0) }
         val size = freed?.let { if (it < 1_048_576) ", ${(it + 1023) / 1024} KB" else ", ${(it + 524_288) / 1_048_576} MB" } ?: ""
         _storage.value = StorageState(usage, if (gone == 0) "Nothing to clear." else "Cleared $gone screen${if (gone == 1) "" else "s"}$size.")
+    }
+
+    /** The dialogue kept for training a better reader: how much, and the zip made to send it. */
+    data class DialogueState(
+        val kept: DialogueSamples.Kept? = null,
+        val busy: Boolean = false,
+        val zip: File? = null,
+        val message: String? = null,
+    )
+
+    private val _dialogue = MutableStateFlow(DialogueState())
+    val dialogue: StateFlow<DialogueState> = _dialogue
+
+    fun measureDialogue() = viewModelScope.launch(Dispatchers.IO) {
+        _dialogue.update { it.copy(kept = DialogueSamples.kept(app.filesDir), zip = null) }
+    }
+
+    /** Zips every kept screen; the page hands [DialogueState.zip] to the mail app once it is made. */
+    fun zipDialogue() = viewModelScope.launch(Dispatchers.IO) {
+        _dialogue.update { it.copy(busy = true, message = null, zip = null) }
+        val zip = runCatching { DialogueSamples.zip(app.filesDir, File(app.cacheDir, DialogueSamples.DIR)) }
+        _dialogue.update {
+            it.copy(
+                busy = false, zip = zip.getOrNull(),
+                message = when {
+                    zip.isFailure -> "Could not make the zip: ${zip.exceptionOrNull()?.message}"
+                    zip.getOrNull() == null -> "Nothing kept yet."
+                    else -> null
+                },
+            )
+        }
+    }
+
+    fun dialogueSent() = _dialogue.update { it.copy(zip = null) }
+
+    fun clearDialogue() = viewModelScope.launch(Dispatchers.IO) {
+        val gone = DialogueSamples.clear(app.filesDir)
+        File(app.cacheDir, DialogueSamples.DIR).listFiles()?.forEach { it.delete() }
+        _dialogue.value = DialogueState(DialogueSamples.kept(app.filesDir), message = "Deleted $gone screen${if (gone == 1) "" else "s"}.")
     }
 
     private val _diagnostics = MutableStateFlow<String?>(null)

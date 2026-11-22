@@ -110,7 +110,11 @@ class LfgAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         app = application as App
-        pipeline = ReadingPipeline(app.lines, File(filesDir, "frames"), apart = { app.settings.prefs.value.interfaceApart })
+        pipeline = ReadingPipeline(
+            app.lines, File(filesDir, "frames"),
+            apart = { app.settings.prefs.value.interfaceApart },
+            dialogueDir = { if (app.settings.prefs.value.keepDialogue) DialogueSamples.dir(filesDir) else null },
+        )
         controller = LookupController(
             scope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) }, ::prepareLine,
             selection = { app.settings.prefs.value.picking },

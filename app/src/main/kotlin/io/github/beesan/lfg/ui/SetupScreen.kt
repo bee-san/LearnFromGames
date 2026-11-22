@@ -42,6 +42,9 @@ fun SetupScreen(
     onRetryDownloads: () -> Unit,
     wifiOnly: Boolean = false,
     onWifiOnly: (Boolean) -> Unit = {},
+    /** Asked once: whether to keep every screen of dialogue for training a better reader. */
+    askKeepDialogue: Boolean = false,
+    onKeepDialogue: (Boolean) -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Set up", color = Lfg.Text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
@@ -128,8 +131,32 @@ fun SetupScreen(
                 Choice(listOf("any" to "Any network", "wifi" to "Only on Wi-Fi"), if (wifiOnly) "wifi" else "any") { onWifiOnly(it == "wifi") }
             }
         }
+        if (askKeepDialogue) KeepDialogueQuestion(onKeepDialogue)
     }
 }
+
+@Composable
+private fun KeepDialogueQuestion(onAnswer: (Boolean) -> Unit) {
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Enable saving full dialogue to improve the app?", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Text(KEEP_DIALOGUE_ASK, color = Lfg.Dim, fontSize = 15.sp, lineHeight = 21.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LfgButton("Yes", { onAnswer(true) }, primary = true)
+            LfgButton("No", { onAnswer(false) })
+        }
+    }
+}
+
+/** The set-up question's words, also on Settings › Help improve LFG. */
+internal const val KEEP_DIALOGUE_ASK =
+    "Making an OCR program is hard and expensive! You can help me for free by enabling it.\n\n" +
+        "LFG will save screenshots from every bit of dialogue you see, that way I can train a better OCR in the future, " +
+        "improving the app for free.\n\n" +
+        "These screenshots are not sent to me automatically. You have to go into Settings and share them with me."
 
 private fun mb(bytes: Long) = (bytes + 512 * 1024) / (1024 * 1024)
 private fun percent(bytes: Long, total: Long) = if (total > 0) bytes * 100 / total else 0

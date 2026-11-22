@@ -63,6 +63,8 @@ class ReadingPipeline(
     private val detector: SettleDetector = SettleDetector(),
     /** Whether menu labels, a HUD's words and name plates are told apart from lines ([InterfaceText]). */
     private val apart: () -> Boolean = { false },
+    /** Where each new line's whole screen is also kept, for good, to train a better reader; null when not asked to. */
+    private val dialogueDir: () -> File? = { null },
 ) {
     private val _latest = MutableStateFlow<Reading?>(null)
     val latest: StateFlow<Reading?> = _latest
@@ -260,8 +262,11 @@ class ReadingPipeline(
         val found = interfaceText.onReading(
             pieces.zip(sorted.parts).map { (piece, parts) -> (parts.singleOrNull() as? Part.Same)?.let { byId[it.id]?.lineText } ?: piece.text },
         )
+        // A screen with new text in a game, never an ordinary app's, is kept for the reader's training when asked.
+        val dialogue = dialogueDir()?.takeIf { !game.app && sorted.parts.any { parts -> parts.any { it !is Part.Same } } }
+            ?.let { dir -> Dialogue(dir, DialogueSamples.labels(game.title, engine.name, pieces, offsetX, offsetY, nowMs)) }
         // The frame is taken before any mark is drawn on the game, so it is the card's picture as is.
-        val framePath = Perf.measure("save.picture") { saveFrame(bitmap) }
+        val framePath = Perf.measure("save.picture") { saveFrame(bitmap, dialogue) }
         val appearedNow = detector.changeStartedMs.takeIf { it in 1..nowMs } ?: nowMs
         val fresh = ArrayList<Pair<GameLine, Box>>()
         // Interface text found on this reading: a label that stayed, or one come back again.
@@ -385,7 +390,10 @@ class ReadingPipeline(
         if (bytes != null) file.writeBytes(bytes) else file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, quality, it) }
     }
 
-    private fun saveFrame(frame: Bitmap): String? {
+    /** A screen kept for training: where it goes, and what was read from it. */
+    private class Dialogue(val dir: File, val labels: String)
+
+    private fun saveFrame(frame: Bitmap, dialogue: Dialogue? = null): String? {
         val copy = try {
             frame.copy(Bitmap.Config.ARGB_8888, false)
         } catch (_: Throwable) {
@@ -398,6 +406,11 @@ class ReadingPipeline(
                 Perf.measure("picture.write") { write(file, copy, 85) }
             } catch (_: Exception) {
                 file.delete()
+            }
+            try {
+                // Finer than the frame's own, so the strokes a reader learns from are not smudged.
+                if (dialogue != null) DialogueSamples.save(dialogue.dir, file.nameWithoutExtension, dialogue.labels) { write(it, copy, 95) }
+            } catch (_: Exception) {
             } finally {
                 copy.recycle()
             }

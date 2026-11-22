@@ -116,6 +116,13 @@ data class Prefs(
     val namesHonorifics: Boolean = true,
     /** Character cards keep what VNDB marks as spoilers. */
     val namesSpoilers: Boolean = false,
+    /**
+     * Keep the whole screen of every new line of game dialogue for good, with
+     * what was read from it, for the player to send to train a better reader.
+     * Asked once at set-up ([keepDialogueAsked]); nothing is sent by itself.
+     */
+    val keepDialogue: Boolean = false,
+    val keepDialogueAsked: Boolean = false,
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
@@ -211,6 +218,8 @@ class Settings(context: Context) {
             namesAuto = store.getBoolean("namesAuto", d.namesAuto),
             namesHonorifics = store.getBoolean("namesHonorifics", d.namesHonorifics),
             namesSpoilers = store.getBoolean("namesSpoilers", d.namesSpoilers),
+            keepDialogue = store.getBoolean("keepDialogue", d.keepDialogue),
+            keepDialogueAsked = store.getBoolean("keepDialogueAsked", d.keepDialogueAsked),
         )
     }
 
@@ -261,6 +270,8 @@ class Settings(context: Context) {
             .putBoolean("namesAuto", next.namesAuto)
             .putBoolean("namesHonorifics", next.namesHonorifics)
             .putBoolean("namesSpoilers", next.namesSpoilers)
+            .putBoolean("keepDialogue", next.keepDialogue)
+            .putBoolean("keepDialogueAsked", next.keepDialogueAsked)
             .apply()
         secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
         _prefs.value = next

@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.beesan.lfg.anki.AnkiBridge
+import io.github.beesan.lfg.capture.DialogueSamples
 import io.github.beesan.lfg.capture.LfgAccessibilityService
 import io.github.beesan.lfg.capture.SoundCapture
 import io.github.beesan.lfg.dict.DictState
@@ -133,7 +134,7 @@ class MainActivity : ComponentActivity() {
                 asked?.let { page = it }
                 requested.value = null
             }
-            val ready = setup.complete(dictionary, reader)
+            val ready = setup.complete(dictionary, reader) && prefs.keepDialogueAsked
             val showPractice = page == Page.PRACTICE || (page == Page.HOME && ready && !practiceDone)
 
             // The first word is looked up before anything is tapped, as the controller cursor is.
@@ -171,6 +172,8 @@ class MainActivity : ComponentActivity() {
                                 onRetryDownloads = model::retryDownloads,
                                 wifiOnly = prefs.wifiOnly,
                                 onWifiOnly = model::setWifiOnly,
+                                askKeepDialogue = !prefs.keepDialogueAsked,
+                                onKeepDialogue = { yes -> model.updatePrefs { it.copy(keepDialogue = yes, keepDialogueAsked = true) } },
                             )
                         }
                         showPractice -> Box(Modifier.verticalScroll(rememberScrollState())) {
@@ -321,6 +324,25 @@ class MainActivity : ComponentActivity() {
                                 onBack = ::back,
                             )
                         }
+                        page == Page.DIALOGUE -> {
+                            val dialogue by model.dialogue.collectAsStateWithLifecycle()
+                            LaunchedEffect(Unit) { model.measureDialogue() }
+                            LaunchedEffect(dialogue.zip) {
+                                dialogue.zip?.let {
+                                    sendDialogue(it)
+                                    model.dialogueSent()
+                                }
+                            }
+                            DialogueScreen(
+                                keep = prefs.keepDialogue,
+                                state = dialogue,
+                                onKeep = { on -> model.updatePrefs { it.copy(keepDialogue = on, keepDialogueAsked = true) } },
+                                onSend = model::zipDialogue,
+                                onClear = model::clearDialogue,
+                                onDiscord = { open(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(DialogueSamples.DISCORD))) },
+                                onBack = ::back,
+                            )
+                        }
                         page == Page.HELP -> {
                             val report by model.diagnostics.collectAsStateWithLifecycle()
                             LaunchedEffect(Unit) { model.gatherDiagnostics() }
@@ -468,6 +490,19 @@ class MainActivity : ComponentActivity() {
             .putExtra(Intent.EXTRA_SUBJECT, "LFG diagnostics")
             .putExtra(Intent.EXTRA_TEXT, report)
         open(Intent.createChooser(send, "Send the report"))
+    }
+
+    /** Hands the zip of kept dialogue to a mail app, addressed and titled. */
+    private fun sendDialogue(zip: java.io.File) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", zip)
+        val send = Intent(Intent.ACTION_SEND).setType("application/zip")
+            .putExtra(Intent.EXTRA_EMAIL, arrayOf(DialogueSamples.EMAIL))
+            .putExtra(Intent.EXTRA_SUBJECT, "LFG dialogue screenshots")
+            .putExtra(Intent.EXTRA_TEXT, "Screens of game dialogue saved by LFG, with the text it read from each, to train a better reader.")
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        send.clipData = android.content.ClipData.newRawUri("", uri)
+        open(Intent.createChooser(send, "Send the dialogue"))
     }
 
     private fun open(intent: Intent): Boolean = try {

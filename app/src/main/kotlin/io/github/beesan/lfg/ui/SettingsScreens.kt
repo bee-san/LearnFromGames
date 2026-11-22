@@ -159,6 +159,7 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Card("Other apps", "Read browsers, chat and ebooks when you ask", { onOpen(Page.APPS) })
     Card("Practice line", "Try a lookup and a card without a game", { onOpen(Page.PRACTICE) })
     Card("Storage", "What LFG keeps, and how long screens are kept", { onOpen(Page.STORAGE) })
+    Card("Help improve LFG", "Keep screens of dialogue, and send them to train a better reader", { onOpen(Page.DIALOGUE) })
     Card("Help and diagnostics", "A report to send with a bug, or after a first run on a new device", { onOpen(Page.HELP) })
 }
 
@@ -1038,7 +1039,7 @@ internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { STORAGE, HELP, HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE }
+enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINE, NOTES, NOTE_NEW, RECAP, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE }
 
 @Composable
 fun StorageScreen(
@@ -1075,6 +1076,40 @@ fun StorageScreen(
         LfgButton("Clean up now", onCleanUp)
         message?.let { Text("  $it", color = Lfg.Dim, fontSize = 14.sp) }
     }
+}
+
+@Composable
+fun DialogueScreen(
+    keep: Boolean,
+    state: MainViewModel.DialogueState,
+    onKeep: (Boolean) -> Unit,
+    onSend: () -> Unit,
+    onClear: () -> Unit,
+    onDiscord: () -> Unit,
+    onBack: () -> Unit,
+) = Page("Help improve LFG", onBack) {
+    Text(KEEP_DIALOGUE_ASK, color = Lfg.Text, fontSize = 15.sp, lineHeight = 22.sp)
+    Card("Save full dialogue", "Every new line of a game's dialogue: its whole screen, and the text LFG read from it. Never an ordinary app's.") {
+        OnOff(keep, onKeep)
+    }
+    val kept = state.kept
+    fun mb(bytes: Long) = if (bytes < 1_048_576) "${(bytes + 1023) / 1024} KB" else "${(bytes + 524_288) / 1_048_576} MB"
+    Card(
+        "Saved so far",
+        if (kept == null) "Counting…" else "${kept.screens} screen${if (kept.screens == 1) "" else "s"} · ${mb(kept.bytes)}. Kept until you delete them.",
+    )
+    Text(
+        "Send opens your mail app with every saved screen in one zip, addressed to ${io.github.beesan.lfg.capture.DialogueSamples.EMAIL}. " +
+            "Look before you send: a screen holds whatever the game showed. Many mail services refuse attachments over 25 MB; " +
+            "if yours does, join the LFG Discord and send it there, or post a Drive or other share link to it.",
+        color = Lfg.Dim, fontSize = 14.sp, lineHeight = 20.sp,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        LfgButton(if (state.busy) "Zipping…" else "Send…", onSend, primary = true, enabled = !state.busy && (kept?.screens ?: 0) > 0)
+        LfgButton("Join the Discord", onDiscord)
+        LfgButton("Delete all", onClear, enabled = !state.busy && (kept?.screens ?: 0) > 0)
+    }
+    state.message?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
 }
 
 @Composable
