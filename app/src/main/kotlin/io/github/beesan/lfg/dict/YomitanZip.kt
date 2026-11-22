@@ -31,6 +31,15 @@ internal class JsonBytes {
         return this
     }
 
+    /** Bytes that are already JSON, from [from] on. */
+    fun raw(b: ByteArray, from: Int = 0): JsonBytes {
+        val n = b.size - from
+        room(n)
+        System.arraycopy(b, from, bytes, size, n)
+        size += n
+        return this
+    }
+
     fun number(n: Int): JsonBytes = raw(n.toString())
 
     fun string(s: String): JsonBytes = utf8(s.toByteArray(Charsets.UTF_8))
