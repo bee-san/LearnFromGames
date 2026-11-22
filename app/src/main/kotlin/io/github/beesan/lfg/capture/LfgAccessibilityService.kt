@@ -658,7 +658,8 @@ class LfgAccessibilityService : AccessibilityService() {
         var ticks = 0
         var stillLooks = 0
         while (scope.isActive) {
-            // A screen that has not changed for a while is looked at half as often, until it does.
+            // A screen that has not changed for a while, or has gone on with no text in it, is looked at half
+            // as often, until it does or has.
             delay(if (stillLooks >= RESTING_AFTER) INTERVAL_MS * 2 else INTERVAL_MS)
             if (++ticks % PERF_EVERY == 0) Perf.report().takeIf { it.isNotEmpty() }?.let { Log.i("LfgPerf", it) }
             val now = try {
