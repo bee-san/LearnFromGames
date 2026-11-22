@@ -142,7 +142,7 @@ internal class RegionPicker(
         return when (drawing.stage) {
             BoxDrawing.Stage.AIMING -> when {
                 game == null -> "Drag a box around the text to read"
-                !pad -> "Drag a box around the dialogue. ${game.title} is then read only there."
+                !pad -> "Drag a box around the dialogue. ${game.title} is then read only there. Cancel on the lines' screen leaves."
                 else -> "Drag a box around the dialogue, or move to one of its corners and press $confirmName. $backName leaves."
             }
             BoxDrawing.Stage.STRETCHING -> if (pad) "$size · Move to the opposite corner and press $confirmName. $backName takes the corner back." else size

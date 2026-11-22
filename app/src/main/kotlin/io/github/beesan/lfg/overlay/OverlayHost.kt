@@ -654,15 +654,14 @@ class OverlayHost(
         val pad = lookup && displayId == gameDisplay
         if (pad) input.release()
         val view = RegionPicker(host.first, game, pad, prefs().swapConfirm, ::ownTouch) { picked ->
-            picker?.remove()
-            picker = null
-            pickerView = null
+            closePicker()
             onPicked(picked)
         }
         val win = Win(view, host.second, PICKER_FLAGS)
         picker = win
         pickerView = view
         win.place(0, 0, screen.width, screen.height)
+        panelView?.crop?.text = "Cancel"
     }
 
     /** Whether a box is being drawn. */
@@ -673,6 +672,7 @@ class OverlayHost(
         picker?.remove()
         picker = null
         pickerView = null
+        panelView?.crop?.text = "Crop"
     }
 
     fun destroy() {
@@ -1003,6 +1003,10 @@ class OverlayHost(
      */
     @SuppressLint("ViewConstructor")
     private inner class PanelView(context: Context) : LinearLayout(context) {
+        val crop = context.pill("Crop", primary = false, sizeSp = 13f) {
+            if (picking) closePicker() else if (gameInFront) onPickBox()
+        }
+
         private val pad = context.dp(16f)
 
         /** The entry in full: pictures, tables and each dictionary's own styling. */
@@ -1048,8 +1052,9 @@ class OverlayHost(
             stats.maxLines = 1
             stats.ellipsize = TextUtils.TruncateAt.END
             top.addView(title, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            // Crop: draw the box the game is read in, so only its dialogue goes to the reader.
-            top.addView(context.pill("Crop", primary = false, sizeSp = 13f) { if (gameInFront) onPickBox() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
+            // Crop: draw the box the game is read in, so only its dialogue goes to the reader. While
+            // the box is being drawn it is Cancel: a box drawn by finger has no other way out until it is drawn.
+            top.addView(crop, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
             top.addView(context.pill("Note", primary = false, sizeSp = 13f) { beginNote(Noting(newestOnScreen(), null), "Note on " + title.text) }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
             top.addView(context.pill("LFG", primary = false, sizeSp = 13f) { openApp() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
             header.addView(top)
