@@ -149,10 +149,14 @@ internal fun seeThrough(color: Int, percent: Int): Int = (color and 0x00FFFFFF) 
 
 /** `A Add card · B Close · ◀ ▶ Word · ▲ ▼ Row`: what replaces the button while the controller drives. */
 /** What the controller's buttons do in lookup mode, in a line. */
-internal fun keyHintsText(confirm: String, close: String, listen: Boolean = true, wholeWord: Boolean = true, stickWords: Boolean = false): String =
+internal fun keyHintsText(
+    confirm: String, close: String, listen: Boolean = true, wholeWord: Boolean = true, stickWords: Boolean = false, box: Boolean = false,
+): String =
     // Y says the word only with word audio installed (Settings › Dictionaries); without it, it is not offered.
     "$confirm Add card    $close Close    X Note    " + (if (listen) "Y Listen    " else "") +
-        (if (stickWords) "Stick" else "◀ ▶") + (if (wholeWord) " Word" else " Character") + "    ▲ ▼ Row    L1 R1 Entry"
+        (if (stickWords) "Stick" else "◀ ▶") + (if (wholeWord) " Word" else " Character") + "    ▲ ▼ Row    L1 R1 Entry" +
+        // Over a game, Select draws the box its dialogue is read in.
+        (if (box) "    Select Box" else "")
 
 internal fun Context.keyHints(text: String): TextView = label(12.5f, Ink.DIM).apply {
     this.text = text

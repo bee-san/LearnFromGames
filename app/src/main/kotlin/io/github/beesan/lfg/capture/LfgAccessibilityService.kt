@@ -26,6 +26,7 @@ import kotlinx.coroutines.Job
 import io.github.beesan.lfg.App
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.core.DialogueBox
 import io.github.beesan.lfg.core.GameStats
 import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.core.ReadingStats
@@ -38,6 +39,8 @@ import io.github.beesan.lfg.games.Hosts
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.overlay.OverlayHost
+import io.github.beesan.lfg.overlay.PickFor
+import io.github.beesan.lfg.overlay.Picked
 import io.github.beesan.lfg.ui.MainActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -120,7 +123,8 @@ class LfgAccessibilityService : AccessibilityService() {
             // While a reading is up, the button takes it away, a region kept reading included.
             onReadButton = { if (asked != null) endAsked() else ask() },
             onReadButtonHeld = { if (asked?.continuous == true) endAsked() else pickRegion() },
-            onRegion = { region, keep -> ask(region, keep) },
+            onPicked = ::onPicked,
+            onPickBox = { pickRegion() },
             onAsk = { id, what ->
                 scope.launch {
                     val result = withContext(Dispatchers.IO) {
@@ -187,6 +191,13 @@ class LfgAccessibilityService : AccessibilityService() {
                 // A new line on screen ends the sound of the one before it.
                 reading.appearedAtMs.maxOrNull()?.let { app.media.onNextLine(it) }
                 overlays.onScreen(reading.displayId, reading.game.tapStrips, front != null)
+                // The box was drawn from lookup: lookup comes back on the first lines read in it.
+                if (reading.lines.isNotEmpty() && afterBox?.isActive == true) {
+                    afterBox?.cancel()
+                    if (front != null && asked == null) controller.enterControllerMode()
+                    boxSaid?.let(::toast)
+                    boxSaid = null
+                }
             }
         }
         scope.launch { controller.state.collect(overlays::onState) }
@@ -340,10 +351,15 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun toggleLookup(anyApp: Boolean) {
         val state = controller.state.value
         when {
+            // A box is being drawn: the shortcut puts it away, as it would lookup.
+            overlays.picking -> overlays.closePicker()
             state.controllerMode -> controller.exitControllerMode()
             (front != null || asked != null) && state.lines.isNotEmpty() -> controller.enterControllerMode()
             // An ordinary app, read on demand: read it now, then hand the controller the cursor.
             front == null -> if (anyApp) ask(thenController = true)
+            // Nothing read in a game with a dialogue box: the box may be in the wrong place, and with no
+            // line there is no lookup to change it from. It is shown, to keep, draw again or take away.
+            front?.game?.let { app.dialogueBoxes[it.id] } != null -> pickRegion()
             !anyApp -> front?.let { overlays.notice(it.displayId, "LFG has read no text on this screen yet.") }
         }
     }
@@ -617,7 +633,11 @@ class LfgAccessibilityService : AccessibilityService() {
         overlays.onScreen(Display.INVALID_DISPLAY, true, false)
     }
 
-    /** Shows where a region can be dragged out on the app in front. */
+    /**
+     * Shows where a box can be drawn on the app in front. Over a game it is
+     * the game's dialogue box, which the game is then read in; over any other
+     * app, a region to read once or to keep reading.
+     */
     fun pickRegion(collapse: Boolean = false) {
         scope.launch {
             endAsked()
@@ -625,12 +645,80 @@ class LfgAccessibilityService : AccessibilityService() {
                 performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
                 delay(SHADE_MS)
             }
-            findFront().also { front = it }
-            val display = (front?.displayId ?: ordinaryFront?.displayId) ?: run {
+            val playing = findFront().also { front = it }
+            val display = (playing?.displayId ?: ordinaryFront?.displayId) ?: run {
                 toast("There is no app in front to read.")
                 return@launch
             }
-            overlays.pickRegion(display)
+            pickingOn = display
+            overlays.pickRegion(
+                display, playing?.game?.let { PickFor(it.id, it.title, dialogueBox(it, display)) },
+                lookup = controller.state.value.controllerMode,
+            )
+        }
+    }
+
+    /** The screen a box is being drawn on. */
+    private var pickingOn = Display.INVALID_DISPLAY
+
+    /**
+     * Running while the first lines read may bring lookup back, after a dialogue box was drawn from it.
+     * What was done is said when they do, or when the wait is over: said at once, on a screen whose
+     * picture is the whole of it, the words would be in the way of the reading they announce.
+     */
+    private var afterBox: Job? = null
+    private var boxSaid: String? = null
+
+    /** The game's dialogue box on this screen, or null for a game read on its whole screen. */
+    private fun dialogueBox(game: Game, displayId: Int): Box? {
+        val kept = app.dialogueBoxes[game.id] ?: return null
+        val screen = overlays.screen(displayId) ?: return null
+        return kept.on(screen.width, screen.height)
+    }
+
+    /** A box was drawn on the app in front, and this chosen for it. */
+    private fun onPicked(picked: Picked) {
+        val lookup = controller.state.value.controllerMode
+        when (picked) {
+            is Picked.Cancelled -> Unit
+            is Picked.Once, is Picked.Keep -> {
+                // The lines under lookup are the game's own; the box's take their place, and lookup with them.
+                if (lookup) controller.exitControllerMode()
+                if (picked is Picked.Once) ask(picked.box, thenController = lookup) else ask((picked as Picked.Keep).box, continuous = true)
+            }
+            is Picked.ForGame -> {
+                val screen = overlays.screen(pickingOn) ?: return
+                app.dialogueBoxes[picked.game.gameId] = DialogueBox(picked.box, screen.width, screen.height)
+                readAfresh(lookup, "${picked.game.title} is read only in this box now.")
+            }
+            is Picked.WholeScreen -> {
+                app.dialogueBoxes[picked.game.gameId] = null
+                readAfresh(lookup, "${picked.game.title} is read on its whole screen again.")
+            }
+        }
+    }
+
+    /**
+     * What a game is read in has changed: the lines of the old part go, and the
+     * new part is read at once. From lookup, lookup comes back on the first
+     * lines read, as Rubi's overlay stays open and reads the new box.
+     */
+    private fun readAfresh(lookup: Boolean, said: String) {
+        afterBox?.cancel()
+        // Nothing is read while lookup holds the screen.
+        if (lookup) controller.exitControllerMode()
+        controller.setLines(emptyList())
+        pipeline.forget()
+        if (!lookup) {
+            toast(said)
+            return
+        }
+        boxSaid = said
+        afterBox = scope.launch {
+            delay(LOOKUP_AFTER_BOX_MS)
+            // No text there now: lookup stays closed, and the next line is read as any other.
+            boxSaid?.let(::toast)
+            boxSaid = null
         }
     }
 
@@ -778,6 +866,8 @@ class LfgAccessibilityService : AccessibilityService() {
             val whole = window == null
             val frame = window ?: (if (overlays.drawingOnGame) null else uncopiedShot(null, now.displayId)) ?: continue
             Perf.add("shot", System.nanoTime() - shotAt)
+            // Where this game's dialogue is, if the player has drawn it: only that is read.
+            val area = dialogueBox(now.game, now.displayId)
             try {
                 val still = withContext(Dispatchers.Default) {
                     Perf.measure("frame") {
@@ -786,6 +876,7 @@ class LfgAccessibilityService : AccessibilityService() {
                         if (whole) 0 else now.bounds.left, if (whole) 0 else now.bounds.top,
                         // A picture of the game's own window has nothing else in it.
                         if (whole) now.covered else emptyList(),
+                        area,
                     )
                     }
                 }
@@ -1106,6 +1197,9 @@ class LfgAccessibilityService : AccessibilityService() {
         /** How often, and how many times, the lookup window is looked for before its tap: a third of a second in all. */
         /** Looks in a row that must miss the game before lookup mode gives it up: about a second. */
         private const val LOST_LOOKS = 3
+
+        /** How long after a dialogue box is drawn from lookup its first lines may bring lookup back: three looks. */
+        private const val LOOKUP_AFTER_BOX_MS = 2000L
 
         private const val TAP_RETRY_MS = 30L
         private const val TAP_TRIES = 12
