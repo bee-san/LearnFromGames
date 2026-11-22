@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -166,21 +167,36 @@ fun Modifier.padField(shape: Shape, singleLine: Boolean): Modifier = composed {
 /**
  * Up and down on the pad for a page: focus goes to the next control that way,
  * and where there is none (a page of text, the end of a list of notes) the
- * page scrolls instead, so everything on it can be read without touch.
+ * page scrolls instead, so everything on it can be read without touch. Once
+ * it has scrolled past the focused control, it keeps scrolling that way, and
+ * the other way scrolls back to the control before focus moves again: from a
+ * control scrolled out of sight, the nearest control "below" could be the
+ * page's own header.
  */
 fun Modifier.padScroll(scroll: ScrollableState): Modifier = composed {
     val focus = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     var height by remember { mutableIntStateOf(0) }
-    onSizeChanged { height = it.height }.onKeyEvent { event ->
+    // How far the page has scrolled beyond the focused control: down is positive.
+    var past by remember { mutableFloatStateOf(0f) }
+    onSizeChanged { height = it.height }.onFocusChanged { past = 0f }.onKeyEvent { event ->
         val down = when (event.key) {
             Key.DirectionDown -> true
             Key.DirectionUp -> false
             else -> return@onKeyEvent false
         }
         if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
-        if (!focus.moveFocus(if (down) FocusDirection.Down else FocusDirection.Up)) {
-            scope.launch { scroll.animateScrollBy((if (down) 0.6f else -0.6f) * height) }
+        val page = (if (down) 0.6f else -0.6f) * height
+        val back = past != 0f && (past > 0) != down
+        when {
+            // Back towards the focused control, no farther than where it was.
+            back -> scope.launch {
+                val by = if (down) minOf(page, -past) else maxOf(page, -past)
+                past += scroll.animateScrollBy(by)
+                if (kotlin.math.abs(past) < 1f) past = 0f
+            }
+            past == 0f && focus.moveFocus(if (down) FocusDirection.Down else FocusDirection.Up) -> past = 0f
+            else -> scope.launch { past += scroll.animateScrollBy(page) }
         }
         true
     }
