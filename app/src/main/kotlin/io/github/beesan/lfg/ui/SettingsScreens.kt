@@ -415,12 +415,15 @@ private fun SettingText(name: String, detail: String, value: String, secret: Boo
 
 @Composable
 fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Controls", onBack) {
-    Card("Lookup shortcut", "Starts and stops lookup with the controller. One button alone is kept from the game while you play, so the game cannot use that button. A pair reaches the game as well, so pick one it does not use.") {
+    Card("Lookup shortcut", "One button starts and stops lookup. While you play it is kept from the game, so pick one the game can do without.") {
         Choice(
-            listOf(
-                Prefs.SHORTCUT_L3 to "L3", Prefs.SHORTCUT_R3 to "R3", Prefs.SHORTCUT_SELECT to "Select", Prefs.SHORTCUT_START to "Start",
-                Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2", Prefs.SHORTCUT_SELECT_START to "Select + Start",
-            ),
+            listOf(Prefs.SHORTCUT_L3 to "L3", Prefs.SHORTCUT_R3 to "R3", Prefs.SHORTCUT_SELECT to "Select", Prefs.SHORTCUT_START to "Start"),
+            prefs.shortcut,
+        ) { v -> onChange { it.copy(shortcut = v) } }
+    }
+    Card("Or two buttons together", "The game gets both of these as well, so pick a pair it does nothing with.") {
+        Choice(
+            listOf(Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2", Prefs.SHORTCUT_SELECT_START to "Select + Start"),
             prefs.shortcut,
         ) { v -> onChange { it.copy(shortcut = v) } }
     }
