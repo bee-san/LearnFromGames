@@ -62,7 +62,7 @@ data class Game(
     @ColumnInfo(defaultValue = "") val detected: String = "",
     /** What named it: Cocoon, ES-DE, RetroArch, Eden or Steam; empty for the app itself. */
     @ColumnInfo(name = "named_by", defaultValue = "") val namedBy: String = "",
-    /** Invisible tap strips over each line; off for touch-driven games. */
+    /** No longer read: the tap strips are always on. Kept so the table needs no migration. */
     @ColumnInfo(name = "tap_strips") val tapStrips: Boolean = true,
     /**
      * [READ_AUTO], [READ_ON], [READ_OFF] or [READ_ON_DEMAND]. Automatic reads

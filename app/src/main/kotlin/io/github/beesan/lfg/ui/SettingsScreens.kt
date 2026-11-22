@@ -175,7 +175,7 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Item("Anki", "The note type and deck cards go to", Page.ANKI)
     Item("Controls", "The lookup shortcut, whole words or characters, and where the entry shows", Page.CONTROLS)
     Item("Text recognition", "ScreenAI, which reads the screen", Page.RECOGNITION)
-    Item("Games and apps", "Rename one, choose when it is read and if words on it can be tapped", Page.GAMES)
+    Item("Games and apps", "Rename one, choose when it is read", Page.GAMES)
     Item("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", Page.GAME_NAMES)
     Item("Character names", "A visual novel's cast from VNDB, so its names look up as its characters", Page.CHARACTER_NAMES)
     Item("Sound and pictures", "Sentence audio, spoken lines and animated pictures", Page.MEDIA)
@@ -607,13 +607,6 @@ fun GamesScreen(
                 ) { onUpdate(game.copy(reading = it.toInt())) }
             } else {
                 Text("In ${apps[game.packageName] ?: game.packageName}, named by ${game.namedBy}", color = Lfg.Dim, fontSize = 13.sp)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text("Tap words on the game", color = Lfg.Text, fontSize = 15.sp)
-                    Text("Turn off for games you play by touch, so your taps always reach the game.", color = Lfg.Dim, fontSize = 13.sp)
-                }
-                OnOff(game.tapStrips) { onUpdate(game.copy(tapStrips = it)) }
             }
             // An ordinary app is read when asked, a region at a time: only what is read by itself has a dialogue box.
             if (!game.app) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
