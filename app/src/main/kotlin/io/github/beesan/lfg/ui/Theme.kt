@@ -9,7 +9,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.ScrollableState
-import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -188,15 +188,20 @@ fun Modifier.padScroll(scroll: ScrollableState): Modifier = composed {
         if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
         val page = (if (down) 0.6f else -0.6f) * height
         val back = past != 0f && (past > 0) != down
-        when {
-            // Back towards the focused control, no farther than where it was.
-            back -> scope.launch {
-                val by = if (down) minOf(page, -past) else maxOf(page, -past)
-                past += scroll.animateScrollBy(by)
+        // At once rather than animated: the next press can come before an animation ends, and must
+        // know how far the page went. An animation cut short by the next one never says.
+        fun scrollBy(by: Float) {
+            past += by
+            scope.launch {
+                past += scroll.scrollBy(by) - by
                 if (kotlin.math.abs(past) < 1f) past = 0f
             }
+        }
+        when {
+            // Back towards the focused control, no farther than where it was.
+            back -> scrollBy(if (down) minOf(page, -past) else maxOf(page, -past))
             past == 0f && focus.moveFocus(if (down) FocusDirection.Down else FocusDirection.Up) -> past = 0f
-            else -> scope.launch { past += scroll.animateScrollBy(page) }
+            else -> scrollBy(page)
         }
         true
     }
