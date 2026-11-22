@@ -69,6 +69,13 @@ class InterfaceText {
         fun short(text: String): Boolean = text.codePointCount(0, text.length) <= SHORT
 
         /**
+         * One kana, kanji, letter or digit with nothing beside it: an icon or
+         * the edge of a picture read as a character. It is never a line. A
+         * mark alone (…, ！) can be one, and is not this.
+         */
+        fun lone(text: String): Boolean = text.codePointCount(0, text.length) == 1 && Character.isLetterOrDigit(text.codePointAt(0))
+
+        /**
          * Whether a short piece read at [nowMs] has come back often enough to be
          * interface text, given when it was saved before ([earlierMs], any order).
          */

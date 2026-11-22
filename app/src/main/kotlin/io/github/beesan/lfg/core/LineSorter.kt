@@ -42,7 +42,9 @@ class Sorted(val parts: List<List<Part>>, val menu: Boolean)
  *   very line its save opens on;
  * - back: on the last screen that was no menu, as a line is when a menu
  *   opened over it is closed; or one of the game's last [RECENT] lines (a
- *   backlog, a save slot, the line a loaded save opens on). A line of [LONG]
+ *   backlog, a save slot, the line a loaded save opens on), unless the story
+ *   is moving on and the piece arrives alone: then it is that line said
+ *   again, which is a new line. A line of [LONG]
  *   characters or more may differ by a character, and by two from twice that,
  *   as long as it is not one number for another; a shorter one must be exact,
  *   and is taken for an old line only when [BUSY] or more pieces arrive
@@ -116,6 +118,9 @@ class LineSorter {
     /** The last reading that was no menu's screen: what is under a menu while it is open. */
     private var story: List<Shown> = emptyList()
 
+    /** Whether the reading before this one was a menu's screen. */
+    private var menuBefore = false
+
     /**
      * What each of [pieces] is. [recent] is the game's last [RECENT] lines,
      * newest first, and [known] its interface text. [apart]: whether interface
@@ -159,10 +164,14 @@ class LineSorter {
             if (parts[i] == null) open += i
         }
 
-        // One of the game's last lines, shown again.
+        // One of the game's last lines, shown again. While the story moves on, the line kept last being the
+        // one that was just on screen, a piece like an older line that arrives alone is that line said
+        // again, and new: old lines come back after a menu, in a crowd, or when nothing is remembered.
         val busy = open.size >= BUSY
+        val onStory = story.flatMapTo(HashSet()) { shown -> shown.parts.map { it.id } }
+        val movingOn = before != null && !menuBefore && newest.any { it.id in onStory }
         open.removeAll { i ->
-            val row = old(texts[i], far, newest, busy) ?: return@removeAll false
+            val row = old(texts[i], far, newest, busy, movingOn) ?: return@removeAll false
             parts[i] = listOf(Part.Same(0, pieces[i].length, row.id))
             true
         }
@@ -190,6 +199,7 @@ class LineSorter {
     fun shown(pieces: List<String>, held: List<List<Held>>, menu: Boolean) {
         val now = pieces.indices.map { Shown(pieces[it], held[it]) }
         before = now
+        menuBefore = menu
         if (!menu) story = now
     }
 
@@ -199,6 +209,7 @@ class LineSorter {
     /** Forget what was on screen. */
     fun reset() {
         before = null
+        menuBefore = false
         story = emptyList()
     }
 
@@ -294,9 +305,9 @@ class LineSorter {
     }
 
     /** The one of the game's last lines that [text] is, if it is one. */
-    private fun old(text: Squeezed, far: List<Row>, newest: List<Row>, busy: Boolean): Row? {
+    private fun old(text: Squeezed, far: List<Row>, newest: List<Row>, busy: Boolean, movingOn: Boolean): Row? {
         rowIn(newest, text)?.let { return it }
-        if (text.size >= LONG || busy) rowIn(far, text)?.let { return it }
+        if ((text.size >= LONG && !movingOn) || busy) rowIn(far, text)?.let { return it }
         return if (busy) far.firstOrNull { begins(text, 0, it.text) } else null
     }
 
