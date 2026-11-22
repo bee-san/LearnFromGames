@@ -81,6 +81,40 @@ class LineSorterTest {
     }
 
     @Test
+    fun aLineSaidAgainWhileTheStoryMovesOnIsANewLine() {
+        // CLANNAD, on the Thor: she says it, he thinks, she says it again.
+        val game = Game()
+        val first = game.read("少女「私の手づくりなの」")
+        game.read("聞いてないっての。")
+        val again = game.read("少女「私の手づくりなの」")
+        assertNotEquals(first, again)
+        assertEquals(listOf("少女「私の手づくりなの」", "聞いてないっての。", "少女「私の手づくりなの」"), game.lines)
+        // But read again after a menu was over it, it is the same line.
+        game.read(*menu)
+        assertEquals(again, game.read("少女「私の手づくりなの」"))
+        assertEquals(3, game.lines.size)
+    }
+
+    @Test
+    fun linesReadAgainAfterLoadingASaveAreTheLinesAlreadyKept() {
+        val game = Game()
+        val lines = listOf(
+            "図書室は、飲食禁止だった気がする。", "タッパーの中を指さす。この辺が自信作らしい。", "朋也「たしかに、うまそうだけどな…」",
+            "少女「今日のメニューは、出汁巻き卵と肉じゃがなの」", "俺はしみじみそう思う。それだけのことだった。",
+        )
+        val rows = lines.map { game.read(it) }
+        // The load screen, then the save's line and those after it, one at a time as before.
+        game.read(*menu)
+        assertEquals(rows[1], game.read(lines[1]))
+        assertEquals(rows[2], game.read(lines[2]))
+        assertEquals(rows[4], game.read(lines[4]))
+        assertEquals(5, game.lines.size)
+        // Past the last line kept, the story is new again.
+        game.read("ここからは新しい文章になります。")
+        assertEquals(6, game.lines.size)
+    }
+
+    @Test
     fun linesThatDifferOnlyInANumberAreEachALine() {
         val game = Game()
         for (day in 1..12) game.read("それから${day}日目の朝が来て、また同じ一日が始まった。")

@@ -237,7 +237,7 @@ class ReadingPipeline(
                     is Part.New -> null
                 } ?: run {
                     val isInterface = telling && (
-                        (part as? Part.New)?.interfaceText == true || (alone && line.text in found) ||
+                        (part as? Part.New)?.interfaceText == true || InterfaceText.lone(line.text) || (alone && line.text in found) ||
                             (alone && InterfaceText.short(line.text) && InterfaceText.comesBack(line.text, store.savedTimes(game, line.text), nowMs))
                                 .also { if (it) newly += line.text }
                         )

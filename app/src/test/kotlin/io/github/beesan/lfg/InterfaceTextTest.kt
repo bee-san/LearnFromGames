@@ -71,4 +71,15 @@ class InterfaceTextTest {
         val line = "ようこそ！ここは港町のよろず屋だよ。"
         assertFalse(InterfaceText.comesBack(line, listOf(now - 60 * minute, now - 30 * minute), now))
     }
+
+    @Test
+    fun aCharacterAloneIsNoLineButAMarkAloneMayBe() {
+        // An icon read as a character on the Thor: 目 in CLANNAD, シ in Senren Banka.
+        assertTrue(InterfaceText.lone("目"))
+        assertTrue(InterfaceText.lone("シ"))
+        assertTrue(InterfaceText.lone("ー"))
+        assertFalse(InterfaceText.lone("…"))
+        assertFalse(InterfaceText.lone("！"))
+        assertFalse(InterfaceText.lone("え？"))
+    }
 }
