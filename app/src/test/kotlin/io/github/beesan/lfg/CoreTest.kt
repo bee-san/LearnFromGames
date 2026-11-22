@@ -123,6 +123,41 @@ class CoreTest {
     }
 
     @Test
+    fun aLineThatAppearsWholeAndEndsASentenceIsReadAtOnce() {
+        val d = SettleDetector(stillMs = 300)
+        assertTrue(d.offer("こんにちは。", 0))
+        assertFalse(d.offer("こんにちは。", 350)) // already read
+        assertTrue(d.offer("「そうだね」", 700))   // speech opened and closed, with no full stop
+        assertTrue(d.offer("ユイ\n「本当に？」", 1_050))
+        // No end to it: it may be half typed, or cut by the box's edge.
+        assertFalse(d.offer("それは、つまり", 1_400))
+        assertTrue(d.offer("それは、つまり", 1_750))
+        // Dots are typed one at a time.
+        assertFalse(d.offer("「……", 2_100))
+        assertFalse(d.offer("そうか……", 2_450))
+    }
+
+    @Test
+    fun aLineBeingTypedWaitsEvenAtAFullStop() {
+        val d = SettleDetector(stillMs = 300)
+        assertFalse(d.offer("でも、", 0))
+        // Caught at the rest after the first sentence: more is coming.
+        assertFalse(d.offer("でも、近づいたら消えてしまった。", 350))
+        assertFalse(d.offer("でも、近づいたら消えてしまった。\nあれは一体何だったんだろう。", 700))
+        assertTrue(d.offer("でも、近づいたら消えてしまった。\nあれは一体何だったんだろう。", 1_050))
+    }
+
+    @Test
+    fun aHelpLineThatStaysDoesNotEndTheStorysLine() {
+        val d = SettleDetector(stillMs = 300)
+        assertTrue(d.offer("前の行だ。\nAボタンで決定します。", 0))
+        assertFalse(d.offer("次の行は\nAボタンで決定します。", 350))
+        assertTrue(d.offer("次の行は\nAボタンで決定します。", 700))
+        assertFalse(SettleDetector.ended("彼は「無理だ」", ""))
+        assertFalse(SettleDetector.ended("所持金 100G", ""))
+    }
+
+    @Test
     fun aBlankScreenNeverSettlesAndTheSameLineIsNotReadTwice() {
         val d = SettleDetector(stillMs = 300)
         d.offer("a", 0)
@@ -139,8 +174,7 @@ class CoreTest {
     @Test
     fun aLinesStartIsWhenItBeganToAppearNotWhenItFinishedTyping() {
         val d = SettleDetector(stillMs = 300)
-        d.offer("前の行。", 0)
-        assertTrue(d.offer("前の行。", 400))
+        assertTrue(d.offer("前の行。", 0))
         // The next line types itself out from 5 000 ms and holds still from 5 700.
         assertFalse(d.offer("こ", 5_000))
         assertFalse(d.offer("こん", 5_350))

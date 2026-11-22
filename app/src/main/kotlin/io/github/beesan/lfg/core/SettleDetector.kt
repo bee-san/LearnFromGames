@@ -15,8 +15,14 @@ package io.github.beesan.lfg.core
  * signatures count as the same text when only a few characters in a hundred
  * differ, and text that never holds still at all is read anyway after
  * [restlessMs], rather than never.
+ *
+ * Text that appears all at once and ends where a sentence does ([ended]) is
+ * not waited for: it is taken as whole on the first picture of it. Text seen
+ * growing is being typed out and waits to hold still, as before.
+ * [atSentenceEnd] turns that off. After PlayTranslate's sentence boundary
+ * release; measured by SettleBench.
  */
-class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Long = 6_000) {
+class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Long = 6_000, private val atSentenceEnd: Boolean = true) {
     private var candidate = ""
     private var candidateSince = 0L
     private var lastSettled = ""
@@ -56,13 +62,17 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
         }
         if (!same(signature, candidate)) {
             // A line typing itself out grows from the one before it; anything else is a new line.
-            if (!(candidate.isNotEmpty() && signature.startsWith(candidate)) || candidate == showing) changeStartedMs = nowMs
+            val growing = candidate.isNotEmpty() && signature.startsWith(candidate)
+            if (!growing || candidate == showing) changeStartedMs = nowMs
             candidate = signature
             candidateSince = nowMs
             if (signature.isEmpty() || same(signature, lastSettled)) {
                 restlessSince = 0L
                 return false
             }
+            // Whole on the first picture of it. Text growing from the look before is being typed, and a
+            // rest after a full stop in the middle of a page looks just like its end: that waits, as ever.
+            if (atSentenceEnd && !growing && ended(signature, lastSettled)) return settle(signature)
             if (restlessSince == 0L) restlessSince = nowMs
             // Still changing after all this time: it is not typing out, it is a screen that never holds still.
             return nowMs - restlessSince >= restlessMs && settle(signature, restless = true)
@@ -95,6 +105,31 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
     }
 
     companion object {
+        private const val ENDS = "。．！？!?‼⁉⁈⁇"
+        private const val CLOSES = "」』）)】"
+        private const val OPENS = "「『（(【"
+
+        /**
+         * Whether the text new since [before] ends where a sentence does: the last row of [signature]
+         * that [before] had not ends in a full stop, a question or an exclamation mark, with or without
+         * the bracket that closes speech after it; or is speech opened and closed, as 「そうだね」 is.
+         * Dots do not count: 「……」 is typed a dot at a time. Rows that were there before are left out,
+         * so a help line under the story that ends in a full stop does not make every look a whole line.
+         */
+        fun ended(signature: String, before: String): Boolean {
+            val old = before.split('\n')
+            val row = signature.split('\n').lastOrNull { it.isNotBlank() && it !in old }?.trimEnd() ?: return false
+            val text = row.trimEnd { it in CLOSES }
+            if (text.isEmpty()) return false
+            if (text.last() in ENDS) return true
+            // Speech with no full stop: closed by the bracket that the new rows opened with.
+            if (text.length == row.length) return false
+            val first = signature.split('\n').firstOrNull { it.isNotBlank() && it !in old }?.trimStart() ?: return false
+            val opened = OPENS.indexOf(first.first())
+            return opened >= 0 && CLOSES.indexOf(row.last()).let { it == opened || (opened == 3 && it == 2) || (opened == 2 && it == 3) } &&
+                signature.count { it == first.first() } == signature.count { it == row.last() }
+        }
+
         /**
          * Whether two signatures are the same text, give or take the first pass's noise: at most one
          * character in twenty added, lost or changed. Short text allows none, so a one-word change counts.
