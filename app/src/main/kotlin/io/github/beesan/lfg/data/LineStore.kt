@@ -73,8 +73,28 @@ class LineStore(private val db: LfgDatabase, private val onSaved: (GameLine) -> 
 
     suspend fun setCrop(lineId: String, path: String) = db.lines().setCrop(lineId, path)
 
-    /** The last few lines saved for a game, newest first. */
-    suspend fun recent(game: Game, limit: Int = 6): List<GameLine> = db.lines().lastOf(game.id, limit)
+    /** A game's last lines, newest first, its interface text left out: what a piece just read is held against. */
+    suspend fun recentLines(game: Game, limit: Int): List<GameLine> = db.lines().lastLines(game.id, limit)
+
+    /** The line of exactly this text in a game, however long ago it was kept. */
+    suspend fun lineOf(game: Game, text: String): GameLine? = db.lines().lineOf(game.id, text)
+
+    suspend fun line(id: String): GameLine? = db.lines().byId(id)
+
+    /**
+     * A line that was read half typed has been read whole: its row holds all
+     * of it now, where it is on screen and the picture that shows all of it.
+     * It keeps the moment it first appeared.
+     */
+    suspend fun grow(line: GameLine, text: String, box: Box?, screenshotPath: String?, nowMs: Long = System.currentTimeMillis()): GameLine {
+        val grown = line.copy(
+            lineText = text, charCount = text.codePointCount(0, text.length), box = box?.encode() ?: line.box,
+            screenshotPath = screenshotPath ?: line.screenshotPath, lastModified = nowMs,
+        )
+        db.lines().grow(grown.id, grown.lineText, grown.charCount, grown.box, grown.screenshotPath, nowMs)
+        onSaved(grown)
+        return grown
+    }
 
     suspend fun recordLookup(lineId: String, term: String, reading: String, nowMs: Long = System.currentTimeMillis()) {
         db.lookups().insert(LookupRecord(lineId = lineId, term = term, reading = reading, timestamp = nowMs / 1000.0))

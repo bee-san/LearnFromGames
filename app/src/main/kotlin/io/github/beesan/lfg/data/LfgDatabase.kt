@@ -25,8 +25,17 @@ interface LineDao {
     @Query("SELECT * FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC LIMIT :limit")
     fun recent(limit: Int): Flow<List<GameLine>>
 
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId ORDER BY created_at DESC LIMIT :limit")
-    suspend fun lastOf(gameId: String, limit: Int): List<GameLine>
+    /** A game's last lines, newest first, its interface text left out: what a piece just read is held against. */
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND interface_text = 0 AND source != 'practice' ORDER BY created_at DESC, rowid DESC LIMIT :limit")
+    suspend fun lastLines(gameId: String, limit: Int): List<GameLine>
+
+    /** The newest line of exactly this text in a game, however long ago it was kept. */
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND line_text = :text AND interface_text = 0 ORDER BY created_at DESC LIMIT 1")
+    suspend fun lineOf(gameId: String, text: String): GameLine?
+
+    /** A line that was read half typed is the whole of it now, with the picture that shows the whole of it. */
+    @Query("UPDATE game_lines SET line_text = :text, char_count = :chars, box = :box, screenshot_path = :picture, last_modified = :now WHERE id = :id")
+    suspend fun grow(id: String, text: String, chars: Int, box: String, picture: String?, now: Long)
 
     /** The line read next after a given moment in the same game: where the earlier line's sound ends. */
     @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND created_at > :afterMs ORDER BY created_at LIMIT 1")

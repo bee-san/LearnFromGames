@@ -3,6 +3,7 @@ package io.github.beesan.lfg.ocr
 
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.CharBox
+import io.github.beesan.lfg.core.Selectable
 import io.github.beesan.lfg.core.TextLine
 import java.text.Normalizer
 
@@ -30,6 +31,12 @@ import java.text.Normalizer
  *    of a line whose other end has its pair, or at both ends around Japanese;
  *  - a line of letters or digits with nothing Japanese in it goes: a menu's
  *    English, a number, scene art. A line of marks alone (……, !?) stays.
+ *
+ * And one from the AYN Thor (Senren Banka's quick-save prompt, 2026-11-22):
+ *
+ *  - a piece with no letter or digit in it that is not made of the marks a
+ *    line of dialogue is made of alone (……, !?, ――, 「」, ♪) goes: a
+ *    checkbox, an icon or the text box's cursor read as a character (□, ▼).
  */
 object TextClean {
     /** One piece of the line: usually one character and its box; a space between words has none. */
@@ -42,7 +49,7 @@ object TextClean {
         longVowels(pieces)
         brackets(pieces)
         val text = pieces.joinToString("") { it.text }
-        if (border(text) || foreign(text)) return null
+        if (border(text) || foreign(text) || stray(text)) return null
         if (text == line.text) return line
         val chars = ArrayList<CharBox>(pieces.size)
         var at = 0
@@ -235,6 +242,21 @@ object TextClean {
     /** Kana, kanji, or a mark only Japanese text uses (…, 「」, 。, ―, ~). */
     private fun japanese(c: Int) = isHira(c) || isKata(c) || isKanji(c) || c in 0x3000..0x303F ||
         c == '…'.code || c == '‥'.code || c == '―'.code || c == '・'.code || c == '~'.code
+
+    /** The marks a line of dialogue can be made of with no word in it: ……, !?, ――, ♪. Brackets are told by their kind. */
+    private const val MARKS = "…‥―ー—–-！？!?♪～~・。、.,♡♥☆★\"'"
+
+    private fun bracket(c: Int) = when (Character.getType(c).toByte()) {
+        Character.START_PUNCTUATION, Character.END_PUNCTUATION, Character.INITIAL_QUOTE_PUNCTUATION, Character.FINAL_QUOTE_PUNCTUATION -> true
+        else -> false
+    }
+
+    /** No letter or digit, and not the marks of a wordless line either: a checkbox, an icon, a cursor read as a character. */
+    private fun stray(text: String): Boolean {
+        val points = text.codePoints().toArray()
+        if (points.any { Character.isLetterOrDigit(it) || Selectable.isJapaneseLetter(it) }) return false
+        return !points.all { Character.isWhitespace(it) || Character.isSpaceChar(it) || (it <= 0xFFFF && it.toChar() in MARKS) || bracket(it) }
+    }
 
     /** Letters or digits and nothing Japanese: a menu's English, a number, scene art. */
     private fun foreign(text: String): Boolean = text.any { it.isLetterOrDigit() } && text.none { japanese(it.code) }

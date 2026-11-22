@@ -10,22 +10,10 @@ class InterfaceTextTest {
     private val minute = 60_000L
 
     @Test
-    fun aMenuIsACrowdOfShortLabels() {
+    fun piecesOnScreenTogetherAreNotInterfaceForThat() {
+        // Which pieces came as a menu does is LineSorter's to tell: it knows what has just arrived.
         val menu = listOf("オーディオ", "ビデオ", "コントロール", "ネットワーク", "システム", "ゲームを終了する")
-        assertEquals(menu.toSet(), InterfaceText().onReading(menu))
-    }
-
-    @Test
-    fun aNovelPageIsNoMenu() {
-        // Six pieces, but sentences: only the short one is taken.
-        val page = List(5) { "これは長い文章の${it}行目で、まだまだ続いていきます。" } + "……"
-        assertEquals(setOf("……"), InterfaceText().onReading(page))
-    }
-
-    @Test
-    fun aTextBoxAndItsChoicesAreNoMenu() {
-        val screen = listOf("アリス", "どうする？", "戦う", "逃げる", "話す")
-        assertTrue(InterfaceText().onReading(screen).isEmpty())
+        assertTrue(InterfaceText().onReading(menu).isEmpty())
     }
 
     @Test

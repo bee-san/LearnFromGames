@@ -31,7 +31,7 @@ LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSent
 - **Sentence audio**: the game's own voice for the line, with the music around it cut away. Android has to ask before LFG may listen, so its question comes up by itself when you open a game: one tap, once a session. Say no and it is not asked again; Start on the Lines page begins it later. A line the game does not speak is read by Android's voice instead.
 - **Moving pictures**, if you switch them on: an animated picture of the line appearing.
 - **Your dictionaries.** Hachidori's starter set is fetched at first run: Jitendex, JMnedict, Bee's Ultimate Kanji Dictionary, Jiten's frequencies and Bee's Ultimate Grammar Dictionary. Add any Yomitan dictionary zip and it is shown with its own styling. Pitch accent dictionaries draw the accent over the reading, frequency dictionaries show their ranks, and local-audio-yomichan's `android.db` lets you hear the word.
-- **Every line is kept**, so you can mine after the session and see reading time, characters, speed and your streak.
+- **Every line is kept, once**, so you can mine after the session and see reading time, characters, speed and your streak. A line shown again when a menu closes, in the backlog or on a save screen is the line you already have; a text box that fills sentence by sentence is a line for each sentence; and a menu's text stays out.
 
 ## How it works
 
@@ -71,8 +71,11 @@ Reading and lookup run on the device. The network is used for the first-run down
   of text on screen the panel listed them all and pushed the entry off it.
   Still wrong there: icons beside labels are read as stray characters
   ("[1) オーディオ"). Every menu label was saved as a line; menus and labels
-  are now told apart (`core/InterfaceText.kt`) and kept out of Lines and the
-  stats, but this has not been run against PPSSPP again.
+  are now told apart (`core/InterfaceText.kt`, and `core/LineSorter.kt` for
+  text that arrives six pieces or more at once, as a menu's does) and kept out
+  of Lines and the stats, but this has not been run against PPSSPP again, nor
+  against any game: the rules are checked on written-out sequences of
+  readings (`LineSorterTest`).
 - **Lapis 1.7.0 and Senren 5.1.0**, imported into AnkiDroid from their release
   decks: a card made from the game lands in the right fields of each. Kiku
   2.1.0's fields are checked against the mapping but no card was made in it.

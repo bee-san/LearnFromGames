@@ -5,6 +5,7 @@ import io.github.beesan.lfg.core.CharBox
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.ocr.TextClean
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -80,6 +81,16 @@ class TextCleanTest {
         assertEquals("……", clean("……"))
         assertEquals("OK~", clean("OK～"))
         assertEquals("J…………", clean("J…………"))
+    }
+
+    @Test
+    fun aSymbolReadAsACharacterGoesAndWordlessLinesStay() {
+        // Senren Banka's quick-save prompt on the AYN Thor: its checkbox was kept as a line.
+        assertNull(clean("□"))
+        assertNull(clean("▼"))
+        assertNull(clean("→ ■"))
+        for (line in listOf("……。", "――", "「……」", "♪", "!?", "・・・", "～♡", "〇〇")) assertNotNull(line, clean(line))
+        assertEquals("□を押す", clean("□を押す"))
     }
 
     /** ScreenAI can give one box to several dots, or to a whole word with no symbols of its own. */

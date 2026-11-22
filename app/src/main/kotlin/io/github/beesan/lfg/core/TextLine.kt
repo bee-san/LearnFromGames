@@ -97,6 +97,21 @@ data class TextLine(
         return hit.groupBy(::rowOf).toSortedMap().values.map { row -> row.map { it.box }.reduce(Box::union) }
     }
 
+    /**
+     * `[from, to)` of [text] as a line of its own, with the rows it is drawn
+     * on: one sentence of a page that holds several. A row it shares with the
+     * text before or after it is cut to its own characters.
+     */
+    fun slice(from: Int, to: Int): TextLine {
+        val part = chars.filter { it.start >= from && it.end <= to }
+        // No places to cut by: the text alone, where the whole piece is.
+        if (part.isEmpty()) return copy(text = text.substring(from, to), chars = emptyList())
+        val drawn = part.groupBy(::rowOf).toSortedMap().values.map { row -> row.map { it.box }.reduce(Box::union) }
+        return TextLine(
+            text.substring(from, to), drawn.reduce(Box::union), part.map { CharBox(it.start - from, it.end - from, it.box) }, vertical, drawn,
+        )
+    }
+
     /** One box around the whole span, whatever rows it is on. */
     fun spanBox(start: Int, end: Int): Box? = spanBoxes(start, end).reduceOrNull(Box::union)
 }
