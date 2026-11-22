@@ -62,6 +62,16 @@
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- A see-through screen over the game while lookup is on: taps and buttons land here, not on the game. -->
+        <activity
+            android:name=".ui.CoverActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:label="LFG lookup cover"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen" />
+
         <!-- "LFG" in the text-selection menu of any app: a lookup of the selection, with no overlay. -->
         <activity
             android:name=".ui.SelectionActivity"

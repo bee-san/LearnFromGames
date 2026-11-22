@@ -18,6 +18,12 @@ data class Prefs(
      * round: for a handheld whose stick is where the thumb rests, as the AYN Thor's is.
      */
     val stickWords: Boolean = false,
+    /**
+     * While a word is looked up with the controller, a see-through screen of
+     * ours lies over the game ([io.github.beesan.lfg.ui.CoverActivity]), so no
+     * tap or button can reach it.
+     */
+    val coverGame: Boolean = false,
     /** Days a line's screen is kept, unless a card or a recap took it; 0 keeps every one. */
     val keepScreensDays: Int = 14,
     /** The first run's downloads wait for an unmetered network. */
@@ -152,6 +158,7 @@ class Settings(context: Context) {
             shortcut = store.getString("shortcut", d.shortcut) ?: d.shortcut,
             swapConfirm = store.getBoolean("swapConfirm", d.swapConfirm),
             stickWords = store.getBoolean("stickWords", d.stickWords),
+            coverGame = store.getBoolean("coverGame", d.coverGame),
             keepScreensDays = store.getInt("keepScreensDays", d.keepScreensDays),
             wifiOnly = store.getBoolean("wifiOnly", d.wifiOnly),
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
@@ -199,6 +206,7 @@ class Settings(context: Context) {
             .putString("shortcut", next.shortcut)
             .putBoolean("swapConfirm", next.swapConfirm)
             .putBoolean("stickWords", next.stickWords)
+            .putBoolean("coverGame", next.coverGame)
             .putInt("keepScreensDays", next.keepScreensDays)
             .putBoolean("wifiOnly", next.wifiOnly)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)
