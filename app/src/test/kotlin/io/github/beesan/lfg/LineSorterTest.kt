@@ -81,6 +81,42 @@ class LineSorterTest {
     }
 
     @Test
+    fun wordsInThePictureReadDifferentlyAtEachLookAreOnePiece() = runBlocking {
+        // CLANNAD's library, on the Thor: a book's spine behind the text box, taken a little differently with each line.
+        val sorter = LineSorter()
+        val rows = ArrayList<KeptLine>()
+        val box = Box(100, 800, 1500, 900)
+        val spine = Box(1700, 300, 1760, 560)
+        suspend fun read(vararg pieces: Pair<String, Box>): List<String> {
+            val texts = pieces.map { it.first }
+            val places = pieces.map { it.second }
+            val sorted = sorter.sort(texts, rows.asReversed(), places = places)
+            val held = texts.mapIndexed { i, text ->
+                val part = sorted.parts[i].single()
+                val id = when (part) {
+                    is Part.Same -> part.id
+                    is Part.Grown -> part.id
+                    is Part.New -> "r${rows.size + 1}".also { rows += KeptLine(it, text, rows.size + 1L) }
+                }
+                listOf(Held(0, text.length, id, rows.first { it.id == id }.text))
+            }
+            sorter.shown(texts, held, sorted.menu, places)
+            return held.map { it[0].id }
+        }
+        val first = read("少女「今日のは、粘土じゃないから」" to box, "重学の基礎(朝超" to spine)
+        val second = read("朋也「…普段は粘土で作った弁当を食ってるのか?」" to box, "重字の基礎(朝场" to spine)
+        val third = read("少女「食べないの。お腹こわすから」" to box, "重字の基礎(制超)" to spine)
+        // The spine is one row throughout, and each line its own.
+        assertEquals(first[1], second[1])
+        assertEquals(first[1], third[1])
+        assertEquals(4, rows.size)
+        // Two lines alike in the same place are still two lines: nothing else on the reading was new.
+        val one = read("そうなのかもしれない。" to box, "重字の基礎(制超)" to spine)
+        val other = read("そうなのかもしれぬ。" to box, "重字の基礎(制超)" to spine)
+        assertNotEquals(one[0], other[0])
+    }
+
+    @Test
     fun aLineSaidAgainWhileTheStoryMovesOnIsANewLine() {
         // CLANNAD, on the Thor: she says it, he thinks, she says it again.
         val game = Game()
