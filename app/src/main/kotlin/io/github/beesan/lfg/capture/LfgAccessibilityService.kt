@@ -294,6 +294,7 @@ class LfgAccessibilityService : AccessibilityService() {
         val (first, second) = when (app.settings.prefs.value.shortcut) {
             Prefs.SHORTCUT_L1_R1 -> KeyEvent.KEYCODE_BUTTON_L1 to KeyEvent.KEYCODE_BUTTON_R1
             Prefs.SHORTCUT_L2_R2 -> KeyEvent.KEYCODE_BUTTON_L2 to KeyEvent.KEYCODE_BUTTON_R2
+            Prefs.SHORTCUT_SELECT_START -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_START
             else -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBR
         }
         if (event.action == KeyEvent.ACTION_DOWN) {
