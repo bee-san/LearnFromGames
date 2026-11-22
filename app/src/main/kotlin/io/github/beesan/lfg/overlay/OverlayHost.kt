@@ -156,8 +156,14 @@ class OverlayHost(
         chordActive = chordActive,
     )
 
-    /** True while something of ours is drawn on the game's screen, so a picture of that screen would include it. */
-    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || notice?.shown == true || picker != null
+    /**
+     * True while something of ours is drawn on the game's screen, so a picture of that screen would include it.
+     * A notice is not counted: it is cut out of the picture instead ([noticeOn]), so it never holds reading up.
+     */
+    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || picker != null
+
+    /** Where a notice is showing on [displayId], in display pixels, or null for none. */
+    fun noticeOn(displayId: Int): Box? = notice?.takeIf { it.shown && noticeDisplay == displayId }?.let { Box(it.x, it.y, it.x + it.width, it.y + it.height) }
 
     private var notice: Win? = null
     private var noticeDisplay = Display.INVALID_DISPLAY
@@ -184,6 +190,8 @@ class OverlayHost(
             private set
         val x get() = lp.x
         val y get() = lp.y
+        val width get() = lp.width
+        val height get() = lp.height
 
         fun place(x: Int, y: Int, width: Int, height: Int) {
             if (shown && lp.x == x && lp.y == y && lp.width == width && lp.height == height) return
@@ -610,7 +618,8 @@ class OverlayHost(
      * reading asked for found, or why it found nothing. Drawn by us, so it
      * shows whether or not the app may post notifications.
      */
-    fun notice(displayId: Int, text: String) {
+    /** A message on [displayId] for a few seconds; kept off [avoid], such as a box being read. */
+    fun notice(displayId: Int, text: String, avoid: Box? = null) {
         if (displayId != noticeDisplay) {
             notice?.remove()
             notice = null
@@ -631,7 +640,19 @@ class OverlayHost(
         view.text = text
         val width = minOf(screen.width - context.dp(32f), context.dp(520f))
         view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(screen.height, View.MeasureSpec.AT_MOST))
-        win.place((screen.width - width) / 2, screen.height - view.measuredHeight - context.dp(56f), width, view.measuredHeight)
+        val height = view.measuredHeight
+        val left = (screen.width - width) / 2
+        val margin = context.dp(16f)
+        var top = screen.height - height - context.dp(56f)
+        if (avoid != null && avoid.intersects(Box(left, top, left + width, top + height))) {
+            // Above the box where there is room, else below it, else at the top of the screen.
+            top = when {
+                avoid.top - height - margin >= margin -> avoid.top - height - margin
+                avoid.bottom + margin + height <= screen.height - margin -> avoid.bottom + margin
+                else -> margin
+            }
+        }
+        win.place(left, top, width, height)
         handler.removeCallbacks(hideNotice)
         handler.postDelayed(hideNotice, NOTICE_MS)
     }

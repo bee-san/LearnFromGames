@@ -577,7 +577,9 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun startContinuous(game: Game, target: Ordinary, region: Box) {
         val regional = ReadingPipeline(app.lines, File(filesDir, "frames"))
         setAsked(Asked(game, target.packageName, target.displayId, target.windowId, continuous = true, frame = null, framePath = null))
-        toast("Reading this region until you turn it off.")
+        toast("Reading this region until you turn it off.", avoid = region)
+        // The box was picked over text already showing: it is read at once, not after a second picture.
+        regional.readNext()
         val reading = scope.launch {
             regional.latest.collect { r ->
                 if (r == null || asked?.continuous != true) return@collect
@@ -619,7 +621,11 @@ class LfgAccessibilityService : AccessibilityService() {
                 }
                 try {
                     if (cut != null) withContext(Dispatchers.Default) {
-                        regional.onFrame(cut, game, target.displayId, System.currentTimeMillis(), left + shot.offsetX, top + shot.offsetY)
+                        regional.onFrame(
+                            cut, game, target.displayId, System.currentTimeMillis(), left + shot.offsetX, top + shot.offsetY,
+                            // A whole-screen picture has our notice in it.
+                            ours = if (shot.whole) listOfNotNull(overlays.noticeOn(target.displayId)) else emptyList(),
+                        )
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "reading a region failed", e)
@@ -700,7 +706,7 @@ class LfgAccessibilityService : AccessibilityService() {
             is Picked.ForGame -> {
                 val screen = overlays.screen(pickingOn) ?: return
                 app.dialogueBoxes[picked.game.gameId] = DialogueBox(picked.box, screen.width, screen.height)
-                readAfresh(lookup, "${picked.game.title} is read only in this box now.")
+                readAfresh(lookup, "${picked.game.title} is read only in this box now.", picked.box)
             }
             is Picked.WholeScreen -> {
                 app.dialogueBoxes[picked.game.gameId] = null
@@ -714,14 +720,17 @@ class LfgAccessibilityService : AccessibilityService() {
      * new part is read at once. From lookup, lookup comes back on the first
      * lines read, as Rubi's overlay stays open and reads the new box.
      */
-    private fun readAfresh(lookup: Boolean, said: String) {
+    private fun readAfresh(lookup: Boolean, said: String, box: Box? = null) {
         afterBox?.cancel()
         // Nothing is read while lookup holds the screen.
         if (lookup) controller.exitControllerMode()
         controller.setLines(emptyList())
         pipeline.forget()
+        // The box was drawn round text already showing: it is read on the first picture, not after a second.
+        pipeline.readNext()
         if (!lookup) {
-            toast(said)
+            // Off the box, so the words do not cover what they announce.
+            toast(said, avoid = box)
             return
         }
         boxSaid = said
@@ -749,7 +758,8 @@ class LfgAccessibilityService : AccessibilityService() {
         }
     }
 
-    private class Shot(val bitmap: Bitmap?, val offsetX: Int, val offsetY: Int, val secure: Boolean)
+    /** [whole]: a picture of the whole screen, with whatever of ours is drawn on it. */
+    private class Shot(val bitmap: Bitmap?, val offsetX: Int, val offsetY: Int, val secure: Boolean, val whole: Boolean = false)
 
     /**
      * A picture of the app's window, or of its screen before Android 14. A
@@ -764,7 +774,7 @@ class LfgAccessibilityService : AccessibilityService() {
         // The whole screen: nothing of ours may be drawn on it.
         if (quiet && overlays.drawingOnGame) return null
         val bitmap = displayScreenshot(target.displayId) ?: return null
-        return Shot(bitmap, 0, 0, secure = isBlack(bitmap))
+        return Shot(bitmap, 0, 0, secure = isBlack(bitmap), whole = true)
     }
 
     /** A capture that is black all over: what a secure window gives instead of itself. */
@@ -810,9 +820,9 @@ class LfgAccessibilityService : AccessibilityService() {
     }
 
     /** A message over the app in front, drawn by us: a toast would be hidden when notifications are off. */
-    private fun toast(text: String) {
+    private fun toast(text: String, avoid: Box? = null) {
         val display = asked?.displayId ?: ordinaryFront?.displayId ?: front?.displayId ?: Display.DEFAULT_DISPLAY
-        overlays.notice(display, text)
+        overlays.notice(display, text, avoid)
     }
 
     // ── pictures ─────────────────────────────────────────────────────────────
@@ -889,6 +899,8 @@ class LfgAccessibilityService : AccessibilityService() {
                         // A picture of the game's own window has nothing else in it.
                         if (whole) now.covered else emptyList(),
                         area,
+                        // A notice of ours on the screen's picture: cut out, not waited for.
+                        if (whole) listOfNotNull(overlays.noticeOn(now.displayId)) else emptyList(),
                     )
                     }
                 }

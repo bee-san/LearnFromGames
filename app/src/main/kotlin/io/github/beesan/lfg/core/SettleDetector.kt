@@ -31,8 +31,29 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
     var changeStartedMs = 0L
         private set
 
+    /** Since when the text last settled has looked as it does. */
+    val stillSinceMs: Long get() = candidateSince
+
+    /** Whether the text last settled never held still and was read for having changed too long. */
+    var restless = false
+        private set
+
+    /** Set by [settleNext]: the next new text settles as soon as it is seen. */
+    private var eager = false
+
+    /** The next new text is taken as settled at once, for text asked for that is already showing. */
+    fun settleNext() {
+        eager = true
+    }
+
     /** Returns true once per new, settled signature. */
     fun offer(signature: String, nowMs: Long): Boolean {
+        if (eager && signature.isNotEmpty() && !same(signature, lastSettled)) {
+            changeStartedMs = nowMs
+            candidate = signature
+            candidateSince = nowMs
+            return settle(signature)
+        }
         if (!same(signature, candidate)) {
             // A line typing itself out grows from the one before it; anything else is a new line.
             if (!(candidate.isNotEmpty() && signature.startsWith(candidate)) || candidate == showing) changeStartedMs = nowMs
@@ -44,7 +65,7 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
             }
             if (restlessSince == 0L) restlessSince = nowMs
             // Still changing after all this time: it is not typing out, it is a screen that never holds still.
-            return nowMs - restlessSince >= restlessMs && settle(signature)
+            return nowMs - restlessSince >= restlessMs && settle(signature, restless = true)
         }
         if (signature.isEmpty() || same(signature, lastSettled)) {
             restlessSince = 0L
@@ -54,7 +75,9 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
         return settle(signature)
     }
 
-    private fun settle(signature: String): Boolean {
+    private fun settle(signature: String, restless: Boolean = false): Boolean {
+        this.restless = restless
+        eager = false
         lastSettled = signature
         showing = signature
         restlessSince = 0L
@@ -68,6 +91,7 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
         showing = ""
         restlessSince = 0L
         changeStartedMs = 0L
+        eager = false
     }
 
     companion object {

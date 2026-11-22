@@ -39,6 +39,10 @@ import kotlin.math.sin
  * Started with `--ez scene true`, the box sits over a classroom with a
  * character in it (CC0 art, see assets/scene/CREDITS.txt), for the website's
  * recording. Without it the ground stays flat, as the OCR tests expect.
+ *
+ * Started with `--ez busy true`, petals drift behind a see-through box and a
+ * ▼ blinks after a page that has finished typing, as in many real games: what
+ * the first pass must not take for new text.
  */
 class GameActivity : Activity() {
     private lateinit var game: GameView
@@ -55,6 +59,8 @@ class GameActivity : Activity() {
             game.voice = getExternalFilesDir(null)?.resolve("voice.s16le")?.takeIf { it.canRead() }?.readBytes()
             music = game.play(music(), 22_050, loop = true)
         }
+        game.busy = intent.getBooleanExtra("busy", false)
+        if (game.busy) game.box.color = 0xC00C141B.toInt()
         setContentView(game)
         window.decorView.windowInsetsController?.hide(WindowInsets.Type.systemBars())
     }
@@ -100,8 +106,12 @@ class GameActivity : Activity() {
         private val handler = Handler(Looper.getMainLooper())
         private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF3F5F7.toInt() }
         private val name = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8FA6B5.toInt() }
-        private val box = Paint().apply { color = 0xFF0C141B.toInt() }
+        val box = Paint().apply { color = 0xFF0C141B.toInt() }
         private val art = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        /** Petals drifting behind the box and a blinking ▼ when a page is done. */
+        var busy = false
+        private val petal = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF2A7C3.toInt() }
 
         /** A background and a character drawn behind the box, when the scene is on. */
         var scene: Pair<Bitmap, Bitmap>? = null
@@ -200,6 +210,15 @@ class GameActivity : Activity() {
                 val pw = ph * person.width / person.height
                 canvas.drawBitmap(person, null, RectF(w * 0.62f - pw / 2, h * 0.06f, w * 0.62f + pw / 2, h * 0.06f + ph), art)
             }
+            val now = android.os.SystemClock.uptimeMillis()
+            if (busy) {
+                for (i in 0 until 40) {
+                    val x = ((i * 0.137f + now / (9000f + i * 211)) % 1f) * w
+                    val y = ((i * 0.291f + now / (6000f + i * 157)) % 1f) * h
+                    canvas.drawCircle(x, y, h * (0.008f + (i % 5) * 0.004f), petal)
+                }
+                postInvalidateOnAnimation()
+            }
             canvas.drawRect(w * 0.04f, h * 0.70f, w * 0.96f, h * 0.95f, box)
             canvas.drawText("ユイ", w * 0.07f, h * 0.745f, name)
             var left = shown
@@ -215,6 +234,11 @@ class GameActivity : Activity() {
                     canvas.drawText(reading, x, h * 0.81f - size * 0.95f, name)
                     name.textSize = size * 0.6f
                 }
+            }
+            val lines = pages[page]
+            if (busy && shown >= lines.sumOf { it.length } && (now / 500) % 2 == 0L) {
+                val last = lines.size - 1
+                canvas.drawText("▼", w * 0.07f + text.measureText(lines[last]) + size * 0.3f, h * 0.81f + last * size * 1.6f, name)
             }
         }
     }

@@ -112,6 +112,17 @@ class CoreTest {
     }
 
     @Test
+    fun textAskedForIsReadAtOnceThenAsUsual() {
+        val d = SettleDetector(stillMs = 300)
+        d.settleNext()
+        assertFalse(d.offer("", 0))            // nothing yet: the wish waits for text
+        assertTrue(d.offer("こんにちは", 350))   // read on the first picture of it
+        assertFalse(d.offer("こんにちは", 700))  // already read
+        assertFalse(d.offer("さようなら", 1_050)) // the next line waits to hold still, as ever
+        assertTrue(d.offer("さようなら", 1_400))
+    }
+
+    @Test
     fun aBlankScreenNeverSettlesAndTheSameLineIsNotReadTwice() {
         val d = SettleDetector(stillMs = 300)
         d.offer("a", 0)

@@ -133,9 +133,33 @@ class ReadingPipeline(
         return same
     }
 
+    /**
+     * Whether [line] runs through [box]: shares its rows, or its columns for vertical text. A line
+     * the blanked box cut in two reads as pieces either side of it, which touch the box only so.
+     */
+    private fun across(line: TextLine, box: Box): Boolean =
+        if (line.vertical) box.left < line.box.right && line.box.left < box.right else box.top < line.box.bottom && line.box.top < box.bottom
+
+    /** Paints [box] (frame pixels) black. */
+    private fun blank(frame: Frame, box: Box) {
+        val left = box.left.coerceIn(0, frame.width)
+        val right = box.right.coerceIn(left, frame.width)
+        for (y in box.top.coerceAtLeast(0) until box.bottom.coerceAtMost(frame.height)) {
+            java.util.Arrays.fill(frame.argb, y * frame.width + left, y * frame.width + right, 0xFF000000.toInt())
+        }
+    }
+
     /** [bitmap]'s pixels into [pixels]: read where Android keeps them when that is exact, else by getPixels. */
     private fun pixelsOf(bitmap: Bitmap, pixels: IntArray) {
         if (!Pixels.argb(bitmap, pixels)) bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+    }
+
+    /** Set by [readNext]; handed to the detector once the first frame's resets are past. */
+    private var eager = false
+
+    /** The next text seen is read at once, without waiting for a second picture of it: text asked for that is already showing. */
+    fun readNext() {
+        eager = true
     }
 
     /** Forget what was on screen, so the next settled frame is read even if it is the same text. */
@@ -155,8 +179,8 @@ class ReadingPipeline(
      */
     suspend fun onFrame(
         bitmap: Bitmap, game: Game, displayId: Int, nowMs: Long, offsetX: Int = 0, offsetY: Int = 0,
-        covered: List<Box> = emptyList(),
-    ): Boolean = onFrame(0L, { bitmap }, game, displayId, nowMs, offsetX, offsetY, covered, null)
+        covered: List<Box> = emptyList(), ours: List<Box> = emptyList(),
+    ): Boolean = onFrame(0L, { bitmap }, game, displayId, nowMs, offsetX, offsetY, covered, null, ours)
 
     /**
      * The same, for a picture not yet copied out of graphics memory: [hash] is
@@ -166,10 +190,14 @@ class ReadingPipeline(
      *
      * [area] is the game's dialogue box in the display's pixels, or null for a
      * game read on its whole screen: only text in it is looked for and read.
+     *
+     * [ours] is where this app draws on the picture (a notice), in display pixels: it is blanked out
+     * before anything looks at the pixels, so it is neither read nor taken for a change, and no line
+     * running through it is kept.
      */
     suspend fun onFrame(
         hash: Long, picture: () -> Bitmap?, game: Game, displayId: Int, nowMs: Long, offsetX: Int = 0, offsetY: Int = 0,
-        covered: List<Box> = emptyList(), area: Box? = null,
+        covered: List<Box> = emptyList(), area: Box? = null, ours: List<Box> = emptyList(),
     ): Boolean {
         val engine = reader() ?: return false
         if (game.id != lastGame) {
@@ -185,6 +213,10 @@ class ReadingPipeline(
             lastSignature = null
         }
         lastArea = area
+        if (eager) {
+            detector.settleNext()
+            eager = false
+        }
         val fingerprint = if (hash != 0L) hash else picture()?.let { Perf.measure("same?") { Pixels.rowsHash(it, 4) } } ?: return false
         val still = unchanged(fingerprint)
         val known = lastSignature
@@ -202,10 +234,11 @@ class ReadingPipeline(
                 whole.cut(cut.left, cut.top, cut.width, cut.height, cutBuffer).also { cutBuffer = it.argb }
             }
         }
-        if (still && known != null) {
-            Perf.measure("pixels") { pixelsOf(bitmap, pixels) }
-        } else {
-            Perf.measure("pixels") { pixelsOf(bitmap, pixels) }
+        Perf.measure("pixels") {
+            pixelsOf(bitmap, pixels)
+            for (box in ours) blank(whole, box.moved(-offsetX, -offsetY))
+        }
+        if (!(still && known != null)) {
             Perf.measure("ring") { FrameRing.offer(whole, nowMs) }
             val signature = Perf.measure("probe") { probe().signature(frame) }
             lastSignature = signature
@@ -220,12 +253,15 @@ class ReadingPipeline(
             }
             if (!detector.offer(signature, nowMs)) return false
         }
+        // How long the settled text waited to be read: since it last changed, or since it began for text that never held still.
+        if (detector.restless) Perf.add("settle.restless", (nowMs - detector.changeStartedMs) * 1_000_000)
+        else Perf.add("settle.still", (nowMs - detector.stillSinceMs) * 1_000_000)
 
         val rows = Perf.measure("read") { engine.read(frame) }
             // The reader's forms made the game's own (TextClean), and what is not the game's text dropped.
             .mapNotNull(TextClean::line).filter { it.text.isNotBlank() }.map { it.moved(offsetX + (cut?.left ?: 0), offsetY + (cut?.top ?: 0)) }
             // Text under another window (a system dialog on a whole-screen picture) is not the game's.
-            .filter { line -> covered.none { it.intersects(line.box) } }
+            .filter { line -> covered.none { it.intersects(line.box) } && ours.none { across(line, it) } }
             // The room read around a dialogue box is for reading its edges well, not for what lies in it.
             .let { rows -> if (cut != null && area != null) TreeText.within(rows, area) else rows }
         // A reader returns rows; the game shows sentences. From here on a piece is a whole piece of text.
