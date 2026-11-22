@@ -17,6 +17,7 @@ import io.github.beesan.lfg.lookup.Move
  * goes the same four ways a character at a time and faster while held, one
  * face button adds the card and the other gives the controller back to the
  * game, the shoulder buttons change entry and the right stick scrolls it.
+ * With [stickWords] the D-pad and the left stick change places.
  *
  * A D-pad reaches a focused window either as keys or as the HAT axes, depending
  * on the pad; both are handled, and a held direction repeats on Rubi's timings
@@ -25,6 +26,7 @@ import io.github.beesan.lfg.lookup.Move
 class ControllerInput(
     private val controller: LookupController,
     private val swapConfirm: () -> Boolean,
+    private val stickWords: () -> Boolean,
     private val onClose: () -> Unit,
     /** X: a note on the word shown. */
     private val onNote: () -> Unit,
@@ -33,8 +35,8 @@ class ControllerInput(
     private val chordActive: () -> Boolean,
 ) {
     private val handler = Handler(Looper.getMainLooper())
-    private val pad = Repeater(KeyRepeat(), stick = false)
-    private val stick = Repeater(KeyRepeat.stick(), stick = true)
+    private val pad = Repeater(characters = { stickWords() })
+    private val stick = Repeater(characters = { !stickWords() }, fast = KeyRepeat.stick())
     private var scrollSpeed = 0f
     private val scroller = object : Runnable {
         override fun run() {
@@ -44,7 +46,14 @@ class ControllerInput(
         }
     }
 
-    private inner class Repeater(private val repeat: KeyRepeat, private val stick: Boolean) : Runnable {
+    /**
+     * A held direction of the D-pad or the left stick, stepping by word or, with [characters], by
+     * character. A stick going by character repeats at Rubi's quicker stick pace ([fast]); a button,
+     * and anything going by word, at the button's, so one press is one step.
+     */
+    private inner class Repeater(private val characters: () -> Boolean, private val fast: KeyRepeat? = null) : Runnable {
+        private val slow = KeyRepeat()
+        private var repeat = slow
         private var move: Move? = null
 
         fun hold(next: Move?) {
@@ -52,13 +61,14 @@ class ControllerInput(
             handler.removeCallbacks(this)
             move = next
             repeat.release()
+            repeat = fast?.takeIf { characters() } ?: slow
             if (next != null) run()
         }
 
         override fun run() {
             val current = move ?: return
             val now = SystemClock.uptimeMillis()
-            if (repeat.press(current.ordinal, now)) controller.move(current, stick)
+            if (repeat.press(current.ordinal, now)) controller.move(current, characters())
             handler.postDelayed(this, (repeat.nextRepeatAt - now).coerceAtLeast(1))
         }
     }

@@ -148,10 +148,14 @@ internal class ShadeDrawable(private val radius: Float, private val inset: Float
 internal fun seeThrough(color: Int, percent: Int): Int = (color and 0x00FFFFFF) or ((255 * (100 - percent.coerceIn(0, 90)) / 100) shl 24)
 
 /** `A Add card · B Close · ◀ ▶ Word · ▲ ▼ Row`: what replaces the button while the controller drives. */
-internal fun Context.keyHints(confirm: String, close: String, listen: Boolean = true, wholeWord: Boolean = true): TextView = label(12.5f, Ink.DIM).apply {
+/** What the controller's buttons do in lookup mode, in a line. */
+internal fun keyHintsText(confirm: String, close: String, listen: Boolean = true, wholeWord: Boolean = true, stickWords: Boolean = false): String =
     // Y says the word only with word audio installed (Settings › Dictionaries); without it, it is not offered.
-    text = "$confirm Add card    $close Close    X Note    " + (if (listen) "Y Listen    " else "") +
-        (if (wholeWord) "◀ ▶ Word" else "◀ ▶ Character") + "    ▲ ▼ Row    L1 R1 Entry"
+    "$confirm Add card    $close Close    X Note    " + (if (listen) "Y Listen    " else "") +
+        (if (stickWords) "Stick" else "◀ ▶") + (if (wholeWord) " Word" else " Character") + "    ▲ ▼ Row    L1 R1 Entry"
+
+internal fun Context.keyHints(text: String): TextView = label(12.5f, Ink.DIM).apply {
+    this.text = text
     setPadding(0, dp(6f), 0, 0)
 }
 
