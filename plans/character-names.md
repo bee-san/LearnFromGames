@@ -42,7 +42,7 @@ Anything weaker becomes a suggestion that needs one tap. The game's page also ha
 
 #### Asking in the popup
 
-A suggestion that only waits on the game's page is rarely seen, so LFG also asks once where the player already is. The first time a word is looked up in a game that has an unanswered suggestion, the popup gets one extra line at the bottom: "Is this the visual novel *Title*? Yes · No".
+A suggestion that only waits on the game's page is rarely seen, so LFG also asks once where the player already is. The first time a word is looked up in a game that has an unanswered suggestion, the popup gets one extra line above the entries: "Is this the visual novel *Title*? Yes · No". (At the bottom, as first built, it sat under a long list and went unseen on the emulator.)
 
 - It is shown only inside a popup the player opened. Nothing appears over the game by itself.
 - It is shown once per game. Yes links the VN (`vndb_how` = `suggested`) and starts the build; No sets `vndb` to `none`. Closing the popup without answering counts as neither, and the line does not come back; the suggestion stays on the game's page.

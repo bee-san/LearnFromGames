@@ -73,7 +73,7 @@ fun GameNamesRow(game: Game, installed: InstalledDictionary?, build: CharacterNa
             when {
                 build is CharacterNames.Build.Running -> Badge("Building", Lfg.Accent, Lfg.Soft)
                 build is CharacterNames.Build.Failed -> Badge("Not built", Lfg.Error, Lfg.Soft)
-                vn != null && installed != null -> Badge("Ready", Lfg.Ok, Lfg.Wash)
+                vn != null && installed != null -> Badge("Ready", Lfg.Ok, Lfg.OkSoft)
                 vn == null && game.vndb.isEmpty() && game.vndbSuggested.isNotEmpty() -> Badge("Is this it?", Lfg.Warn, Lfg.Soft)
             }
         }
@@ -235,5 +235,9 @@ private fun Switch(on: Boolean, onChange: (Boolean) -> Unit) =
 private val PLATFORMS = mapOf(
     "win" to "Windows", "and" to "Android", "ios" to "iOS", "swi" to "Switch", "psp" to "PSP", "psv" to "Vita", "ps2" to "PS2",
     "ps1" to "PS1", "ps3" to "PS3", "ps4" to "PS4", "ps5" to "PS5", "nds" to "DS", "n3d" to "3DS", "wii" to "Wii", "wiu" to "Wii U",
-    "lin" to "Linux", "mac" to "Mac", "web" to "Web",
+    "lin" to "Linux", "mac" to "Mac", "web" to "Web", "sw2" to "Switch 2", "xb1" to "Xbox", "xb3" to "Xbox 360",
+    "xbo" to "Xbox One", "xxs" to "Xbox Series", "drc" to "Dreamcast", "sat" to "Saturn", "pce" to "PC Engine", "sfc" to "SNES",
+    "nes" to "NES", "n64" to "N64", "gba" to "GBA", "gbc" to "GBC", "dos" to "DOS", "p98" to "PC-98", "p88" to "PC-88",
+    "x68" to "X68000", "fmt" to "FM Towns", "msx" to "MSX", "mob" to "Other mobile", "dvd" to "DVD player", "bdp" to "Blu-ray player",
+    "oth" to "Other",
 )

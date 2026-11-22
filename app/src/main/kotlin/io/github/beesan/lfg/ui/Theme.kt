@@ -43,6 +43,7 @@ object Lfg {
     val OnFill get() = Color(palette.onFill)
     val Wash get() = Color(palette.wash)
     val Ok get() = Color(palette.ok)
+    val OkSoft get() = Color(palette.okSoft)
     val Warn get() = Color(palette.warn)
     val Error get() = Color(palette.error)
 }

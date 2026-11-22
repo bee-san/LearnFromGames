@@ -92,19 +92,20 @@ object EntryHtml {
 
     /**
      * The entries of a lookup, the inside of the list's body. [askVn] is a visual
-     * novel's title to ask about once under them, or null.
+     * novel's title to ask about once, above them: under a long list it would
+     * go unseen, and it is asked only once.
      */
     fun listBody(entries: List<Entry>, notes: Boolean = true, askVn: String? = null, audio: (Entry) -> Boolean): String = buildString {
-        entries.forEachIndexed { i, entry ->
-            append("<section class=\"lfg-entry\" id=\"e").append(i).append("\">")
-            append(body(entry, audio(entry), index = i, notes = notes))
-            append("</section>")
-        }
         if (askVn != null) {
             append("<div class=\"lfg-ask\"><span>Is this the visual novel <b lang=\"ja\">").append(escape(askVn))
             append("</b>? <span class=\"lfg-ask-why\">Then its characters' names get their own cards.</span></span>")
             append("<a class=\"lfg-ask-button lfg-ask-yes\" href=\"").append(VN_YES_URL).append("/0\">Yes</a>")
             append("<a class=\"lfg-ask-button\" href=\"").append(VN_NO_URL).append("/0\">No</a></div>")
+        }
+        entries.forEachIndexed { i, entry ->
+            append("<section class=\"lfg-entry\" id=\"e").append(i).append("\">")
+            append(body(entry, audio(entry), index = i, notes = notes))
+            append("</section>")
         }
     }
 
@@ -474,7 +475,7 @@ body{margin:0;padding:10px 12px 14px;overflow-wrap:anywhere}
 .lfg-tags{margin-right:.35em}
 .lfg-tag{display:inline-block;font-size:.66em;font-weight:700;line-height:1.5;color:#ffffff;background:#6f6f78;border-radius:4px;padding:0 .45em;margin-right:.25em;vertical-align:middle}
 .lfg-message{color:var(--dim)}
-.lfg-ask{display:flex;align-items:center;gap:10px;margin-top:16px;padding:10px 12px;border-radius:10px;background:var(--chip);font-size:.88em}
+.lfg-ask{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:10px 12px;border-radius:10px;background:var(--chip);font-size:.88em}
 .lfg-ask>span{flex:1}
 .lfg-ask-why{color:var(--dim)}
 .lfg-ask-button{display:inline-flex;min-height:42px;min-width:56px;padding:0 14px;box-sizing:border-box;align-items:center;justify-content:center;border-radius:8px;border:1px solid var(--border-strong);color:var(--text);text-decoration:none;font-weight:600;-webkit-tap-highlight-color:transparent}
