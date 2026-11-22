@@ -28,7 +28,7 @@ LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSent
 - **Or never let go of the controller.** L3 + R3 turns the pad into a text cursor: by word, by line, by character. The game receives nothing until you leave.
 - **Uses the second screen.** On a two-screen handheld the entry opens on the screen the game is not on. On one screen it is a popup.
 - **One press to Anki.** Cards go to AnkiDroid with the sentence, the word marked, the definition and a picture of the game. Kiku, Lapis and Senren note types are found by themselves; without one, the app makes its own.
-- **Sentence audio**: the game's own voice for the line, with the music around it cut away. Android asks before LFG may listen, so press Start once a session. A line the game does not speak is read by Android's voice instead.
+- **Sentence audio**: the game's own voice for the line, with the music around it cut away. Android has to ask before LFG may listen, so its question comes up by itself when you open a game: one tap, once a session. Say no and it is not asked again; Start on the Lines page begins it later. A line the game does not speak is read by Android's voice instead.
 - **Moving pictures**, if you switch them on: an animated picture of the line appearing.
 - **Your dictionaries.** Hachidori's starter set is fetched at first run: Jitendex, JMnedict, Bee's Ultimate Kanji Dictionary, Jiten's frequencies and Bee's Ultimate Grammar Dictionary. Add any Yomitan dictionary zip and it is shown with its own styling. Pitch accent dictionaries draw the accent over the reading, frequency dictionaries show their ranks, and local-audio-yomichan's `android.db` lets you hear the word.
 - **Every line is kept**, so you can mine after the session and see reading time, characters, speed and your streak.
@@ -80,6 +80,13 @@ Reading and lookup run on the device. The network is used for the first-run down
   so one of the three installed later is picked up without "Find again".
 - **The release build** on the Android 15 emulator: reading with ScreenAI,
   lookup, the styled entry and a card all work after shrinking.
+- **Sentence audio on the AYN Thor** (Android 13), with the stand-in game on
+  the top screen: Android's question comes up over the game as it opens, and
+  after one tap a card made from a line gets the voice, cut from the music and
+  added to its AnkiDroid note (SentenceAudio in Kiku). This holds with the
+  Thor's volume at nothing too. A game on the Thor's lower screen is another
+  matter: the Thor plays no sound from an app there, and a sound it starts
+  after LFG began listening is recorded as silence. Not run with a real game.
 
 ### Not done, or not known
 

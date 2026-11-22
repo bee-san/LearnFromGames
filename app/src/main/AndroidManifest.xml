@@ -54,6 +54,14 @@
                 android:resource="@xml/accessibility_service" />
         </service>
 
+        <!-- Android's question before LFG may listen to game sound, asked over a game as it opens. Nothing of ours shows. -->
+        <activity
+            android:name=".ui.ListenActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- "LFG" in the text-selection menu of any app: a lookup of the selection, with no overlay. -->
         <activity
             android:name=".ui.SelectionActivity"
