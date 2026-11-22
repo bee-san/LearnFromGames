@@ -89,9 +89,12 @@ Reading and lookup run on the device. The network is used for the first-run down
   the top screen: Android's question comes up over the game as it opens, and
   after one tap a card made from a line gets the voice, cut from the music and
   added to its AnkiDroid note (SentenceAudio in Kiku). This holds with the
-  Thor's volume at nothing too. A game on the Thor's lower screen is another
-  matter: the Thor plays no sound from an app there, and a sound it starts
-  after LFG began listening is recorded as silence. Not run with a real game.
+  Thor's volume at nothing too. A sound that began after LFG started listening
+  (a game opened afterwards, or a voice played as a sound of its own) used to
+  be recorded as silence; LFG now begins listening again whenever one more
+  thing starts to play, missing only its first tenth of a second or two. A game
+  on the Thor's lower screen is another matter: the Thor plays no sound from an
+  app there. Not run with a real game.
 
 ### Not done, or not known
 

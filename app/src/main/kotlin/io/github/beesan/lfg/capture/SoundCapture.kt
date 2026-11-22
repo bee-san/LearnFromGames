@@ -12,6 +12,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.MediaCodec
@@ -25,10 +27,12 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
 /**
@@ -199,10 +203,50 @@ class SampleRing(private val capacity: Int) {
 /** Holds the screen recording consent and reads the game's sound into [SoundCapture]. */
 class SoundService : Service() {
     private var projection: MediaProjection? = null
+
+    @Volatile
     private var record: AudioRecord? = null
 
     @Volatile
     private var reading = false
+
+    /** A recorder begun since the one being read, for the reading thread to change over to. */
+    private val fresh = AtomicReference<AudioRecord?>()
+    private val main = Handler(Looper.getMainLooper())
+    private var listenedAt = 0L
+
+    /**
+     * On some devices (the AYN Thor) a sound that starts while a recorder is
+     * already listening reaches it as silence, and only a recorder begun after
+     * the sound hears it. So each time one more thing is playing, listening
+     * begins again.
+     */
+    private val players = object : AudioManager.AudioPlaybackCallback() {
+        private var playing = 0
+
+        override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>) {
+            if (configs.size > playing) {
+                main.removeCallbacks(listenAgain)
+                main.postAtTime(listenAgain, listenedAt + RELISTEN_EVERY_MS)
+            }
+            playing = configs.size
+        }
+    }
+
+    /** Begins a new recorder beside the one being read, which goes on being read until the new one is recording. */
+    private val listenAgain = Runnable {
+        val granted = projection ?: return@Runnable
+        listenedAt = SystemClock.uptimeMillis()
+        thread(name = "lfg-sound-again") {
+            try {
+                fresh.getAndSet(listen(granted))?.release()
+                // The service ended while this one was being made: nothing is left to read it.
+                if (!reading) fresh.getAndSet(null)?.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "could not listen again", e)
+            }
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -222,31 +266,26 @@ class SoundService : Service() {
             projection = granted
             granted.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() = stopSelf()
-            }, Handler(Looper.getMainLooper()))
+            }, main)
 
-            val config = AudioPlaybackCaptureConfiguration.Builder(granted)
-                .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-                .build()
-            val format = AudioFormat.Builder()
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setSampleRate(SoundCapture.SAMPLE_RATE)
-                .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-                .build()
-            val recorder = AudioRecord.Builder()
-                .setAudioFormat(format)
-                .setBufferSizeInBytes(SoundCapture.SAMPLE_RATE * 2)
-                .setAudioPlaybackCaptureConfig(config)
-                .build()
-            record = recorder
-            recorder.startRecording()
+            val first = listen(granted)
+            record = first
+            listenedAt = SystemClock.uptimeMillis()
             reading = true
             SoundCapture.setRunning(true)
+            getSystemService(AudioManager::class.java).registerAudioPlaybackCallback(players, main)
             thread(name = "lfg-sound") {
                 val buffer = ShortArray(4096)
+                var current = first
                 while (reading) {
-                    val n = recorder.read(buffer, 0, buffer.size)
+                    fresh.getAndSet(null)?.let { next ->
+                        val old = current
+                        current = next
+                        record = next
+                        runCatching { old.stop() }
+                        runCatching { old.release() }
+                    }
+                    val n = current.read(buffer, 0, buffer.size)
                     if (n > 0) SoundCapture.onSamples(buffer, n, System.currentTimeMillis()) else if (n < 0) break
                 }
             }
@@ -257,8 +296,32 @@ class SoundService : Service() {
         return START_NOT_STICKY
     }
 
+    /** A recorder of everything playing as game or media sound, already recording. */
+    @SuppressLint("MissingPermission")
+    private fun listen(granted: MediaProjection): AudioRecord {
+        val config = AudioPlaybackCaptureConfiguration.Builder(granted)
+            .addMatchingUsage(AudioAttributes.USAGE_GAME)
+            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+            .build()
+        val format = AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setSampleRate(SoundCapture.SAMPLE_RATE)
+            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+            .build()
+        return AudioRecord.Builder()
+            .setAudioFormat(format)
+            .setBufferSizeInBytes(SoundCapture.SAMPLE_RATE * 2)
+            .setAudioPlaybackCaptureConfig(config)
+            .build()
+            .apply { startRecording() }
+    }
+
     override fun onDestroy() {
+        runCatching { getSystemService(AudioManager::class.java).unregisterAudioPlaybackCallback(players) }
+        main.removeCallbacks(listenAgain)
         reading = false
+        runCatching { fresh.getAndSet(null)?.release() }
         SoundCapture.setRunning(false)
         runCatching { record?.stop() }
         runCatching { record?.release() }
@@ -283,5 +346,8 @@ class SoundService : Service() {
         private const val TAG = "LfgSound"
         private const val CHANNEL = "sound"
         private const val NOTIFICATION = 1
+
+        /** Listening begins again no more often than this, however many sounds start. */
+        private const val RELISTEN_EVERY_MS = 1000L
     }
 }
