@@ -113,6 +113,11 @@ class ReadingPipeline(
         return same
     }
 
+    /** [bitmap]'s pixels into [pixels]: read where Android keeps them when that is exact, else by getPixels. */
+    private fun pixelsOf(bitmap: Bitmap, pixels: IntArray) {
+        if (!Pixels.argb(bitmap, pixels)) bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+    }
+
     /** Forget what was on screen, so the next settled frame is read even if it is the same text. */
     fun forget() {
         detector.reset()
@@ -163,9 +168,9 @@ class ReadingPipeline(
         val pixels = buffer?.takeIf { it.size == size } ?: IntArray(size).also { buffer = it }
         val frame = Frame(bitmap.width, bitmap.height, pixels)
         if (still && known != null) {
-            Perf.measure("pixels") { bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height) }
+            Perf.measure("pixels") { pixelsOf(bitmap, pixels) }
         } else {
-            Perf.measure("pixels") { bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height) }
+            Perf.measure("pixels") { pixelsOf(bitmap, pixels) }
             Perf.measure("ring") { FrameRing.offer(frame, nowMs) }
             val signature = Perf.measure("probe") { probe().signature(frame) }
             lastSignature = signature
@@ -174,7 +179,9 @@ class ReadingPipeline(
                 detector.offer(signature, nowMs)
                 interfaceText.onReading(emptyList())
                 if (_latest.value?.lines?.isNotEmpty() == true) _latest.value = Reading(game, displayId, emptyList(), emptyList(), null, nowMs)
-                return false
+                // A game going on with no text in it, as at the look before, is as good as a still screen
+                // and is looked at as seldom: an emulator needs the processor more. A line appearing ends that.
+                return known != null && known.isEmpty()
             }
             if (!detector.offer(signature, nowMs)) return false
         }
