@@ -23,12 +23,6 @@ data class Prefs(
      * two presses of the shortcut, or [TAP_AUTO], which is the second on a device with a controller.
      */
     val tapLookup: String = TAP_AUTO,
-    /**
-     * While a word is looked up with the controller, a see-through screen of
-     * ours lies over the game ([io.github.beesan.lfg.ui.CoverActivity]), so no
-     * tap or button can reach it.
-     */
-    val coverGame: Boolean = false,
     /** Days a line's screen is kept, unless a card or a recap took it; 0 keeps every one. */
     val keepScreensDays: Int = 14,
     /** The first run's downloads wait for an unmetered network. */
@@ -169,7 +163,6 @@ class Settings(context: Context) {
             swapConfirm = store.getBoolean("swapConfirm", d.swapConfirm),
             tapLookup = store.getString("tapLookup", d.tapLookup) ?: d.tapLookup,
             stickWords = store.getBoolean("stickWords", d.stickWords),
-            coverGame = store.getBoolean("coverGame", d.coverGame),
             keepScreensDays = store.getInt("keepScreensDays", d.keepScreensDays),
             wifiOnly = store.getBoolean("wifiOnly", d.wifiOnly),
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
@@ -219,7 +212,6 @@ class Settings(context: Context) {
             .putBoolean("swapConfirm", next.swapConfirm)
             .putString("tapLookup", next.tapLookup)
             .putBoolean("stickWords", next.stickWords)
-            .putBoolean("coverGame", next.coverGame)
             .putInt("keepScreensDays", next.keepScreensDays)
             .putBoolean("wifiOnly", next.wifiOnly)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)
