@@ -13,6 +13,11 @@ data class Prefs(
     val shortcut: String = SHORTCUT_L3_R3,
     /** Swap which face button adds a card and which closes, for pads printed the other way round. */
     val swapConfirm: Boolean = false,
+    /**
+     * When a tap on a game's text looks the word up: [TAP_ALWAYS], [TAP_SHORTCUT], only between
+     * two presses of the shortcut, or [TAP_AUTO], which is the second on a device with a controller.
+     */
+    val tapLookup: String = TAP_AUTO,
     /** Days a line's screen is kept, unless a card or a recap took it; 0 keeps every one. */
     val keepScreensDays: Int = 14,
     /** The first run's downloads wait for an unmetered network. */
@@ -114,6 +119,9 @@ data class Prefs(
 
         /** The triggers: on pads that send them as buttons too, as the Thor's does. */
         const val SHORTCUT_L2_R2 = "l2r2"
+        const val TAP_AUTO = io.github.beesan.lfg.core.TapGate.AUTO
+        const val TAP_ALWAYS = io.github.beesan.lfg.core.TapGate.ALWAYS
+        const val TAP_SHORTCUT = io.github.beesan.lfg.core.TapGate.SHORTCUT
         const val ENTRY_OVER_GAME = "game"
         const val ENTRY_OTHER_SCREEN = "other"
         const val SELECT_WORD = "word"
@@ -141,6 +149,7 @@ class Settings(context: Context) {
         Prefs(
             shortcut = store.getString("shortcut", d.shortcut) ?: d.shortcut,
             swapConfirm = store.getBoolean("swapConfirm", d.swapConfirm),
+            tapLookup = store.getString("tapLookup", d.tapLookup) ?: d.tapLookup,
             keepScreensDays = store.getInt("keepScreensDays", d.keepScreensDays),
             wifiOnly = store.getBoolean("wifiOnly", d.wifiOnly),
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
@@ -188,6 +197,7 @@ class Settings(context: Context) {
         store.edit()
             .putString("shortcut", next.shortcut)
             .putBoolean("swapConfirm", next.swapConfirm)
+            .putString("tapLookup", next.tapLookup)
             .putInt("keepScreensDays", next.keepScreensDays)
             .putBoolean("wifiOnly", next.wifiOnly)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)

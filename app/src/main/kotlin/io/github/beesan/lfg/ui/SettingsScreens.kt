@@ -413,6 +413,16 @@ fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: (
     Card("Lookup shortcut", "Starts and stops lookup with the controller. The game sees these buttons too, so pick a pair it does not use.") {
         Choice(listOf(Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2"), prefs.shortcut) { v -> onChange { it.copy(shortcut = v) } }
     }
+    Card(
+        "Tap a word",
+        when (prefs.tapLookup) {
+            Prefs.TAP_ALWAYS -> "A tap on a game's text always looks the word up, so a tap on the game's own menus can too."
+            Prefs.TAP_SHORTCUT -> "Taps are the game's until you press ${shortcutLabel(prefs)}. Press it again, or close the lookup, to give them back."
+            else -> "With a controller, taps are the game's until you press ${shortcutLabel(prefs)}. Without one, a tap always looks the word up."
+        },
+    ) {
+        Choice(listOf(Prefs.TAP_AUTO to "Automatic", Prefs.TAP_SHORTCUT to "After the shortcut", Prefs.TAP_ALWAYS to "Always"), prefs.tapLookup) { v -> onChange { it.copy(tapLookup = v) } }
+    }
     Card("Add card button", "Which face button adds the card; the other one closes. As Android names them.") {
         Choice(listOf("a" to "A adds, B closes", "b" to "B adds, A closes"), if (prefs.swapConfirm) "b" else "a") { v -> onChange { it.copy(swapConfirm = v == "b") } }
     }

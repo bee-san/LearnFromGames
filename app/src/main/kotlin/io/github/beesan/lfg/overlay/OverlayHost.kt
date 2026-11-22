@@ -6,10 +6,12 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
+import android.os.SystemClock
 import android.text.TextUtils
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -22,6 +24,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.core.TapGate
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.Entry
@@ -274,6 +277,9 @@ class OverlayHost(
 
     private fun pickedByTouch() = state.selected && !state.controllerMode && noting == null
 
+    /** The system went light or dark: everything on screen takes the other colours now, not at the next line. */
+    fun onSystemTheme() = render()
+
     fun onState(next: LookupState) {
         val wasController = state.controllerMode
         // Another word, or none: a note half written on the last word is let go. A note on a line or the game stays.
@@ -343,6 +349,22 @@ class OverlayHost(
         return pickedOnPanel || state.selectedLine?.geometry == null || prefs().entryPlace != Prefs.ENTRY_OVER_GAME
     }
 
+    private var controllerSeen = false
+    private var controllerSeenAt = 0L
+
+    /** Whether the device has a controller, built in or connected. Asked on every drawing, so looked up at most every few seconds. */
+    private fun hasController(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (controllerSeenAt == 0L || now - controllerSeenAt > 3_000) {
+            controllerSeenAt = now
+            controllerSeen = InputDevice.getDeviceIds().any { id ->
+                val device = InputDevice.getDevice(id) ?: return@any false
+                !device.isVirtual && device.sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD
+            }
+        }
+        return controllerSeen
+    }
+
     // ── drawing ──────────────────────────────────────────────────────────────
 
     private fun render() {
@@ -373,7 +395,7 @@ class OverlayHost(
 
         // Tap strips: one per row of text with a place on screen.
         var used = 0
-        if (stripsOn) {
+        if (stripsOn && TapGate.open(prefs().tapLookup, hasController(), state.controllerMode, asking)) {
             lines.forEachIndexed { index, line ->
                 for (box in line.geometry?.rows ?: emptyList()) {
                     if (box.width <= 0 || box.height <= 0) continue

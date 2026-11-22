@@ -86,6 +86,9 @@ class LfgAccessibilityService : AccessibilityService() {
 
     private var front: Front? = null
 
+    /** The game in front, for the panel's heading; null when none is. */
+    private val frontGame = MutableStateFlow<Game?>(null)
+
     /** The screens this app's own pages are in front on: the lines' screen gives way to them there. */
     private var ownAppOn: Set<Int> = emptySet()
     private val packageOfWindow = HashMap<Int, String>()
@@ -204,8 +207,10 @@ class LfgAccessibilityService : AccessibilityService() {
         scope.launch { app.notes.all.collect(overlays::onNotes) }
         // The session still going, on the panel: again with each new line, and each minute so it ends when its gap has passed.
         scope.launch {
-            combine(app.database.lines().recent(1), minutes()) { rows, _ -> rows.firstOrNull() }.collect { latest ->
-                overlays.onSession(latest?.gameName, withContext(Dispatchers.IO) { sessionLine(latest) })
+            combine(app.database.lines().recent(1), minutes(), frontGame) { rows, _, playing -> rows.firstOrNull() to playing }.collect { (latest, playing) ->
+                // A game just opened has no line kept yet: the panel names it, not the game the newest line came from.
+                if (playing != null && latest?.gameId != playing.id) overlays.onSession(playing.title, null)
+                else overlays.onSession(latest?.gameName, withContext(Dispatchers.IO) { sessionLine(latest) })
             }
         }
         scope.launch { captureLoop() }
@@ -236,6 +241,10 @@ class LfgAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        // A window that keeps its contents from accessibility (DroidDeck's game screen) still says whose it is here.
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && event.windowId >= 0) {
+            event.packageName?.toString()?.takeIf { it.isNotEmpty() }?.let { packageOfWindow[event.windowId] = it }
+        }
         val now = asked ?: return
         val from = event.packageName?.toString() ?: return
         if (from == packageName || from == "com.android.systemui") return
@@ -254,6 +263,11 @@ class LfgAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() = Unit
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::overlays.isInitialized) overlays.onSystemTheme()
+    }
 
     override fun onUnbind(intent: Intent?): Boolean {
         stop()
@@ -680,6 +694,7 @@ class LfgAccessibilityService : AccessibilityService() {
             }
             if (now?.game?.id != lastFront) {
                 lastFront = now?.game?.id
+                frontGame.value = now?.game
                 // The game went behind something else, or came back: the overlays follow at once.
                 val reading = pipeline.latest.value
                 if (now == null) controller.clear()
@@ -791,7 +806,13 @@ class LfgAccessibilityService : AccessibilityService() {
                 // Windows come front to back: the first app window is the one on top of its screen.
                 val top = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION } ?: continue
                 alive += top.id
-                val name = packageOfWindow[top.id] ?: top.root?.packageName?.toString()?.also { packageOfWindow[top.id] = it } ?: continue
+                val name = packageOfWindow[top.id]
+                    ?: (top.root?.packageName?.toString() ?: hostTitled(top.title?.toString()))?.also { packageOfWindow[top.id] = it }
+                if (name == null) {
+                    // Said once for each window: why a game on screen is not being read.
+                    if (unowned.add(top.id)) Log.i(TAG, "window '${top.title}' on screen ${all.keyAt(i)} shows no contents and no known app has that name: ${hostTitles?.keys}")
+                    continue
+                }
                 if (name == packageName) own += all.keyAt(i)
                 // A status or navigation bar on the screen means an ordinary app; a game hides them.
                 // A phone held sideways hides them for every app, though: an app
@@ -867,7 +888,14 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** In an emulator or a Steam player, the game a front-end, Eden or Steam says it has open; else the app's own row. */
     private suspend fun namedInside(host: Game): Game {
-        val named = app.gameFinder.nameFor(host.packageName) ?: return host
+        val named = app.gameFinder.nameFor(host.packageName)
+        // Said when it changes: which app is in front and what it is taken to be running.
+        val said = host.packageName + " / " + host.title + " / " + named?.title + " / " + named?.source
+        if (said != lastNamed) {
+            lastNamed = said
+            Log.i(TAG, "in front: $said")
+        }
+        if (named == null) return host
         val key = host.packageName + "\n" + named.key
         return (namedGames[key] ?: withContext(Dispatchers.IO) {
             app.lines.namedGame(host, named.key, named.title, named.source)
@@ -918,6 +946,8 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun ignoredPackages(): Set<String> {
         val launchers = packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
             .mapNotNull { it.activityInfo?.packageName }
+            // DroidDeck offers itself as a home screen too; it is still where the game is.
+            .filterNot { Hosts.isEmulator(it) }
         return (launchers + listOf(packageName, "com.android.systemui", "com.android.settings", "com.ichi2.anki", "android")).toSet()
     }
 
@@ -925,7 +955,35 @@ class LfgAccessibilityService : AccessibilityService() {
     private val neverAsked: Set<String> by lazy {
         val launchers = packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
             .mapNotNull { it.activityInfo?.packageName }
+            // DroidDeck offers itself as a home screen too; it is still where the game is.
+            .filterNot { Hosts.isEmulator(it) }
         (launchers + listOf(packageName, "com.android.systemui", "android")).toSet()
+    }
+
+    private var lastNamed: String? = null
+    private var hostTitles: Map<String, String>? = null
+    private val unowned = HashSet<Int>()
+    private var hostTitlesAt = 0L
+
+    /**
+     * The emulator or Steam player whose name a window carries, for a window
+     * with nothing in it to ask: DroidDeck's game screen shows accessibility
+     * no contents, only its title.
+     */
+    private fun hostTitled(title: String?): String? {
+        if (title.isNullOrBlank()) return null
+        val now = SystemClock.uptimeMillis()
+        val known = hostTitles?.takeIf { now - hostTitlesAt < HOST_TITLES_MS } ?: try {
+            packageManager.getInstalledApplications(0)
+                .filter { Hosts.isEmulator(it.packageName) }
+                .associate { packageManager.getApplicationLabel(it).toString() to it.packageName }
+        } catch (_: Exception) {
+            emptyMap()
+        }.also {
+            hostTitles = it
+            hostTitlesAt = now
+        }
+        return known[title]
     }
 
     private fun titleOf(packageName: String): String = try {
@@ -1024,6 +1082,9 @@ class LfgAccessibilityService : AccessibilityService() {
         /** Text items that make a window an ordinary app's: a game's own menus seldom show this many as items. */
         private const val TEXT_ITEMS = 5
         private const val TEXT_ITEMS_MS = 5_000L
+
+        /** How long the names of the installed emulators are trusted: one may be installed while the service runs. */
+        private const val HOST_TITLES_MS = 60_000L
 
         private val DPAD = setOf(
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
