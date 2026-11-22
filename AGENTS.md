@@ -2,6 +2,22 @@
 
 What has gone wrong before, so it does not again. Read this before building, installing or releasing.
 
+## The Thor runs main, and main has everything
+
+On 2026-11-22 the Thor was running a build of a local branch with 49 commits that were never pushed, so the v0.1.3 release from `main` silently took away the dialogue box, one-button lookup and more. To stop that happening again:
+
+- **Push to `main` often.** Finished work goes to `main` as soon as `tools/check.sh` passes, not to a side branch that waits. The user has asked for this.
+- **Never install on the Thor from a branch that is not `main`.** Merge it into `main` and push first, then build from `main`.
+- **Before building for the Thor or tagging a release**, check that nothing is left behind:
+  ```sh
+  git fetch
+  git log --oneline origin/main..HEAD        # must be empty: pushed
+  git log --oneline HEAD..origin/main        # must be empty: up to date
+  for b in $(git branch --format='%(refname:short)' --no-merged origin/main); do echo "$b: $(git rev-list --count origin/main..$b) unmerged"; done
+  ```
+  An unmerged branch with real work is merged first or named to the user; it is never dropped quietly.
+- **Compare with what is installed:** `adb -s f34c1a3d shell dumpsys package io.github.beesan.lfg | grep -E 'versionCode|versionName'`. If the installed build has features `main` lacks, stop and find the branch it came from.
+
 ## A fresh checkout or worktree does not build as it is
 
 - `git submodule update --init --recursive`. Without `--recursive`, hoshidicts' own submodules (glaze, zstd, libdeflate…) are empty and CMake fails.
