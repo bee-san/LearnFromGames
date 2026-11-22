@@ -57,20 +57,21 @@ extern "C" JNIEXPORT jlong JNICALL Java_io_github_beesan_lfg_capture_Pixels_nati
   return static_cast<jlong>(hash | 1);  // never 0, which means "could not read"
 }
 
-// The pixels as Bitmap.getPixels gives them (0xAARRGGBB), written into [out] in one pass here: getPixels
-// goes over a screen's two million one by one through Skia's colour conversion, which took three times
-// as long as looking for text in them. A see-through pixel is stored multiplied by its alpha, which
-// getPixels undoes; a screen has none, and false is returned for a picture that has, as for one that
-// cannot be read or does not fit [out].
-extern "C" JNIEXPORT jboolean JNICALL Java_io_github_beesan_lfg_capture_Pixels_nativeArgb(
+// The pixels as they are stored, each as 0xAARRGGBB, written into [out] in one pass. Bitmap.getPixels
+// gives the same for an opaque sRGB picture, but goes over a screen's two million one by one through
+// Skia, converting a wide-gamut screen's colours to sRGB on the way, which took three times as long as
+// looking for text in them and changes nothing a reader of text needs. Returns 0 for a picture that
+// cannot be read or does not fit [out], 1 for an opaque one, 2 for one see-through somewhere (whose
+// colours are stored multiplied by their alpha, and are left so).
+extern "C" JNIEXPORT jint JNICALL Java_io_github_beesan_lfg_capture_Pixels_nativeArgb(
     JNIEnv* env, jclass, jobject bitmap, jintArray out) {
   Locked locked(env, bitmap);
-  if (!locked.pixels) return JNI_FALSE;
+  if (!locked.pixels) return 0;
   const size_t width = locked.info.width;
   const size_t height = locked.info.height;
-  if (static_cast<size_t>(env->GetArrayLength(out)) < width * height) return JNI_FALSE;
+  if (static_cast<size_t>(env->GetArrayLength(out)) < width * height) return 0;
   auto* to = static_cast<uint32_t*>(env->GetPrimitiveArrayCritical(out, nullptr));
-  if (!to) return JNI_FALSE;
+  if (!to) return 0;
   uint32_t opaque = 0xFF000000u;
   for (size_t y = 0; y < height; y++) {
     const uint8_t* row = locked.pixels + y * locked.info.stride;
@@ -84,7 +85,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_io_github_beesan_lfg_capture_Pixels_n
     }
   }
   env->ReleasePrimitiveArrayCritical(out, to, 0);
-  return opaque == 0xFF000000u ? JNI_TRUE : JNI_FALSE;
+  return opaque == 0xFF000000u ? 1 : 2;
 }
 
 // A still lossy WebP. [method] is libwebp's speed-for-size trade, 0 (fastest) to 6; Android's own
