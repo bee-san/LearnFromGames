@@ -80,6 +80,8 @@ class App : Application() {
         scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme, it.widgetSize) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
         // WorkManager keeps the automatic backup across restarts; it changes only when the setting does.
         scope.launch { settings.prefs.map { it.backupEvery }.distinctUntilChanged().drop(1).collect { BackupWorker.schedule(this@App, it) } }
+        // The same for the daily look for newer dictionaries, which is also set going on a first start.
+        scope.launch { settings.prefs.map { it.updateDictionaries to it.wifiOnly }.distinctUntilChanged().collect { (on, wifi) -> io.github.beesan.lfg.dict.DictionaryUpdateWorker.schedule(this@App, on, wifi) } }
     }
 
     /** Starts the app again from its first screen: after a restore, which replaced the database under it. */

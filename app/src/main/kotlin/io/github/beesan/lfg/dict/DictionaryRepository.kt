@@ -342,7 +342,7 @@ class DictionaryRepository(private val context: Context) {
         val background = installed().isNotEmpty()
         val report: (DictState) -> Unit = { if (background) _fetching.value = it else _state.value = it }
         try {
-            withContext(Dispatchers.IO) { download(source, zip, report) }
+            withContext(Dispatchers.IO) { download(source.name, source.url, source.minBytes, zip, report) }
             report(DictState.Installing(source.name))
             return installing.withLock {
                 val outcome = importZip(zip)
@@ -359,6 +359,97 @@ class DictionaryRepository(private val context: Context) {
         }
     }
 
+    /** When the dictionaries were last asked about, in epoch milliseconds; 0 for never. */
+    fun updatesCheckedAt(): Long = prefs.getLong(KEY_UPDATES_CHECKED, 0L)
+
+    /**
+     * Asks each dictionary that can be updated ([DictionaryUpdates]) whether its publisher has another
+     * release, and puts that in its place: the same place in the order, since entries show in it.
+     * Character names and dictionaries that name no index are left alone. A release that fails to
+     * import, or holds far less than the one installed, is dropped and not fetched again until the
+     * publisher's revision changes. Returns the names of those updated; a publisher that cannot be
+     * reached is passed over until the next time.
+     */
+    suspend fun updateAll(): List<String> = fetchingDefaults.withLock {
+        val updated = ArrayList<String>()
+        for (old in installed().filter { it.vndb == null }) {
+            try {
+                update(old)?.let { updated += it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "no update for ${old.title}", e)
+            }
+        }
+        prefs.edit().putLong(KEY_UPDATES_CHECKED, System.currentTimeMillis()).apply()
+        updated
+    }
+
+    /** Updates [old] if its publisher has another release. Returns the new title, or null when nothing was changed. */
+    private suspend fun update(old: InstalledDictionary): String? {
+        val mine = withContext(Dispatchers.IO) { DictionaryUpdates.index(File(old.path, "index.json").readText()) } ?: return null
+        if (!DictionaryUpdates.asks(mine)) return null
+        val theirs = withContext(Dispatchers.IO) { DictionaryUpdates.index(fetchText(mine.indexUrl)) } ?: return null
+        val url = DictionaryUpdates.download(mine, theirs) ?: return null
+        val skip = KEY_UPDATE_SKIPPED + mine.indexUrl
+        if (prefs.getString(skip, null) == theirs.revision) return null
+        val zip = File(context.cacheDir, "update-${System.currentTimeMillis()}.zip")
+        // Imported beside the dictionaries, not among them: the one in use is untouched until the new one is whole.
+        val staging = File(context.filesDir, "dictionaries-update")
+        try {
+            withContext(Dispatchers.IO) {
+                staging.deleteRecursively()
+                download(old.title, url, 1, zip) { _fetching.value = it }
+            }
+            _fetching.value = DictState.Installing(old.title)
+            return installing.withLock {
+                val outcome = importZip(zip, staging)
+                val all = installed()
+                val at = all.indexOfFirst { it.title == old.title }
+                val taken = all.any { it.title == outcome.title && it.title != old.title }
+                if (at < 0) return@withLock null
+                if (!DictionaryUpdates.replaces(old, outcome) || taken || DefaultDictionaries.ALL.any { it.matches(old) && !it.accepts(outcome) }) {
+                    android.util.Log.w(TAG, "${old.title}: release ${theirs.revision} not taken: ${outcome.error.ifEmpty { "${outcome.terms} entries" }}")
+                    prefs.edit().putString(skip, theirs.revision).apply()
+                    return@withLock null
+                }
+                val home = File(root, outcome.title)
+                val moved = withContext(native) {
+                    // No session may hold the old files open while they go.
+                    for (handle in sessions.values) Hoshidicts.close(handle)
+                    sessions.clear()
+                    File(old.path).deleteRecursively()
+                    home.deleteRecursively()
+                    File(staging, outcome.title).renameTo(home)
+                }
+                val new = old.copy(
+                    title = outcome.title, path = home.path, terms = outcome.terms, frequencies = outcome.frequencies,
+                    pitches = outcome.pitches, kanji = outcome.kanji, installedAt = System.currentTimeMillis(),
+                )
+                // The old one is gone either way; a move that failed leaves the starter set to fetch it again.
+                save(all.toMutableList().apply { if (moved) set(at, new) else removeAt(at) })
+                if (moved) outcome.title else null
+            }
+        } finally {
+            _fetching.value = null
+            withContext(NonCancellable + Dispatchers.IO) {
+                zip.delete()
+                staging.deleteRecursively()
+            }
+        }
+    }
+
+    /** A small text file, as an index.json is; more than a megabyte is not one. */
+    private fun fetchText(url: String): String {
+        val connection = open(url, "application/json")
+        try {
+            if (connection.responseCode != 200) error("$url answered ${connection.responseCode}.")
+            return connection.inputStream.use { String(it.readNBytes(1024 * 1024), Charsets.UTF_8) }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     /**
      * hoshidicts stores index.json's strings still escaped and escapes them again, so a
      * line break reads back as a backslash and an n. Read once more as a JSON string,
@@ -370,9 +461,9 @@ class DictionaryRepository(private val context: Context) {
         text
     }
 
-    private suspend fun importZip(zip: File): ImportOutcome = withContext(native) {
-        root.mkdirs()
-        DictJson.decodeFromString<ImportOutcome>(Hoshidicts.import(zip.path, root.path, lowRam = false))
+    private suspend fun importZip(zip: File, into: File = root): ImportOutcome = withContext(native) {
+        into.mkdirs()
+        DictJson.decodeFromString<ImportOutcome>(Hoshidicts.import(zip.path, into.path, lowRam = false))
     }
 
     private suspend fun register(outcome: ImportOutcome, vndb: String? = null) {
@@ -389,13 +480,13 @@ class DictionaryRepository(private val context: Context) {
         save(installed().filter { it.title != added.title } + added)
     }
 
-    private fun download(source: DefaultDictionaries.Source, to: File, report: (DictState) -> Unit) {
-        val connection = open(source.url)
+    private fun download(name: String, url: String, minBytes: Long, to: File, report: (DictState) -> Unit) {
+        val connection = open(url)
         try {
-            if (connection.responseCode != 200) error("${source.name}'s download answered ${connection.responseCode}.")
+            if (connection.responseCode != 200) error("$name's download answered ${connection.responseCode}.")
             val total = connection.contentLengthLong
             var done = 0L
-            report(DictState.Downloading(source.name, 0, total))
+            report(DictState.Downloading(name, 0, total))
             connection.inputStream.use { input ->
                 to.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
@@ -404,27 +495,30 @@ class DictionaryRepository(private val context: Context) {
                         if (n < 0) break
                         output.write(buffer, 0, n)
                         done += n
-                        report(DictState.Downloading(source.name, done, total))
+                        report(DictState.Downloading(name, done, total))
                     }
                 }
             }
-            if (done < source.minBytes) error("${source.name}'s download was only $done bytes.")
+            if (done < minBytes) error("$name's download was only $done bytes.")
         } finally {
             connection.disconnect()
         }
     }
 
-    private fun open(url: String): HttpURLConnection = (URL(url).openConnection() as HttpURLConnection).apply {
+    private fun open(url: String, accept: String = "application/zip, application/octet-stream"): HttpURLConnection = (URL(url).openConnection() as HttpURLConnection).apply {
         connectTimeout = 15_000
         readTimeout = 30_000
         instanceFollowRedirects = true
-        setRequestProperty("Accept", "application/zip, application/octet-stream")
+        setRequestProperty("Accept", accept)
         setRequestProperty("User-Agent", "LearnFromGames")
     }
 
     companion object {
         private const val KEY_INSTALLED = "installed"
         private const val KEY_DEFAULTS_PENDING = "defaults_pending"
+        private const val KEY_UPDATES_CHECKED = "updates_checked"
+        private const val KEY_UPDATE_SKIPPED = "update_skipped:"
+        private const val TAG = "LfgDictionaries"
         private const val SCAN_LENGTH = 16
         private const val MAX_SESSIONS = 3
     }

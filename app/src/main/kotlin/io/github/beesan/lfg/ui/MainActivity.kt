@@ -327,6 +327,10 @@ class MainActivity : ComponentActivity() {
                             onRemoveAudio = { model.removeWordAudio() },
                             starterMissing = remember(dictionary, fetchingDictionary) { model.starterMissing() },
                             onStarter = model::fetchStarterDictionaries,
+                            updates = prefs.updateDictionaries,
+                            onUpdates = { on -> model.updatePrefs { it.copy(updateDictionaries = on) } },
+                            updatesCheckedAt = remember(dictionary, fetchingDictionary) { model.dictionaryUpdatesCheckedAt() },
+                            onCheckUpdates = model::checkDictionaryUpdates,
                             onBack = ::back,
                         )
                         page == Page.SOURCES -> SourcesScreen(sources, ::back)

@@ -203,6 +203,11 @@ fun DictionariesScreen(
     /** The starter dictionaries not installed, by name, and the button that fetches them. */
     starterMissing: List<String>,
     onStarter: () -> Unit,
+    /** Whether dictionaries are brought up to date by themselves, when they were last asked about (0 for never), and "Check now". */
+    updates: Boolean,
+    onUpdates: (Boolean) -> Unit,
+    updatesCheckedAt: Long,
+    onCheckUpdates: () -> Unit,
     onBack: () -> Unit,
 ) = Page("Dictionaries", onBack, actions = { LfgButton(if (busy.busy) "Adding…" else "Add dictionary…", onAdd, primary = true, enabled = !busy.busy) }) {
     val date = remember { SimpleDateFormat("d MMMM yyyy", Locale.getDefault()) }
@@ -236,6 +241,17 @@ fun DictionariesScreen(
     Row {
         Text("Entries show in this order. ", color = Lfg.Dim, fontSize = 14.sp)
         Text("Show sources", color = Lfg.Accent, fontSize = 14.sp, modifier = Modifier.focusRing(RoundedCornerShape(4.dp)).clickable(onClick = onSources))
+    }
+    if (list.isNotEmpty()) {
+        Card(
+            "Updates",
+            "A dictionary that says where its next release is, as Jitendex, JMdict and Jiten do, is replaced by it, and keeps its place. " +
+                (if (updates) "Looked for once a day. " else "") +
+                if (updatesCheckedAt > 0) "Last checked ${date.format(Date(updatesCheckedAt))}." else "Not checked yet.",
+        ) {
+            Choice(listOf("on" to "Automatic", "off" to "Off"), if (updates) "on" else "off") { onUpdates(it == "on") }
+            LfgButton("Check now", onCheckUpdates, enabled = !busy.busy && fetching == null)
+        }
     }
     if (names.isNotEmpty()) {
         Text("Character names", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)

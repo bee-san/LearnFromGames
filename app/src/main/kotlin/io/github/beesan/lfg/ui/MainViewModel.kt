@@ -234,6 +234,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun starterMissing(): List<String> = app.dictionaries.defaultsMissing().map { it.name }
 
+    /** "Check now" on Settings › Dictionaries: every dictionary that can be updated is asked about behind the page. */
+    fun checkDictionaryUpdates() = io.github.beesan.lfg.dict.DictionaryUpdateWorker.now(app)
+
+    fun dictionaryUpdatesCheckedAt(): Long = app.dictionaries.updatesCheckedAt()
+
     fun retryDownloads() = DictionaryWorker.start(app, replace = true, wifiOnly = app.settings.prefs.value.wifiOnly)
 
     /** Waits for Wi-Fi, or not, from now on; downloads still to do start again under the new rule. */

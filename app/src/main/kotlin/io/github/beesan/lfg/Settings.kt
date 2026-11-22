@@ -27,6 +27,8 @@ data class Prefs(
     val keepScreensDays: Int = 14,
     /** The first run's downloads wait for an unmetered network. */
     val wifiOnly: Boolean = false,
+    /** Dictionaries that name where their next release is are brought up to date once a day. */
+    val updateDictionaries: Boolean = true,
     /** On a two-screen handheld, the screen the game is not on shows the game's lines as they are read. */
     val secondScreenPanel: Boolean = true,
     /** On a two-screen handheld, the app's own pages open on the second screen, wherever they were started from. */
@@ -180,6 +182,7 @@ class Settings(context: Context) {
             stickWords = store.getBoolean("stickWords", d.stickWords),
             keepScreensDays = store.getInt("keepScreensDays", d.keepScreensDays),
             wifiOnly = store.getBoolean("wifiOnly", d.wifiOnly),
+            updateDictionaries = store.getBoolean("updateDictionaries", d.updateDictionaries),
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
             appOnSecondScreen = store.getBoolean("appOnSecondScreen", d.appOnSecondScreen),
             entryPlace = store.getString("entryPlace", d.entryPlace) ?: d.entryPlace,
@@ -235,6 +238,7 @@ class Settings(context: Context) {
             .putBoolean("stickWords", next.stickWords)
             .putInt("keepScreensDays", next.keepScreensDays)
             .putBoolean("wifiOnly", next.wifiOnly)
+            .putBoolean("updateDictionaries", next.updateDictionaries)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)
             .putBoolean("appOnSecondScreen", next.appOnSecondScreen)
             .putString("entryPlace", next.entryPlace)
