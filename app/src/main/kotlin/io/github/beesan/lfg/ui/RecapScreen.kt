@@ -5,8 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,16 +29,15 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The story so far in a game, from only what has been read: its arcs, the
- * last session, and moments to look back at, each with its line's picture.
+ * The story so far in the game read last, from only what has been read: its
+ * arcs, newest first, the last session, and moments to look back at, each
+ * with its line's picture.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RecapScreen(
     state: MainViewModel.RecapState,
     games: List<Game>,
     hasKey: Boolean,
-    onGame: (String) -> Unit,
     onWrite: () -> Unit,
     onKey: () -> Unit,
     onBack: () -> Unit,
@@ -56,13 +53,9 @@ fun RecapScreen(
             Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (games.isEmpty()) Text("Nothing has been read yet. Play a game, then come back for its recap.", color = Lfg.Dim, fontSize = 15.sp)
-            if (games.size == 1) Text(games.single().title, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            if (games.size > 1) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    games.forEach { game -> LfgButton(game.title, { onGame(game.id) }, primary = game.id == state.gameId) }
-                }
-            }
+            val game = games.firstOrNull { it.id == state.gameId }
+            if (game == null) Text("Nothing has been read yet. Play a game, then come back for its recap.", color = Lfg.Dim, fontSize = 15.sp)
+            else Text(game.title, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Text("From what you have read so far, so nothing ahead is spoiled", color = Lfg.Dim, fontSize = 14.sp)
             if (!hasKey) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -75,7 +68,8 @@ fun RecapScreen(
             val recap = state.recap ?: return@Column
 
             Heading("The story so far")
-            for (arc in recap.arcs) {
+            // Newest first: where the story is now is what a returning player wants.
+            for (arc in recap.arcs.asReversed()) {
                 val shape = RoundedCornerShape(8.dp)
                 Row(
                     Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape).padding(horizontal = 16.dp, vertical = 12.dp),

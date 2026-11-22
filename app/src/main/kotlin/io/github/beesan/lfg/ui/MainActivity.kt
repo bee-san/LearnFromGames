@@ -208,7 +208,6 @@ class MainActivity : ComponentActivity() {
                             state = recap,
                             games = games,
                             hasKey = prefs.openRouterKey.isNotBlank(),
-                            onGame = model::recapGame,
                             onWrite = model::writeRecap,
                             onKey = { page = Page.TRANSLATION },
                             onBack = ::back,
