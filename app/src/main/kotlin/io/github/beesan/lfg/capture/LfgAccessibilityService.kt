@@ -295,8 +295,10 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /**
      * Button presses, heard whatever window has focus. The shortcut starts and
-     * stops lookup mode. Android cannot hide a chord from the game, which is
-     * why the default is the two stick clicks: emulators leave them unbound.
+     * stops lookup mode. Android cannot hide a pair of buttons from the game,
+     * which is why the default is the two stick clicks: emulators leave them
+     * unbound. A shortcut of one button is kept from the game instead
+     * ([oneButton]).
      */
     override fun onKeyEvent(event: KeyEvent): Boolean {
         // Back first takes away the strips of a reading asked for, before it reaches the app.
@@ -304,22 +306,23 @@ class LfgAccessibilityService : AccessibilityService() {
             if (event.action == KeyEvent.ACTION_UP) endAsked()
             return true
         }
-        if (!KeyEvent.isGamepadButton(event.keyCode) && event.keyCode !in DPAD) return false
         val (first, second) = when (app.settings.prefs.value.shortcut) {
             Prefs.SHORTCUT_L1_R1 -> KeyEvent.KEYCODE_BUTTON_L1 to KeyEvent.KEYCODE_BUTTON_R1
             Prefs.SHORTCUT_L2_R2 -> KeyEvent.KEYCODE_BUTTON_L2 to KeyEvent.KEYCODE_BUTTON_R2
             Prefs.SHORTCUT_SELECT_START -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_START
+            Prefs.SHORTCUT_SELECT -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_SELECT
+            Prefs.SHORTCUT_START -> KeyEvent.KEYCODE_BUTTON_START to KeyEvent.KEYCODE_BUTTON_START
+            Prefs.SHORTCUT_L3 -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBL
+            Prefs.SHORTCUT_R3 -> KeyEvent.KEYCODE_BUTTON_THUMBR to KeyEvent.KEYCODE_BUTTON_THUMBR
             else -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBR
         }
+        if (first == second && event.keyCode == first) return oneButton(event)
+        if (!KeyEvent.isGamepadButton(event.keyCode) && event.keyCode !in DPAD) return false
         if (event.action == KeyEvent.ACTION_DOWN) {
             down += event.keyCode
-            if (first in down && second in down && !chordFired) {
+            if (first != second && first in down && second in down && !chordFired) {
                 chordFired = true
-                val state = controller.state.value
-                if (state.controllerMode) controller.exitControllerMode()
-                else if ((front != null || asked != null) && state.lines.isNotEmpty()) controller.enterControllerMode()
-                // An ordinary app, read on demand: read it now, then hand the controller the cursor.
-                else if (front == null) ask(thenController = true)
+                toggleLookup(anyApp = true)
             } else if (event.keyCode != first && event.keyCode != second && event.repeatCount == 0) {
                 // A button meant for the game: the word looked up by touch is done with.
                 val state = controller.state.value
@@ -330,6 +333,40 @@ class LfgAccessibilityService : AccessibilityService() {
             if (first !in down && second !in down) chordFired = false
         }
         return false
+    }
+
+    /** Whether the press of the one-button shortcut now held is ours, so its release is too. */
+    private var oneButtonOurs = false
+
+    /**
+     * The button of a one-button shortcut. While a game is in front, or lookup
+     * is on, it starts and stops lookup and the game never receives it;
+     * anywhere else it is the app's as ever.
+     */
+    private fun oneButton(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            oneButtonOurs = controller.state.value.controllerMode || front != null || asked != null
+            if (oneButtonOurs) toggleLookup(anyApp = false)
+        } else if (event.action == KeyEvent.ACTION_UP) {
+            return oneButtonOurs.also { oneButtonOurs = false }
+        }
+        return oneButtonOurs
+    }
+
+    /**
+     * Starts lookup mode, or stops it. With [anyApp], an ordinary app in front
+     * is read first; without it, a press where there is nothing to look up
+     * says so, since the game did not get the button either.
+     */
+    private fun toggleLookup(anyApp: Boolean) {
+        val state = controller.state.value
+        when {
+            state.controllerMode -> controller.exitControllerMode()
+            (front != null || asked != null) && state.lines.isNotEmpty() -> controller.enterControllerMode()
+            // An ordinary app, read on demand: read it now, then hand the controller the cursor.
+            front == null -> if (anyApp) ask(thenController = true)
+            !anyApp -> front?.let { overlays.notice(it.displayId, "LFG has read no text on this screen yet.") }
+        }
     }
 
     private fun toggleStrips() {

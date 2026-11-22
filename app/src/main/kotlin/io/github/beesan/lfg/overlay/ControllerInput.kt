@@ -17,6 +17,7 @@ import io.github.beesan.lfg.lookup.Move
  * goes the same four ways a character at a time and faster while held, one
  * face button adds the card and the other gives the controller back to the
  * game, the shoulder buttons change entry and the right stick scrolls it.
+ * With [stickWords] the D-pad and the left stick change places.
  *
  * A D-pad reaches a focused window either as keys or as the HAT axes, depending
  * on the pad; both are handled, and a held direction repeats on Rubi's timings
@@ -25,6 +26,7 @@ import io.github.beesan.lfg.lookup.Move
 class ControllerInput(
     private val controller: LookupController,
     private val swapConfirm: () -> Boolean,
+    private val stickWords: () -> Boolean,
     private val onClose: () -> Unit,
     /** X: a note on the word shown. */
     private val onNote: () -> Unit,
@@ -33,8 +35,10 @@ class ControllerInput(
     private val chordActive: () -> Boolean,
 ) {
     private val handler = Handler(Looper.getMainLooper())
-    private val pad = Repeater(KeyRepeat(), stick = false)
-    private val stick = Repeater(KeyRepeat.stick(), stick = true)
+    private val words = Repeater(KeyRepeat(), stick = false)
+    private val characters = Repeater(KeyRepeat.stick(), stick = true)
+    private val pad: Repeater get() = if (stickWords()) characters else words
+    private val stick: Repeater get() = if (stickWords()) words else characters
     private var scrollSpeed = 0f
     private val scroller = object : Runnable {
         override fun run() {
@@ -44,6 +48,7 @@ class ControllerInput(
         }
     }
 
+    /** A held direction: with [stick] false it steps by word at the D-pad's pace, with true by character at the left stick's. */
     private inner class Repeater(private val repeat: KeyRepeat, private val stick: Boolean) : Runnable {
         private var move: Move? = null
 
@@ -130,8 +135,8 @@ class ControllerInput(
 
     /** Lookup mode ended: nothing may keep repeating. */
     fun release() {
-        pad.hold(null)
-        stick.hold(null)
+        words.hold(null)
+        characters.hold(null)
         scrollSpeed = 0f
         handler.removeCallbacks(scroller)
     }
