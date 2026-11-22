@@ -14,6 +14,7 @@ import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -38,6 +39,7 @@ import io.github.beesan.lfg.games.Hosts
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.overlay.OverlayHost
+import io.github.beesan.lfg.ui.CoverActivity
 import io.github.beesan.lfg.ui.MainActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -49,8 +51,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -190,6 +194,17 @@ class LfgAccessibilityService : AccessibilityService() {
             }
         }
         scope.launch { controller.state.collect(overlays::onState) }
+        // Lookup with the controller on a game: the game is covered for as long, where Settings asks for it.
+        scope.launch {
+            controller.state.map { it.controllerMode }.distinctUntilChanged().collect { lookup ->
+                val display = front?.displayId
+                if (lookup && asked == null && display != null && app.settings.prefs.value.coverGame) {
+                    CoverActivity.show(this@LfgAccessibilityService, display)
+                } else {
+                    CoverActivity.hide()
+                }
+            }
+        }
         scope.launch {
             // Enough of every game's newest lines that the lines' screen still has those of the one being played.
             app.database.lines().recent(80).collect(overlays::onHistory)
@@ -264,6 +279,7 @@ class LfgAccessibilityService : AccessibilityService() {
         if (instance === this) instance = null
         _asking.value = false
         _pipeline.value = null
+        CoverActivity.hide()
         if (::overlays.isInitialized) overlays.destroy()
         scope.cancel()
         shots.execute { thumbnails.close() }
@@ -313,6 +329,20 @@ class LfgAccessibilityService : AccessibilityService() {
         }
         return false
     }
+
+    /** Whether a word is being looked up with the controller: what the cover over the game stays up for. */
+    val lookupOn: Boolean get() = ::controller.isInitialized && controller.state.value.controllerMode
+
+    /** Android took the cover off the game (Home, another app over it): lookup ends with it. */
+    fun leaveLookup() {
+        if (lookupOn) controller.exitControllerMode()
+    }
+
+    /** A button that reached the cover over the game, not the lookup window. */
+    fun coverKey(event: KeyEvent): Boolean = lookupOn && overlays.key(event)
+
+    /** A stick or the D-pad, likewise. */
+    fun coverMotion(event: MotionEvent): Boolean = lookupOn && overlays.motion(event)
 
     /** Whether the press of the one-button shortcut now held is ours, so its release is too. */
     private var oneButtonOurs = false
@@ -739,6 +769,8 @@ class LfgAccessibilityService : AccessibilityService() {
                 null
             }
             front = now
+            // The cover is only ever over a game whose word is being looked up: lost sight of, lookup ends and it goes.
+            if (now == null && CoverActivity.displayId != null) leaveLookup()
             overlays.onOwnApp(ownAppOn)
             val prefs = app.settings.prefs.value
             if (!shooting) overlays.showReadButton(ordinaryFront?.displayId?.takeIf { prefs.readButton && (now == null || asked != null) })
@@ -853,6 +885,7 @@ class LfgAccessibilityService : AccessibilityService() {
             val window: AccessibilityWindowInfo, val displayId: Int, val name: String, val fullscreen: Boolean, val covered: List<Box>,
         )
         val candidates = ArrayList<Candidate>()
+        var held: Front? = null
         try {
             val all = windowsOnAllDisplays
             val alive = HashSet<Int>()
@@ -861,8 +894,14 @@ class LfgAccessibilityService : AccessibilityService() {
                 val windows = all.valueAt(i)
                 // Windows come front to back: the first app window is the one on top of its screen.
                 val top = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION } ?: continue
+                if (isCover(top, all.keyAt(i))) {
+                    // Our own cover over a game during lookup. It takes every touch on its screen, so Android
+                    // no longer lists the game's window under it: the game in front there is the one it was.
+                    front?.takeIf { it.displayId == all.keyAt(i) }?.let { held = it }
+                    continue
+                }
                 alive += top.id
-                val name = packageOfWindow[top.id] ?: top.root?.packageName?.toString()?.also { packageOfWindow[top.id] = it } ?: continue
+                val name = packageOf(top) ?: continue
                 if (name == packageName) own += all.keyAt(i)
                 // A status or navigation bar on the screen means an ordinary app; a game hides them.
                 // A phone held sideways hides them for every app, though: an app
@@ -887,6 +926,7 @@ class LfgAccessibilityService : AccessibilityService() {
             ordinaryFront = null
             return null
         }
+        held?.let { return it }
         var ordinary: Ordinary? = null
         fun noteOrdinary(c: Candidate) {
             if (ordinary == null && c.name !in neverAsked) ordinary = Ordinary(c.name, c.displayId, c.window.id, Rect().also(c.window::getBoundsInScreen))
@@ -934,6 +974,17 @@ class LfgAccessibilityService : AccessibilityService() {
         }
         ordinaryFront = ordinary
         return null
+    }
+
+    private fun packageOf(window: AccessibilityWindowInfo): String? =
+        packageOfWindow[window.id] ?: window.root?.packageName?.toString()?.also { packageOfWindow[window.id] = it }
+
+    /** Whether [window], on [display], is our see-through cover over the game ([CoverActivity]). */
+    private fun isCover(window: AccessibilityWindowInfo, display: Int): Boolean {
+        if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) return false
+        if (window.title?.toString() == CoverActivity.TITLE) return true
+        // Its title may not have reached us yet: while it is up, a window of ours on that screen is it.
+        return CoverActivity.displayId == display && packageOf(window) == packageName
     }
 
     /** In an emulator or a Steam player, the game a front-end, Eden or Steam says it has open; else the app's own row. */
