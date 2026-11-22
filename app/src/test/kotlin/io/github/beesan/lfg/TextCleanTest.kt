@@ -70,6 +70,20 @@ class TextCleanTest {
     }
 
     @Test
+    fun aBracketReadAsALetterWithItsPairOnAnotherRow() {
+        // The Greek letter, as ScreenAI gives it on the OCR bench.
+        assertEquals("「…………」", clean("Γ…………]"))
+        assertEquals("「………………」", clean("Γ………………|"))
+        // The line's other end is on the next row, or was not read.
+        assertEquals("「……!", clean("Γ……!"))
+        assertEquals("「そうだね、それは", clean("[そうだね、それは"))
+        assertEquals("……」", clean("……]"))
+        // A square bracket with its own pair is one.
+        assertEquals("[1]はい", clean("[1]はい"))
+        assertEquals("はい[A]", clean("はい[A]"))
+    }
+
+    @Test
     fun whatIsNotTheGamesTextGoes() {
         assertNull(clean("ーニーーーーニーニー"))
         assertNull(clean("Canesvenatica"))

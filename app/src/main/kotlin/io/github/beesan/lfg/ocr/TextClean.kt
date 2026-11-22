@@ -202,8 +202,11 @@ object TextClean {
         }
     }
 
-    private val OPEN_LOOKALIKES = setOf("[", "J", "E", "Г", "L", "|", "I")
-    private val CLOSE_LOOKALIKES = setOf("]", "J", "Г", "L", "|", "I")
+    private val OPEN_LOOKALIKES = setOf("[", "J", "E", "Г", "Γ", "L", "|", "I")
+    private val CLOSE_LOOKALIKES = setOf("]", "J", "Г", "Γ", "L", "|", "I")
+
+    /** What 「 is read as that no Japanese line begins with otherwise: the Cyrillic and the Greek letter, and a square bracket. */
+    private val OPEN_ALONE = setOf("Г", "Γ", "[")
 
     private fun isLatin(c: Int) = c in 'a'.code..'z'.code || c in 'A'.code..'Z'.code
 
@@ -212,6 +215,11 @@ object TextClean {
      * pair: 「…Г -> 「…」, [ふーん…」 -> 「ふーん…」, and both at once when
      * Japanese is between them (E……Г -> 「……」). A letter that is part of a
      * Latin word ("Jun", "OK") is that word.
+     *
+     * A line's other end is often on another row, or was not read. So Г, Γ or
+     * [ before Japanese opens speech by itself (Γ……! -> 「……!), and ] after
+     * Japanese closes it (……] -> ……」), unless the line has the square
+     * bracket's own pair in it.
      */
     private fun brackets(pieces: MutableList<Piece>) {
         val first = pieces.indexOfFirst { it.text.isNotBlank() }
@@ -228,6 +236,8 @@ object TextClean {
                 pieces[first].text = "「"
                 pieces[last].text = "」"
             }
+            start in OPEN_ALONE && japanese(cp(pieces[first + 1])) && pieces.none { it.text == "]" } -> pieces[first].text = "「"
+            end == "]" && japanese(cp(pieces[last - 1])) && pieces.none { it.text == "[" } -> pieces[last].text = "」"
         }
     }
 
