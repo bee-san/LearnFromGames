@@ -28,7 +28,8 @@ LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSent
 - **Or never let go of the controller.** L3 + R3 turns the pad into a text cursor: by word, by line, by character. The game receives nothing until you leave.
 - **Uses the second screen.** On a two-screen handheld the entry opens on the screen the game is not on. On one screen it is a popup.
 - **One press to Anki.** Cards go to AnkiDroid with the sentence, the word marked, the definition and a picture of the game. Kiku, Lapis and Senren note types are found by themselves; without one, the app makes its own.
-- **Sentence audio and moving pictures**, if you switch them on: the game's own voice for the line, with the music around it cut away, and an animated picture of it appearing. A line the game does not speak is read by Android's voice instead.
+- **Sentence audio**: the game's own voice for the line, with the music around it cut away. Android asks before LFG may listen, so press Start once a session. A line the game does not speak is read by Android's voice instead.
+- **Moving pictures**, if you switch them on: an animated picture of the line appearing.
 - **Your dictionaries.** Hachidori's starter set is fetched at first run: Jitendex, JMnedict, Bee's Ultimate Kanji Dictionary, Jiten's frequencies and Bee's Ultimate Grammar Dictionary. Add any Yomitan dictionary zip and it is shown with its own styling. Pitch accent dictionaries draw the accent over the reading, frequency dictionaries show their ranks, and local-audio-yomichan's `android.db` lets you hear the word.
 - **Every line is kept**, so you can mine after the session and see reading time, characters, speed and your streak.
 
