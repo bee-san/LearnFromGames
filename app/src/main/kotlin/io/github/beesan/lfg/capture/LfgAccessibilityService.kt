@@ -783,6 +783,8 @@ class LfgAccessibilityService : AccessibilityService() {
                 null
             }
             front = now
+            // The cover is only ever over a game whose word is being looked up: lost sight of, lookup ends and it goes.
+            if (now == null && CoverActivity.displayId != null) leaveLookup()
             overlays.onOwnApp(ownAppOn)
             val prefs = app.settings.prefs.value
             if (!shooting) overlays.showReadButton(ordinaryFront?.displayId?.takeIf { prefs.readButton && (now == null || asked != null) })
@@ -898,6 +900,7 @@ class LfgAccessibilityService : AccessibilityService() {
             val window: AccessibilityWindowInfo, val displayId: Int, val name: String, val fullscreen: Boolean, val covered: List<Box>,
         )
         val candidates = ArrayList<Candidate>()
+        var held: Front? = null
         try {
             val all = windowsOnAllDisplays
             val alive = HashSet<Int>()
@@ -905,8 +908,13 @@ class LfgAccessibilityService : AccessibilityService() {
             for (i in 0 until all.size()) {
                 val windows = all.valueAt(i)
                 // Windows come front to back: the first app window is the one on top of its screen.
-                // Our own cover over a game during lookup is not one: the game under it is still in front.
-                val top = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && !isCover(it, all.keyAt(i)) } ?: continue
+                val top = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION } ?: continue
+                if (isCover(top, all.keyAt(i))) {
+                    // Our own cover over a game during lookup. It takes every touch on its screen, so Android
+                    // no longer lists the game's window under it: the game in front there is the one it was.
+                    front?.takeIf { it.displayId == all.keyAt(i) }?.let { held = it }
+                    continue
+                }
                 alive += top.id
                 val name = packageOfWindow[top.id]
                     ?: (top.root?.packageName?.toString() ?: hostTitled(top.title?.toString()))?.also { packageOfWindow[top.id] = it }
@@ -939,6 +947,7 @@ class LfgAccessibilityService : AccessibilityService() {
             ordinaryFront = null
             return null
         }
+        held?.let { return it }
         var ordinary: Ordinary? = null
         fun noteOrdinary(c: Candidate) {
             if (ordinary == null && c.name !in neverAsked) ordinary = Ordinary(c.name, c.displayId, c.window.id, Rect().also(c.window::getBoundsInScreen))
