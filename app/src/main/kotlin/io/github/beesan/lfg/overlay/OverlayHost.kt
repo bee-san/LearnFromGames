@@ -44,7 +44,8 @@ import io.github.beesan.lfg.lookup.LookupState
  * - the entry, a see-through popup beside the word, with its shadow;
  * - on the other screen of a two-screen handheld, the game's lines as they are
  *   read, as a texthooker page lists them;
- * - in lookup mode, a window that holds the controller.
+ * - in lookup mode, a window that holds the controller and, over a game,
+ *   covers it so that no tap reaches it.
  *
  * Windows are made once and then moved or parked, never added and removed in
  * quick succession: PlayTranslate's code reports AYN firmware crashing on that.
@@ -62,11 +63,13 @@ class OverlayHost(
     /** The read button over an ordinary app: a tap, and a long press. */
     private val onReadButton: () -> Unit,
     private val onReadButtonHeld: () -> Unit,
-    /** A region dragged out: where, and whether to keep reading it. */
-    private val onRegion: (Box, Boolean) -> Unit,
+    /** A box was drawn on the screen and something chosen for it ([RegionPicker]). */
+    private val onPicked: (Picked) -> Unit,
+    /** In lookup mode over a game, the button for its dialogue box was pressed: the box is to be drawn. */
+    private val onPickBox: () -> Unit,
     /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
     private val onAsk: (lineId: String, what: Ask) -> Unit,
-    /** Taps a point of a screen, as a finger would: only ever our own focus window. */
+    /** Taps a point of a screen, as a finger would, once a window of ours is on top there: only ever our own focus window. */
     private val tapOn: (displayId: Int, x: Int, y: Int) -> Unit,
     private val styles: () -> List<EntryHtml.Style>,
     private val media: (dictionary: String, path: String) -> ByteArray?,
@@ -117,6 +120,9 @@ class OverlayHost(
     private var buttonX = -1
     private var buttonY = -1
     private var picker: Win? = null
+
+    /** The box picker while it shows: in lookup mode the controller is its own. */
+    private var pickerView: RegionPicker? = null
     private val handler = android.os.Handler(service.mainLooper)
     private var history: List<GameLine> = emptyList()
 
@@ -139,14 +145,17 @@ class OverlayHost(
     val input = ControllerInput(
         controller,
         swapConfirm = { prefs().swapConfirm },
+        stickWords = { prefs().stickWords },
         onClose = { controller.exitControllerMode() },
         onNote = { startNote(state.entryIndex) },
         onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(0, dy) },
+        // An ordinary app has no dialogue box: its regions are read when asked, from the read button.
+        onBox = { if (gameInFront && !asking) onPickBox() },
         chordActive = chordActive,
     )
 
     /** True while something of ours is drawn on the game's screen, so a picture of that screen would include it. */
-    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || notice?.shown == true
+    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || notice?.shown == true || picker != null
 
     private var notice: Win? = null
     private var noticeDisplay = Display.INVALID_DISPLAY
@@ -195,6 +204,14 @@ class OverlayHost(
             lp.y = 0
             lp.width = 1
             lp.height = 1
+            lp.flags = flags or LayoutParams.FLAG_NOT_TOUCHABLE or LayoutParams.FLAG_NOT_FOCUSABLE
+            view.visibility = View.INVISIBLE
+            apply()
+        }
+
+        /** Put on the screen parked, before it is first shown: every window made after it then lies over it. */
+        fun addParked() {
+            if (added) return
             lp.flags = flags or LayoutParams.FLAG_NOT_TOUCHABLE or LayoutParams.FLAG_NOT_FOCUSABLE
             view.visibility = View.INVISIBLE
             apply()
@@ -371,6 +388,13 @@ class OverlayHost(
         val host = manager(gameDisplay) ?: return
         val lines = if (gameInFront) state.lines else emptyList()
 
+        // The lookup-mode window goes on the screen first, parked: the strips, the mark and the entry are
+        // then all over it, so when it covers the game it does not cover them.
+        val cover = focus ?: Win(FocusView(host.first), host.second, FOCUS_FLAGS).also {
+            focus = it
+            it.addParked()
+        }
+
         // Tap strips: one per row of text with a place on screen.
         var used = 0
         if (stripsOn) {
@@ -417,11 +441,15 @@ class OverlayHost(
         // moment whenever the controller has to be brought back to the game's screen.
         val holding = state.controllerMode && gameInFront && noting == null
         if (holding || bringing) {
-            val win = focus ?: Win(FocusView(host.first), host.second, FOCUS_FLAGS).also { focus = it }
-            win.place(0, 0, FOCUS_PX, FOCUS_PX)
-            if (holding) win.view.requestFocus()
+            // Over a game it covers the whole screen, seen through: a tap that misses the words and the entry
+            // lands on it and not on the game, and nothing but our own windows is left to take the buttons.
+            // The game is not told of it, as it would be of a screen put over it, so nothing pauses.
+            // An ordinary app that was asked to be read keeps its taps: one elsewhere ends the reading.
+            val whole = if (holding && !asking) bounds(gameDisplay) else null
+            if (whole != null) cover.place(0, 0, whole.width, whole.height) else cover.place(0, 0, FOCUS_PX, FOCUS_PX)
+            if (holding) cover.view.requestFocus()
         } else {
-            focus?.hide()
+            cover.hide()
         }
     }
 
@@ -441,10 +469,11 @@ class OverlayHost(
         bringing = true
         render()
         handler.postDelayed({ tapOn(gameDisplay, FOCUS_PX / 2, FOCUS_PX / 2) }, 60)
+        // Long enough for the tap, which waits until the window is seen to be up.
         handler.postDelayed({
             bringing = false
             render()
-        }, 450)
+        }, 600)
     }
 
     private fun renderPanel(displayId: Int) {
@@ -586,19 +615,42 @@ class OverlayHost(
         handler.postDelayed(hideNotice, NOTICE_MS)
     }
 
-    /** A screen-sized window to drag a box on; it reports the box and goes. */
-    fun pickRegion(displayId: Int) {
+    /** The size of a screen, as a box at its corner; null for a screen that is gone. */
+    fun screen(displayId: Int): Box? = bounds(displayId)
+
+    /**
+     * A screen-sized window to draw a box on; it reports what was chosen for
+     * the box and goes. Over a game, [game] is that game: the box is then its
+     * dialogue box. From lookup mode ([lookup]) the controller draws it as well
+     * as a finger.
+     */
+    fun pickRegion(displayId: Int, game: PickFor? = null, lookup: Boolean = false) {
         val host = manager(displayId) ?: return
         val screen = bounds(displayId) ?: return
         picker?.remove()
-        val view = RegionPicker(host.first) { box, keep ->
+        // The controller is ours only in lookup mode, and only on the game's screen.
+        val pad = lookup && displayId == gameDisplay
+        if (pad) input.release()
+        val view = RegionPicker(host.first, game, pad, prefs().swapConfirm, ::ownTouch) { picked ->
             picker?.remove()
             picker = null
-            if (box != null) onRegion(box, keep)
+            pickerView = null
+            onPicked(picked)
         }
         val win = Win(view, host.second, PICKER_FLAGS)
         picker = win
+        pickerView = view
         win.place(0, 0, screen.width, screen.height)
+    }
+
+    /** Whether a box is being drawn. */
+    val picking: Boolean get() = picker != null
+
+    /** The box picker goes, with nothing chosen. */
+    fun closePicker() {
+        picker?.remove()
+        picker = null
+        pickerView = null
     }
 
     fun destroy() {
@@ -607,6 +659,7 @@ class OverlayHost(
         handler.removeCallbacksAndMessages(null)
         notice?.remove()
         picker?.remove()
+        pickerView = null
         readButton?.remove()
         (strips + marks + listOfNotNull(popup, shade, focus, panel)).forEach { it.remove() }
         strips.clear()
@@ -681,8 +734,12 @@ class OverlayHost(
             }
         }
 
-        override fun dispatchKeyEvent(event: KeyEvent): Boolean = input.onKey(event) || super.dispatchKeyEvent(event)
-        override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean = input.onMotion(event) || super.dispatchGenericMotionEvent(event)
+        // While a box is being drawn the controller draws it; lookup under it stays as it is.
+        override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+            (pickerView?.onKey(event) ?: input.onKey(event)) || super.dispatchKeyEvent(event)
+
+        override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean =
+            (pickerView?.onMotion(event) ?: input.onMotion(event)) || super.dispatchGenericMotionEvent(event)
     }
 
     /**
@@ -759,12 +816,17 @@ class OverlayHost(
         }
     }
 
-    private fun hints(context: Context): TextView {
+    private fun hints(context: Context): TextView = context.keyHints(hintsText(context))
+
+    /** The hints as Settings has the buttons now: read each time they show, since Controls can change under them. */
+    private fun hintsText(context: Context): String {
         val swap = prefs().swapConfirm
-        return context.keyHints(
+        return keyHintsText(
             if (swap) "B" else "A", if (swap) "A" else "B",
             listen = (context.applicationContext as? io.github.beesan.lfg.App)?.wordAudio?.info?.value != null,
             wholeWord = prefs().picking.wholeWord,
+            stickWords = prefs().stickWords,
+            box = gameInFront && !asking,
         )
     }
 
@@ -832,6 +894,7 @@ class OverlayHost(
             showEntries(entry, state)
             message.text = state.message.takeIf { state.entries.isNotEmpty() } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
+            if (state.controllerMode) hints.text = hintsText(context)
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.GONE
         }
     }
@@ -1028,6 +1091,7 @@ class OverlayHost(
         fun show(stripsOn: Boolean) {
             showSession(session?.first, session?.second)
             stripsToggle.text = if (stripsOn) "Tap strips on" else "Tap strips off"
+            if (state.controllerMode) hints.text = hintsText(context)
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.INVISIBLE
             tip.visibility = if (state.controllerMode) View.GONE else View.VISIBLE
             tip.text = "Tap a word, here or on the game."
@@ -1335,8 +1399,9 @@ class OverlayHost(
         const val POPUP_FLAGS = BASE or LayoutParams.FLAG_NOT_TOUCH_MODAL or LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
         const val PANEL_FLAGS = BASE or LayoutParams.FLAG_NOT_TOUCH_MODAL
 
-        // Focusable, so it holds the controller. A few pixels in the corner, which our own tap lands on
-        // to bring the controller to this screen; every other tap still reaches the strips and the game.
+        // Focusable, so it holds the controller. Our own tap lands in its corner to bring the controller to
+        // this screen. Over a game in lookup mode it is the whole screen; otherwise a few pixels in that
+        // corner, so every other tap still reaches the strips and the app.
         const val FOCUS_FLAGS = LayoutParams.FLAG_NOT_TOUCH_MODAL or LayoutParams.FLAG_LAYOUT_IN_SCREEN or LayoutParams.FLAG_LAYOUT_NO_LIMITS
         const val FOCUS_PX = 4
     }

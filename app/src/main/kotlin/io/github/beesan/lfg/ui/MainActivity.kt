@@ -319,7 +319,10 @@ class MainActivity : ComponentActivity() {
                             LaunchedEffect(Unit) { model.gatherDiagnostics() }
                             HelpScreen(report, onCopy = { report?.let(::copyReport) }, onShare = { report?.let(::shareReport) }, onBack = ::back)
                         }
-                        page == Page.GAMES -> GamesScreen(games, packageName, { model.updateGame(it) }, ::back)
+                        page == Page.GAMES -> {
+                            val boxes by model.dialogueBoxes.collectAsStateWithLifecycle()
+                            GamesScreen(games, packageName, { model.updateGame(it) }, ::back, boxes, model::readWholeScreen)
+                        }
                         page == Page.GAME_NAMES -> GameNamesScreen(
                             prefs = prefs,
                             status = gameNameStatus,

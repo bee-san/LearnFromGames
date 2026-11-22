@@ -66,6 +66,7 @@ import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.StatsPeriod
+import io.github.beesan.lfg.core.DialogueBox
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.games.CocoonLog
 import io.github.beesan.lfg.games.Eden
@@ -268,6 +269,10 @@ fun shortcutLabel(prefs: Prefs) = when (prefs.shortcut) {
     Prefs.SHORTCUT_L1_R1 -> "L1 + R1"
     Prefs.SHORTCUT_L2_R2 -> "L2 + R2"
     Prefs.SHORTCUT_SELECT_START -> "Select + Start"
+    Prefs.SHORTCUT_SELECT -> "Select"
+    Prefs.SHORTCUT_START -> "Start"
+    Prefs.SHORTCUT_L3 -> "L3"
+    Prefs.SHORTCUT_R3 -> "R3"
     else -> "L3 + R3"
 }
 
@@ -411,8 +416,23 @@ private fun SettingText(name: String, detail: String, value: String, secret: Boo
 
 @Composable
 fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Controls", onBack) {
-    Card("Lookup shortcut", "Starts and stops lookup with the controller. The game sees these buttons too, so pick a pair it does not use.") {
-        Choice(listOf(Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2", Prefs.SHORTCUT_SELECT_START to "Select + Start"), prefs.shortcut) { v -> onChange { it.copy(shortcut = v) } }
+    Card("Lookup shortcut", "One button starts and stops lookup. While you play it is kept from the game, so pick one the game can do without.") {
+        Choice(
+            listOf(Prefs.SHORTCUT_L3 to "L3", Prefs.SHORTCUT_R3 to "R3", Prefs.SHORTCUT_SELECT to "Select", Prefs.SHORTCUT_START to "Start"),
+            prefs.shortcut,
+        ) { v -> onChange { it.copy(shortcut = v) } }
+    }
+    Card("Or two buttons together", "The game gets both of these as well, so pick a pair it does nothing with.") {
+        Choice(
+            listOf(Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2", Prefs.SHORTCUT_SELECT_START to "Select + Start"),
+            prefs.shortcut,
+        ) { v -> onChange { it.copy(shortcut = v) } }
+    }
+    Card(
+        "Stick and D-pad",
+        if (prefs.stickWords) "In lookup, the left stick goes word by word and the D-pad a character at a time." else "In lookup, the D-pad goes word by word and the left stick a character at a time.",
+    ) {
+        Choice(listOf("pad" to "D-pad by word", "stick" to "Stick by word"), if (prefs.stickWords) "stick" else "pad") { v -> onChange { it.copy(stickWords = v == "stick") } }
     }
     Card("Add card button", "Which face button adds the card; the other one closes. As Android names them.") {
         Choice(listOf("a" to "A adds, B closes", "b" to "B adds, A closes"), if (prefs.swapConfirm) "b" else "a") { v -> onChange { it.copy(swapConfirm = v == "b") } }
@@ -481,7 +501,11 @@ fun RecognitionScreen(
 }
 
 @Composable
-fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit, onBack: () -> Unit) = Page("Games and apps", onBack) {
+fun GamesScreen(
+    games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit, onBack: () -> Unit,
+    /** The dialogue box drawn for a game, by its id, and what takes one away. */
+    boxes: Map<String, DialogueBox> = emptyMap(), onWholeScreen: (Game) -> Unit = {},
+) = Page("Games and apps", onBack) {
     val list = games.filter { it.packageName != ownPackage }
     if (list.isEmpty()) Text("Nothing has been read yet. A game is the app in front when it is fullscreen; other apps are listed once you ask for one to be read.", color = Lfg.Dim, fontSize = 15.sp)
     val apps = list.filter { it.detected.isEmpty() }.associate { it.packageName to it.title }
@@ -531,6 +555,19 @@ fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit,
                     Text("Off for touch-driven games: taps then always reach the game.", color = Lfg.Dim, fontSize = 13.sp)
                 }
                 OnOff(game.tapStrips) { onUpdate(game.copy(tapStrips = it)) }
+            }
+            // An ordinary app is read when asked, a region at a time: only what is read by itself has a dialogue box.
+            if (!game.app) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val box = boxes[game.id]
+                Column(Modifier.weight(1f)) {
+                    Text("Dialogue box", color = Lfg.Text, fontSize = 15.sp)
+                    Text(
+                        if (box == null) "The whole screen is read. To read only the dialogue, start lookup in the game and press Select, then draw a box around it."
+                        else "Only the box you drew is read (${box.box.width} × ${box.box.height}). Menus and words in the picture outside it are left alone.",
+                        color = Lfg.Dim, fontSize = 13.sp,
+                    )
+                }
+                if (box != null) LfgButton("Read the whole screen", { onWholeScreen(game) })
             }
         }
     }
