@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** The few choices the app has. Every one has a default, so none is ever asked for. */
 data class Prefs(
-    /** [SHORTCUT_L3_R3], [SHORTCUT_L1_R1], [SHORTCUT_L2_R2] or [SHORTCUT_SELECT_START]. */
+    /** [SHORTCUT_L3_R3], [SHORTCUT_L1_R1], [SHORTCUT_L2_R2], [SHORTCUT_SELECT_START], [SHORTCUT_SELECT] or [SHORTCUT_START]. */
     val shortcut: String = SHORTCUT_L3_R3,
     /** Swap which face button adds a card and which closes, for pads printed the other way round. */
     val swapConfirm: Boolean = false,
@@ -113,6 +113,10 @@ data class Prefs(
         /** The triggers: on pads that send them as buttons too, as the Thor's does. */
         const val SHORTCUT_L2_R2 = "l2r2"
         const val SHORTCUT_SELECT_START = "selectstart"
+
+        /** One button alone, which the game then never receives. */
+        const val SHORTCUT_SELECT = "select"
+        const val SHORTCUT_START = "start"
         const val ENTRY_OVER_GAME = "game"
         const val ENTRY_OTHER_SCREEN = "other"
         const val SELECT_WORD = "word"

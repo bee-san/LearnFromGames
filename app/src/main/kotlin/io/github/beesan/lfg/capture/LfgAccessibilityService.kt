@@ -283,6 +283,7 @@ class LfgAccessibilityService : AccessibilityService() {
      * Button presses, heard whatever window has focus. The shortcut starts and
      * stops lookup mode. Android cannot hide a chord from the game, which is
      * why the default is the two stick clicks: emulators leave them unbound.
+     * A shortcut of one button is kept from the game altogether.
      */
     override fun onKeyEvent(event: KeyEvent): Boolean {
         // Back first takes away the strips of a reading asked for, before it reaches the app.
@@ -295,6 +296,8 @@ class LfgAccessibilityService : AccessibilityService() {
             Prefs.SHORTCUT_L1_R1 -> KeyEvent.KEYCODE_BUTTON_L1 to KeyEvent.KEYCODE_BUTTON_R1
             Prefs.SHORTCUT_L2_R2 -> KeyEvent.KEYCODE_BUTTON_L2 to KeyEvent.KEYCODE_BUTTON_R2
             Prefs.SHORTCUT_SELECT_START -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_START
+            Prefs.SHORTCUT_SELECT -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_SELECT
+            Prefs.SHORTCUT_START -> KeyEvent.KEYCODE_BUTTON_START to KeyEvent.KEYCODE_BUTTON_START
             else -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBR
         }
         if (event.action == KeyEvent.ACTION_DOWN) {
@@ -315,7 +318,7 @@ class LfgAccessibilityService : AccessibilityService() {
             down -= event.keyCode
             if (first !in down && second !in down) chordFired = false
         }
-        return false
+        return first == second && event.keyCode == first
     }
 
     private fun toggleStrips() {

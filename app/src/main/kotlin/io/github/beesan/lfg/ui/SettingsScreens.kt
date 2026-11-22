@@ -268,6 +268,8 @@ fun shortcutLabel(prefs: Prefs) = when (prefs.shortcut) {
     Prefs.SHORTCUT_L1_R1 -> "L1 + R1"
     Prefs.SHORTCUT_L2_R2 -> "L2 + R2"
     Prefs.SHORTCUT_SELECT_START -> "Select + Start"
+    Prefs.SHORTCUT_SELECT -> "Select"
+    Prefs.SHORTCUT_START -> "Start"
     else -> "L3 + R3"
 }
 
@@ -411,8 +413,8 @@ private fun SettingText(name: String, detail: String, value: String, secret: Boo
 
 @Composable
 fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Controls", onBack) {
-    Card("Lookup shortcut", "Starts and stops lookup with the controller. The game sees these buttons too, so pick a pair it does not use.") {
-        Choice(listOf(Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2", Prefs.SHORTCUT_SELECT_START to "Select + Start"), prefs.shortcut) { v -> onChange { it.copy(shortcut = v) } }
+    Card("Lookup shortcut", "Starts and stops lookup with the controller. The game sees a pair's buttons too, so pick one it does not use. Select or Start alone is kept from the game.") {
+        Choice(listOf(Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2", Prefs.SHORTCUT_SELECT_START to "Select + Start", Prefs.SHORTCUT_SELECT to "Select", Prefs.SHORTCUT_START to "Start"), prefs.shortcut) { v -> onChange { it.copy(shortcut = v) } }
     }
     Card("Add card button", "Which face button adds the card; the other one closes. As Android names them.") {
         Choice(listOf("a" to "A adds, B closes", "b" to "B adds, A closes"), if (prefs.swapConfirm) "b" else "a") { v -> onChange { it.copy(swapConfirm = v == "b") } }
