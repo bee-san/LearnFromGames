@@ -698,6 +698,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _diagnostics.value = Diagnostics.report(app)
     }
 
+    /** The dialogue box drawn for each game, by its id. */
+    val dialogueBoxes = app.dialogueBoxes.boxes
+
+    /** The game's dialogue box is taken away: the reading notices at its next look. */
+    fun readWholeScreen(game: Game) {
+        app.dialogueBoxes[game.id] = null
+    }
+
     fun updateGame(game: Game) = viewModelScope.launch {
         withContext(Dispatchers.IO) {
             val old = app.database.games().byId(game.id)

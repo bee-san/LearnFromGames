@@ -66,8 +66,10 @@ class OverlayHost(
     /** The read button over an ordinary app: a tap, and a long press. */
     private val onReadButton: () -> Unit,
     private val onReadButtonHeld: () -> Unit,
-    /** A region dragged out: where, and whether to keep reading it. */
-    private val onRegion: (Box, Boolean) -> Unit,
+    /** A box was drawn on the screen and something chosen for it ([RegionPicker]). */
+    private val onPicked: (Picked) -> Unit,
+    /** In lookup mode over a game, the button for its dialogue box was pressed: the box is to be drawn. */
+    private val onPickBox: () -> Unit,
     /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
     private val onAsk: (lineId: String, what: Ask) -> Unit,
     /** Taps a point of a screen, as a finger would, once a window of ours is on top there: only ever our own focus window. */
@@ -121,6 +123,9 @@ class OverlayHost(
     private var buttonX = -1
     private var buttonY = -1
     private var picker: Win? = null
+
+    /** The box picker while it shows: in lookup mode the controller is its own. */
+    private var pickerView: RegionPicker? = null
     private val handler = android.os.Handler(service.mainLooper)
     private var history: List<GameLine> = emptyList()
 
@@ -147,11 +152,13 @@ class OverlayHost(
         onClose = { controller.exitControllerMode() },
         onNote = { startNote(state.entryIndex) },
         onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(0, dy) },
+        // An ordinary app has no dialogue box: its regions are read when asked, from the read button.
+        onBox = { if (gameInFront && !asking) onPickBox() },
         chordActive = chordActive,
     )
 
     /** True while something of ours is drawn on the game's screen, so a picture of that screen would include it. */
-    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || notice?.shown == true
+    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || notice?.shown == true || picker != null
 
     private var notice: Win? = null
     private var noticeDisplay = Display.INVALID_DISPLAY
@@ -630,19 +637,42 @@ class OverlayHost(
         handler.postDelayed(hideNotice, NOTICE_MS)
     }
 
-    /** A screen-sized window to drag a box on; it reports the box and goes. */
-    fun pickRegion(displayId: Int) {
+    /** The size of a screen, as a box at its corner; null for a screen that is gone. */
+    fun screen(displayId: Int): Box? = bounds(displayId)
+
+    /**
+     * A screen-sized window to draw a box on; it reports what was chosen for
+     * the box and goes. Over a game, [game] is that game: the box is then its
+     * dialogue box. From lookup mode ([lookup]) the controller draws it as well
+     * as a finger.
+     */
+    fun pickRegion(displayId: Int, game: PickFor? = null, lookup: Boolean = false) {
         val host = manager(displayId) ?: return
         val screen = bounds(displayId) ?: return
         picker?.remove()
-        val view = RegionPicker(host.first) { box, keep ->
+        // The controller is ours only in lookup mode, and only on the game's screen.
+        val pad = lookup && displayId == gameDisplay
+        if (pad) input.release()
+        val view = RegionPicker(host.first, game, pad, prefs().swapConfirm, ::ownTouch) { picked ->
             picker?.remove()
             picker = null
-            if (box != null) onRegion(box, keep)
+            pickerView = null
+            onPicked(picked)
         }
         val win = Win(view, host.second, PICKER_FLAGS)
         picker = win
+        pickerView = view
         win.place(0, 0, screen.width, screen.height)
+    }
+
+    /** Whether a box is being drawn. */
+    val picking: Boolean get() = picker != null
+
+    /** The box picker goes, with nothing chosen. */
+    fun closePicker() {
+        picker?.remove()
+        picker = null
+        pickerView = null
     }
 
     fun destroy() {
@@ -651,6 +681,7 @@ class OverlayHost(
         handler.removeCallbacksAndMessages(null)
         notice?.remove()
         picker?.remove()
+        pickerView = null
         readButton?.remove()
         (strips + marks + listOfNotNull(popup, shade, focus, panel)).forEach { it.remove() }
         strips.clear()
@@ -725,8 +756,12 @@ class OverlayHost(
             }
         }
 
-        override fun dispatchKeyEvent(event: KeyEvent): Boolean = input.onKey(event) || super.dispatchKeyEvent(event)
-        override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean = input.onMotion(event) || super.dispatchGenericMotionEvent(event)
+        // While a box is being drawn the controller draws it; lookup under it stays as it is.
+        override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+            (pickerView?.onKey(event) ?: input.onKey(event)) || super.dispatchKeyEvent(event)
+
+        override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean =
+            (pickerView?.onMotion(event) ?: input.onMotion(event)) || super.dispatchGenericMotionEvent(event)
     }
 
     /**
@@ -813,6 +848,7 @@ class OverlayHost(
             listen = (context.applicationContext as? io.github.beesan.lfg.App)?.wordAudio?.info?.value != null,
             wholeWord = prefs().picking.wholeWord,
             stickWords = prefs().stickWords,
+            box = gameInFront && !asking,
         )
     }
 

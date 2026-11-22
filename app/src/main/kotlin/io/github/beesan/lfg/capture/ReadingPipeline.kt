@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import io.github.beesan.lfg.core.Blocks
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.core.DialogueBox
 import io.github.beesan.lfg.core.Held
 import io.github.beesan.lfg.core.InterfaceText
 import io.github.beesan.lfg.core.KeptLine
@@ -13,6 +14,7 @@ import io.github.beesan.lfg.core.Part
 import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.core.SettleDetector
 import io.github.beesan.lfg.core.TextLine
+import io.github.beesan.lfg.core.TreeText
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LineStore
@@ -49,6 +51,9 @@ data class Reading(
  * A line is kept once: what was read is sorted ([LineSorter]) into lines
  * still on screen, lines read before and shown again, more of a line already
  * kept, a menu's text, and what is new; only the new is saved.
+ *
+ * A game with a dialogue box ([DialogueBox]) is probed and read inside it
+ * only; the picture kept for a line is still the whole screen.
  */
 class ReadingPipeline(
     private val store: LineStore,
@@ -63,6 +68,12 @@ class ReadingPipeline(
     val latest: StateFlow<Reading?> = _latest
 
     private var lastGame = ""
+
+    /** The dialogue box the last picture was read in, or null for the whole of it. */
+    private var lastArea: Box? = null
+
+    /** Reused between frames, as [buffer] is: the part of the picture a dialogue box has read. */
+    private var cutBuffer: IntArray? = null
 
     private val interfaceText = InterfaceText()
 
@@ -143,17 +154,20 @@ class ReadingPipeline(
     suspend fun onFrame(
         bitmap: Bitmap, game: Game, displayId: Int, nowMs: Long, offsetX: Int = 0, offsetY: Int = 0,
         covered: List<Box> = emptyList(),
-    ): Boolean = onFrame(0L, { bitmap }, game, displayId, nowMs, offsetX, offsetY, covered)
+    ): Boolean = onFrame(0L, { bitmap }, game, displayId, nowMs, offsetX, offsetY, covered, null)
 
     /**
      * The same, for a picture not yet copied out of graphics memory: [hash] is
      * its fingerprint (Thumbnails), or 0 for none, and [picture] copies it out,
      * which is done only when its pixels are needed. A screen found as it was
      * is never copied.
+     *
+     * [area] is the game's dialogue box in the display's pixels, or null for a
+     * game read on its whole screen: only text in it is looked for and read.
      */
     suspend fun onFrame(
         hash: Long, picture: () -> Bitmap?, game: Game, displayId: Int, nowMs: Long, offsetX: Int = 0, offsetY: Int = 0,
-        covered: List<Box> = emptyList(),
+        covered: List<Box> = emptyList(), area: Box? = null,
     ): Boolean {
         val engine = reader() ?: return false
         if (game.id != lastGame) {
@@ -163,7 +177,12 @@ class ReadingPipeline(
             lastSignature = null
             lastGame = game.id
             kept[game.id]?.recent = null
+        } else if (area != lastArea) {
+            // The box was drawn, moved or taken away: what the probe made of the old part says nothing of this one.
+            detector.reset()
+            lastSignature = null
         }
+        lastArea = area
         val fingerprint = if (hash != 0L) hash else picture()?.let { Perf.measure("same?") { Pixels.rowsHash(it, 4) } } ?: return false
         val still = unchanged(fingerprint)
         val known = lastSignature
@@ -173,12 +192,19 @@ class ReadingPipeline(
         val bitmap = picture() ?: return still
         val size = bitmap.width * bitmap.height
         val pixels = buffer?.takeIf { it.size == size } ?: IntArray(size).also { buffer = it }
-        val frame = Frame(bitmap.width, bitmap.height, pixels)
+        val whole = Frame(bitmap.width, bitmap.height, pixels)
+        // What is probed and read: the whole picture, or the part the game's dialogue box is in.
+        val cut = area?.let { DialogueBox.reading(it.moved(-offsetX, -offsetY), bitmap.width, bitmap.height) }
+        val frame by lazy(LazyThreadSafetyMode.NONE) {
+            if (cut == null) whole else Perf.measure("cut") {
+                whole.cut(cut.left, cut.top, cut.width, cut.height, cutBuffer).also { cutBuffer = it.argb }
+            }
+        }
         if (still && known != null) {
             Perf.measure("pixels") { pixelsOf(bitmap, pixels) }
         } else {
             Perf.measure("pixels") { pixelsOf(bitmap, pixels) }
-            Perf.measure("ring") { FrameRing.offer(frame, nowMs) }
+            Perf.measure("ring") { FrameRing.offer(whole, nowMs) }
             val signature = Perf.measure("probe") { probe().signature(frame) }
             lastSignature = signature
             if (signature.isEmpty()) {
@@ -195,9 +221,11 @@ class ReadingPipeline(
 
         val rows = Perf.measure("read") { engine.read(frame) }
             // The reader's forms made the game's own (TextClean), and what is not the game's text dropped.
-            .mapNotNull(TextClean::line).filter { it.text.isNotBlank() }.map { it.moved(offsetX, offsetY) }
+            .mapNotNull(TextClean::line).filter { it.text.isNotBlank() }.map { it.moved(offsetX + (cut?.left ?: 0), offsetY + (cut?.top ?: 0)) }
             // Text under another window (a system dialog on a whole-screen picture) is not the game's.
             .filter { line -> covered.none { it.intersects(line.box) } }
+            // The room read around a dialogue box is for reading its edges well, not for what lies in it.
+            .let { rows -> if (cut != null && area != null) TreeText.within(rows, area) else rows }
         // A reader returns rows; the game shows sentences. From here on a piece is a whole piece of text.
         val pieces = Perf.measure("group") { Blocks.group(rows) }
         if (pieces.isEmpty()) {

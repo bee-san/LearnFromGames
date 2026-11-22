@@ -26,6 +26,7 @@ LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSent
 - **Reads the game for you.** An accessibility service pictures the screen, notices when new text has stopped moving, and reads it. No screen-recording prompt, no setup per game.
 - **Tap a word on the game.** Each line of text becomes tappable where it is drawn. A wrapped sentence is one sentence, and a word cut by the line break is still one word.
 - **Or never let go of the controller.** L3 + R3 turns the pad into a text cursor: by word, by line, by character. The game receives nothing until you leave. The shortcut can be one button instead (L3, R3, Select or Start), which is then kept from the game, and the left stick can go word by word where the stick is under your thumb. A tap that misses the words does not reach the game either.
+- **Reads only the dialogue, once you draw its box.** In lookup, Select dims the game: drag a box around the dialogue with a finger, or move to one corner with the stick, press A, move to the opposite corner and press A again. That game is then read inside the box only, so its menus, its buttons and the words in its pictures are left alone, and a line is read quicker. The box is kept for each game; Settings › Games and apps puts a game back on its whole screen. **Read once** reads a box a single time instead: a sign, a choice. After [Rubi](https://github.com/bee-san/Rubi_for_vita)'s dialogue region.
 - **Uses the second screen.** On a two-screen handheld the entry opens on the screen the game is not on. On one screen it is a popup.
 - **One press to Anki.** Cards go to AnkiDroid with the sentence, the word marked, the definition and a picture of the game. Kiku, Lapis and Senren note types are found by themselves; without one, the app makes its own.
 - **Sentence audio**: the game's own voice for the line, with the music around it cut away. Android has to ask before LFG may listen, so its question comes up by itself when you open a game: one tap, once a session. Say no and it is not asked again; Start on the Lines page begins it later. A line the game does not speak is read by Android's voice instead.
@@ -55,7 +56,7 @@ Reading and lookup run on the device. The network is used for the first-run down
 | Stage | What works on the emulator |
 | --- | --- |
 | Tap, read, mine | First run from a clean install. Background reading. Tap strips, the second-screen panel, the one-screen popup. Add card with the picture. Lines saved. |
-| Controller | L3 + R3 lookup mode: word, line and character steps, held repeat, entry change, add, close. A one-button shortcut the game never receives. The stick and the D-pad changing places. |
+| Controller | L3 + R3 lookup mode: word, line and character steps, held repeat, entry change, add, close. A one-button shortcut the game never receives. The stick and the D-pad changing places. Select drawing a game's dialogue box with the stick or a finger, the game read in it only afterwards, lookup coming back on the box's first line, and the box read once instead. |
 | Dictionaries and lines | Add, order and remove Yomitan dictionaries; Rubi's .vjdict files can be added too. Full entry rendering with pitch accent and frequency. Word audio from local-audio-yomichan's `android.db`: a play button, Y in a game, and the card's ExpressionAudio field. Cards from a stored line after the session. |
 | Sound, then motion | Sentence audio added to a card when the next line appears, trimmed to the voice by Silero VAD. Android's voice for a card without one. Animated WebP of the line appearing. |
 | Stats | Reading time, characters, speed and streak over 7 days, 30 days, 12 months or all time, against the period before, and a bar for each day or month. Daily goals for hours and characters: today against each, the days that met them, a goal streak, and a goal line on the chart. Two home screen widgets: today against the goals as rings (time, characters and, with a cards-a-day goal, cards; at 4 × 4 the week as small rings too), and the last seven days as bars ([picture](docs/widgets.png)). On [Rubi](https://github.com/bee-san/Rubi_for_vita)'s reading-time rule. |
@@ -100,6 +101,11 @@ Reading and lookup run on the device. The network is used for the first-run down
   battery and heat. The emulator answered the others (see below).
 - No speed figures for ScreenAI on a handheld: the OCR bench below
   ran on the x86_64 emulator.
+- The dialogue box has run on the Android 13 emulator with the stand-in game:
+  not on a handheld, and not on a real game. A box offered by LFG itself the
+  first time a game is read, as Rubi offers one, is not built; nor is a box
+  for each of a game's screens, so a game whose text moves about is better
+  left on its whole screen.
 - A text hook as a second source of lines (the plan's "after that, if wanted")
   is not built. The intent is for the app to be the texthooker itself, not to
   listen to another one.
@@ -146,6 +152,14 @@ quick setting (127 ms and 128 KB a 1080p screen, against Android's 337 ms and
 only around the text VOCR found was tried and left out: 17% quicker, but 0.8
 points fewer lines read exactly on the OCR bench, and text VOCR misses (a
 choice menu) would go unread.
+
+A dialogue box the player draws is another matter: nothing outside it is
+looked at. With a box 1,802 × 282 around the stand-in game's dialogue, on the
+x86_64 emulator, looking for a change took 20 ms where it took 51, and reading
+a line 90 ms where it took 278. The box is read with 60 pixels of room around
+it (of a 1080p screen): cut closer, 86.6% of the OCR bench's lines were read
+exactly against the whole screen's 87.6%; with the room, 87.2%
+([#23](https://github.com/bee-san/LearnFromGames/issues/23)).
 
 ```sh
 adb shell am instrument -w -e count 40 io.github.beesan.lfg/.PixelsBench   # debug build, after the OCR bench's pages are pushed

@@ -66,6 +66,7 @@ import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.StatsPeriod
+import io.github.beesan.lfg.core.DialogueBox
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.games.CocoonLog
 import io.github.beesan.lfg.games.Eden
@@ -513,7 +514,11 @@ fun RecognitionScreen(
 }
 
 @Composable
-fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit, onBack: () -> Unit) = Page("Games and apps", onBack) {
+fun GamesScreen(
+    games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit, onBack: () -> Unit,
+    /** The dialogue box drawn for a game, by its id, and what takes one away. */
+    boxes: Map<String, DialogueBox> = emptyMap(), onWholeScreen: (Game) -> Unit = {},
+) = Page("Games and apps", onBack) {
     val list = games.filter { it.packageName != ownPackage }
     if (list.isEmpty()) Text("Nothing has been read yet. A game is the app in front when it is fullscreen; other apps are listed once you ask for one to be read.", color = Lfg.Dim, fontSize = 15.sp)
     val apps = list.filter { it.detected.isEmpty() }.associate { it.packageName to it.title }
@@ -563,6 +568,19 @@ fun GamesScreen(games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit,
                     Text("Off for touch-driven games: taps then always reach the game.", color = Lfg.Dim, fontSize = 13.sp)
                 }
                 OnOff(game.tapStrips) { onUpdate(game.copy(tapStrips = it)) }
+            }
+            // An ordinary app is read when asked, a region at a time: only what is read by itself has a dialogue box.
+            if (!game.app) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val box = boxes[game.id]
+                Column(Modifier.weight(1f)) {
+                    Text("Dialogue box", color = Lfg.Text, fontSize = 15.sp)
+                    Text(
+                        if (box == null) "The whole screen is read. To read only the dialogue, start lookup in the game and press Select, then draw a box around it."
+                        else "Only the box you drew is read (${box.box.width} × ${box.box.height}). Menus and words in the picture outside it are left alone.",
+                        color = Lfg.Dim, fontSize = 13.sp,
+                    )
+                }
+                if (box != null) LfgButton("Read the whole screen", { onWholeScreen(game) })
             }
         }
     }
