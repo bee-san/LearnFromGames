@@ -60,7 +60,6 @@ class OverlayHost(
     private val controller: LookupController,
     private val prefs: () -> Prefs,
     private val chordActive: () -> Boolean,
-    private val onToggleStrips: () -> Unit,
     /** A tap landed on the app, away from the strips and the entry, while a reading asked for is up. */
     private val onTapElsewhere: () -> Unit,
     /** The read button over an ordinary app: a tap, and a long press. */
@@ -514,7 +513,7 @@ class OverlayHost(
         val size = bounds(displayId) ?: return
         val view = panelView?.takeIf { panel != null } ?: PanelView(host.first).also { panelView = it }
         val win = panel ?: Win(view, host.second, PANEL_FLAGS).also { panel = it }
-        view.show(stripsOn)
+        view.show()
         win.place(0, 0, size.width, size.height)
     }
 
@@ -1021,7 +1020,6 @@ class OverlayHost(
         private val sheetBar = LinearLayout(context)
         private val sheetTitle = context.label(12f, Ink.DIM, bold = true)
         private val message = context.label(12.5f, Ink.DIM)
-        private val stripsToggle = context.pill("", primary = false, sizeSp = 12.5f) { onToggleStrips() }
         private val hints = hints(context)
         private val tip = context.label(12.5f, Ink.DIM)
         private val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
@@ -1105,7 +1103,6 @@ class OverlayHost(
             words.addView(hints)
             words.addView(tip)
             foot.addView(words, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            foot.addView(stripsToggle, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
             addView(foot)
         }
 
@@ -1119,9 +1116,8 @@ class OverlayHost(
             return super.dispatchTouchEvent(event)
         }
 
-        fun show(stripsOn: Boolean) {
+        fun show() {
             showSession(session?.first, session?.second)
-            stripsToggle.text = if (stripsOn) "Tap strips on" else "Tap strips off"
             if (state.controllerMode) hints.text = hintsText(context)
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.INVISIBLE
             tip.visibility = if (state.controllerMode) View.GONE else View.VISIBLE

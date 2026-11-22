@@ -127,7 +127,6 @@ class LfgAccessibilityService : AccessibilityService() {
             prefs = { app.settings.prefs.value },
             chordActive = { chordFired },
             tapOn = ::tapOwnWindow,
-            onToggleStrips = ::toggleStrips,
             onTapElsewhere = { if (asked?.continuous == false) endAsked() },
             // While a reading is up, the button takes it away, a region kept reading included.
             onReadButton = { if (asked != null) endAsked() else ask() },
@@ -420,14 +419,6 @@ class LfgAccessibilityService : AccessibilityService() {
         // Front to back, and only windows a touch can land on: the first one holding the point takes it.
         val top = windows.firstOrNull { w -> w.getBoundsInScreen(bounds).let { bounds.contains(x, y) } } ?: return false
         return top.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
-    }
-
-    private fun toggleStrips() {
-        val current = front?.game ?: pipeline.latest.value?.game ?: return
-        val next = current.copy(tapStrips = !current.tapStrips)
-        if (next.detected.isEmpty()) games[next.packageName] = next else namedGames[next.packageName + "\n" + next.detected] = next
-        overlays.onScreen(front?.displayId ?: Display.INVALID_DISPLAY, next.tapStrips, front != null)
-        scope.launch(Dispatchers.IO) { app.database.games().update(next) }
     }
 
     // ── readings asked for ───────────────────────────────────────────────────
