@@ -218,7 +218,7 @@ private fun NarrowGames(rows: List<GameStats.Row>, games: Map<String, Game>, mos
         rows.forEach { row ->
             val game = games[row.gameId]
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(4.dp)).clickable { onGame(row.gameId) }
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).focusRing(RoundedCornerShape(4.dp)).clip(RoundedCornerShape(4.dp)).clickable { onGame(row.gameId) }
                     .padding(horizontal = 4.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -259,7 +259,7 @@ private fun WideGames(rows: List<GameStats.Row>, games: Map<String, Game>, most:
     rows.forEach { row ->
         val game = games[row.gameId]
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(4.dp)).clickable { onGame(row.gameId) }
+            Modifier.fillMaxWidth().heightIn(min = 56.dp).focusRing(RoundedCornerShape(4.dp)).clip(RoundedCornerShape(4.dp)).clickable { onGame(row.gameId) }
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),

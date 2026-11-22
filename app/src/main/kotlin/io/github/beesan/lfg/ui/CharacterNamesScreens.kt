@@ -166,7 +166,7 @@ fun VnSearchScreen(
             cursorBrush = SolidColor(Lfg.Accent),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onSearch(query) }),
-            modifier = Modifier.weight(1f).clip(RoundedCornerShape(5.dp)).background(Lfg.Sunken).border(1.dp, Lfg.BorderStrong, RoundedCornerShape(5.dp))
+            modifier = Modifier.weight(1f).padField(RoundedCornerShape(5.dp), singleLine = true).clip(RoundedCornerShape(5.dp)).background(Lfg.Sunken).border(1.dp, Lfg.BorderStrong, RoundedCornerShape(5.dp))
                 .padding(horizontal = 12.dp, vertical = 12.dp),
         )
         LfgButton(if (search.searching) "Searching…" else "Search", { onSearch(query) }, primary = true, enabled = !search.searching && query.isNotBlank())
@@ -178,7 +178,7 @@ fun VnSearchScreen(
     for (result in search.results) {
         val shape = RoundedCornerShape(8.dp)
         Column(
-            Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, if (result.id == linked) Lfg.Accent else Lfg.Border, shape)
+            Modifier.fillMaxWidth().focusRing(shape).clip(shape).background(Lfg.Surface).border(1.dp, if (result.id == linked) Lfg.Accent else Lfg.Border, shape)
                 .clickable { onPick(result) }.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {

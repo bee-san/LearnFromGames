@@ -6,12 +6,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -30,8 +30,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,43 +41,48 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.Prefs
-import androidx.compose.ui.platform.LocalContext
-import io.github.beesan.lfg.backup.Backup
 import io.github.beesan.lfg.anki.AnkiStatus
+import io.github.beesan.lfg.backup.Backup
+import io.github.beesan.lfg.core.DialogueBox
 import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.StatsPeriod
-import io.github.beesan.lfg.core.DialogueBox
 import io.github.beesan.lfg.data.Game
-import io.github.beesan.lfg.games.CocoonLog
-import io.github.beesan.lfg.games.Eden
-import io.github.beesan.lfg.games.EsdeLog
-import io.github.beesan.lfg.games.GameNameSources
-import io.github.beesan.lfg.games.RetroArchHistory
 import io.github.beesan.lfg.data.PictureKeeper
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.dict.DictionarySource
 import io.github.beesan.lfg.dict.InstalledDictionary
 import io.github.beesan.lfg.dict.WordAudio
+import io.github.beesan.lfg.games.CocoonLog
+import io.github.beesan.lfg.games.Eden
+import io.github.beesan.lfg.games.EsdeLog
+import io.github.beesan.lfg.games.GameNameSources
+import io.github.beesan.lfg.games.RetroArchHistory
 import io.github.beesan.lfg.ocr.ModelState
 import java.text.SimpleDateFormat
 import java.time.ZoneId
@@ -89,14 +94,15 @@ import kotlin.math.roundToInt
 
 @Composable
 internal fun Page(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxSize()) {
+    val scroll = rememberScrollState()
+    Column(Modifier.fillMaxSize().padScroll(scroll)) {
         PageHeader(title) {
             actions()
             LfgButton("Back", onBack)
         }
         HorizontalDivider(color = Lfg.Border)
         Column(
-            Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 24.dp),
+            Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll).firstFocus().padding(top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp), content = content,
         )
     }
@@ -105,10 +111,10 @@ internal fun Page(title: String, onBack: () -> Unit, actions: @Composable () -> 
 /** A row of the app: a name, a line of detail, and whatever it does on the right. */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-fun Card(name: String, detail: String = "", onClick: (() -> Unit)? = null, trailing: @Composable () -> Unit = {}) {
+fun Card(name: String, detail: String = "", onClick: (() -> Unit)? = null, modifier: Modifier = Modifier, trailing: @Composable () -> Unit = {}) {
     val shape = RoundedCornerShape(8.dp)
     BoxWithConstraints(
-        Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape)
+        modifier.fillMaxWidth().then(if (onClick != null) Modifier.focusRing(shape) else Modifier).clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
@@ -143,24 +149,41 @@ internal fun Choice(options: List<Pair<String, String>>, current: String, onPick
 @Composable
 private fun OnOff(on: Boolean, onChange: (Boolean) -> Unit) = Choice(listOf("on" to "On", "off" to "Off"), if (on) "on" else "off") { onChange(it == "on") }
 
+/** The page last opened from Settings, where the pad's focus goes back to. */
+private var lastSetting: Page? = null
+
 @Composable
 fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings", onBack) {
-    Card("Appearance", "Colours, and light or dark", { onOpen(Page.APPEARANCE) })
-    Card("Backup", "Back up, restore, and back up on a schedule", { onOpen(Page.BACKUP) })
-    Card("Translation", "Translate and explain lines with your OpenRouter key", { onOpen(Page.TRANSLATION) })
-    Card("Dictionaries", "Add, order and remove dictionaries", { onOpen(Page.DICTIONARIES) })
-    Card("Anki", "The note type and deck cards go to", { onOpen(Page.ANKI) })
-    Card("Controls", "The lookup shortcut, whole words or characters, and where the entry shows", { onOpen(Page.CONTROLS) })
-    Card("Text recognition", "ScreenAI, which reads the screen", { onOpen(Page.RECOGNITION) })
-    Card("Games and apps", "Rename one, choose when it is read, turn tap strips off", { onOpen(Page.GAMES) })
-    Card("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", { onOpen(Page.GAME_NAMES) })
-    Card("Character names", "A visual novel's cast from VNDB, so its names look up as its characters", { onOpen(Page.CHARACTER_NAMES) })
-    Card("Sound and pictures", "Sentence audio, spoken lines and animated pictures", { onOpen(Page.MEDIA) })
-    Card("Other apps", "Read browsers, chat and ebooks when you ask", { onOpen(Page.APPS) })
-    Card("Practice line", "Try a lookup and a card without a game", { onOpen(Page.PRACTICE) })
-    Card("Storage", "What LFG keeps, and how long screens are kept", { onOpen(Page.STORAGE) })
-    Card("Help improve LFG", "Keep screens of dialogue, and send them to train a better reader", { onOpen(Page.DIALOGUE) })
-    Card("Help and diagnostics", "A report to send with a bug, or after a first run on a new device", { onOpen(Page.HELP) })
+    val back = remember { FocusRequester() }
+    val input = LocalInputModeManager.current
+    LaunchedEffect(Unit) {
+        if (input.inputMode == InputMode.Keyboard && lastSetting != null) runCatching { back.requestFocus() }
+    }
+    @Composable
+    fun Item(name: String, detail: String, page: Page) = Card(
+        name, detail,
+        onClick = {
+            lastSetting = page
+            onOpen(page)
+        },
+        modifier = if (page == lastSetting) Modifier.focusRequester(back) else Modifier,
+    )
+    Item("Appearance", "Colours, and light or dark", Page.APPEARANCE)
+    Item("Backup", "Back up, restore, and back up on a schedule", Page.BACKUP)
+    Item("Translation", "Translate and explain lines with your OpenRouter key", Page.TRANSLATION)
+    Item("Dictionaries", "Add, order and remove dictionaries", Page.DICTIONARIES)
+    Item("Anki", "The note type and deck cards go to", Page.ANKI)
+    Item("Controls", "The lookup shortcut, whole words or characters, and where the entry shows", Page.CONTROLS)
+    Item("Text recognition", "ScreenAI, which reads the screen", Page.RECOGNITION)
+    Item("Games and apps", "Rename one, choose when it is read, turn tap strips off", Page.GAMES)
+    Item("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", Page.GAME_NAMES)
+    Item("Character names", "A visual novel's cast from VNDB, so its names look up as its characters", Page.CHARACTER_NAMES)
+    Item("Sound and pictures", "Sentence audio, spoken lines and animated pictures", Page.MEDIA)
+    Item("Other apps", "Read browsers, chat and ebooks when you ask", Page.APPS)
+    Item("Practice line", "Try a lookup and a card without a game", Page.PRACTICE)
+    Item("Storage", "What LFG keeps, and how long screens are kept", Page.STORAGE)
+    Item("Help improve LFG", "Keep screens of dialogue, and send them to train a better reader", Page.DIALOGUE)
+    Item("Help and diagnostics", "A report to send with a bug, or after a first run on a new device", Page.HELP)
 }
 
 @Composable
@@ -212,7 +235,7 @@ fun DictionariesScreen(
     }
     Row {
         Text("Entries show in this order. ", color = Lfg.Dim, fontSize = 14.sp)
-        Text("Show sources", color = Lfg.Accent, fontSize = 14.sp, modifier = Modifier.clickable(onClick = onSources))
+        Text("Show sources", color = Lfg.Accent, fontSize = 14.sp, modifier = Modifier.focusRing(RoundedCornerShape(4.dp)).clickable(onClick = onSources))
     }
     if (names.isNotEmpty()) {
         Text("Character names", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
@@ -429,7 +452,7 @@ private fun SettingText(name: String, detail: String, value: String, secret: Boo
             visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
             textStyle = TextStyle(color = Lfg.Text, fontSize = 16.sp),
             cursorBrush = SolidColor(Lfg.Accent),
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Lfg.Sunken).padding(horizontal = 12.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padField(RoundedCornerShape(6.dp), singleLine = true).clip(RoundedCornerShape(6.dp)).background(Lfg.Sunken).padding(horizontal = 12.dp, vertical = 12.dp),
         )
     }
 }
@@ -559,7 +582,7 @@ fun GamesScreen(
                     singleLine = true,
                     textStyle = TextStyle(color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                     cursorBrush = SolidColor(Lfg.Accent),
-                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(4.dp)).background(Lfg.Sunken).padding(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier.weight(1f).padField(RoundedCornerShape(4.dp), singleLine = true).clip(RoundedCornerShape(4.dp)).background(Lfg.Sunken).padding(horizontal = 10.dp, vertical = 8.dp),
                 )
                 Spacer(Modifier.width(8.dp))
                 LfgButton("Rename", { onUpdate(game.copy(title = title.trim())) }, enabled = title.trim().isNotEmpty() && title.trim() != game.title)
@@ -995,7 +1018,9 @@ internal fun BarChart(values: List<Double>, axis: List<String>, hours: Boolean, 
                 Row(Modifier.matchParentSize()) {
                     values.forEachIndexed { i, v ->
                         Box(
-                            Modifier.weight(1f).fillMaxHeight().clickable { onPick(i) }.semantics { contentDescription = names[i] },
+                            Modifier.weight(1f).fillMaxHeight().focusRing(RoundedCornerShape(4.dp))
+                                // The pad picks the bar it is on, as a tap does.
+                                .onFocusChanged { if (it.isFocused && picked != i) onPick(i) }.clickable { onPick(i) }.semantics { contentDescription = names[i] },
                             contentAlignment = Alignment.BottomCenter,
                         ) {
                             val fraction = if (top > 0) (v / top).toFloat().coerceIn(0f, 1f) else 0f

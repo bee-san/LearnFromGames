@@ -350,6 +350,18 @@ class LookupController(
         if (!_state.value.selected) built.first()?.let { lookUp(it.line, it.index) }
     }
 
+    /**
+     * The pad on one of the app's own pages: a cursor over the lines, as in
+     * controller mode, without the game's controller mode. A word already
+     * chosen stays; otherwise the first is looked up.
+     */
+    fun startCursor() {
+        if (cursor != null) return
+        val built = cursorOver(_state.value.lines)
+        cursor = built
+        if (!_state.value.selected) built.first()?.let { lookUp(it.line, it.index) }
+    }
+
     fun exitControllerMode() {
         cursor = null
         _state.update { it.copy(controllerMode = false) }

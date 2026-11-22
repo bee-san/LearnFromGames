@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -59,7 +60,8 @@ fun NotesScreen(notes: List<Note>, onNew: () -> Unit, onBack: () -> Unit) {
     val time = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val zone = remember { ZoneId.systemDefault() }
     val today = remember(notes.size) { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, zone) }
-    Column(Modifier.fillMaxSize()) {
+    val list = rememberLazyListState()
+    Column(Modifier.fillMaxSize().padScroll(list).firstFocus()) {
         PageHeader("Notes") {
             LfgButton("New note…", onNew, primary = true)
             LfgButton("Back", onBack)
@@ -69,7 +71,7 @@ fun NotesScreen(notes: List<Note>, onNew: () -> Unit, onBack: () -> Unit) {
             Text("No notes yet. Press ✎ on a word over a game, or New note…", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 16.dp))
             return
         }
-        LazyColumn {
+        LazyColumn(state = list) {
             var lastGroup = ""
             for (note in notes) {
                 val day = MainViewModel.dayLabel(ReadingStats.dayOf(note.createdAt / 1000.0, zone), today)
@@ -148,14 +150,17 @@ fun NoteNewScreen(
     var title by rememberSaveable { mutableStateOf("") }
     var text by rememberSaveable { mutableStateOf("") }
     var inLookups by rememberSaveable { mutableStateOf(true) }
-    Column(Modifier.fillMaxSize()) {
+    val left = rememberScrollState()
+    val right = rememberScrollState()
+    Column(Modifier.fillMaxSize().padScroll(left)) {
         PageHeader("New note") {
             LfgButton("Cancel", onCancel)
             LfgButton("Save", { onSave(title, text, inLookups) }, primary = true, enabled = text.isNotBlank() || title.isNotBlank())
         }
         HorizontalDivider(color = Lfg.Border)
-        Row(Modifier.fillMaxWidth().weight(1f).padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // The columns start a little below their tops, so a focused control's ring is not cut off.
+        Row(Modifier.fillMaxWidth().weight(1f).padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            Column(Modifier.weight(1f).verticalScroll(left).firstFocus().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 draft.picture?.let { Picture(it, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp))) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (draft.line != null) LfgButton("Use the line before", onLineBefore)
@@ -169,7 +174,7 @@ fun NoteNewScreen(
                     Text("No lines yet: this note is on its own.", color = Lfg.Dim, fontSize = 14.sp)
                 }
             }
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.weight(1f).padScroll(right).verticalScroll(right).padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 val entry = lookup.entry
                 if (entry != null) {
                     Label("Word")
@@ -187,7 +192,7 @@ fun NoteNewScreen(
                         LfgButton("Clear", onClearWord)
                     }
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { inLookups = !inLookups },
+                        Modifier.fillMaxWidth().heightIn(min = 44.dp).focusRing(RoundedCornerShape(6.dp)).clickable { inLookups = !inLookups },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Checkbox(
@@ -218,7 +223,7 @@ private fun Field(value: String, onChange: (String) -> Unit, singleLine: Boolean
         singleLine = singleLine,
         textStyle = TextStyle(color = Lfg.Text, fontSize = 16.sp, lineHeight = 24.sp),
         cursorBrush = SolidColor(Lfg.Accent),
-        modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Lfg.Sunken)
+        modifier = modifier.fillMaxWidth().padField(RoundedCornerShape(6.dp), singleLine = singleLine).clip(RoundedCornerShape(6.dp)).background(Lfg.Sunken)
             .border(1.dp, Lfg.BorderStrong, RoundedCornerShape(6.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
     )
 }

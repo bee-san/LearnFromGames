@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.ui
 
+import io.github.beesan.lfg.lookup.Move
 import android.graphics.drawable.ColorDrawable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
@@ -160,35 +161,41 @@ class MainActivity : ComponentActivity() {
                 val frame = Modifier.widthIn(max = 980.dp).padding(horizontal = 24.dp, vertical = 20.dp)
                 Box(frame) {
                     when {
-                        page == Page.HOME && !ready -> Box(Modifier.verticalScroll(rememberScrollState())) {
-                            SetupScreen(
-                                setup = setup,
-                                dictionary = dictionary,
-                                reader = reader,
-                                onTurnOn = ::openAccessibilitySettings,
-                                onOpenAppInfo = ::openAppInfo,
-                                onConnectAnki = { ankiPermission.launch(AnkiBridge.PERMISSION) },
-                                onInstallAnki = ::openAnkiDroidListing,
-                                onRetryDownloads = model::retryDownloads,
-                                wifiOnly = prefs.wifiOnly,
-                                onWifiOnly = model::setWifiOnly,
-                                askKeepDialogue = !prefs.keepDialogueAsked,
-                                onKeepDialogue = { yes -> model.updatePrefs { it.copy(keepDialogue = yes, keepDialogueAsked = true) } },
-                            )
+                        page == Page.HOME && !ready -> {
+                            val scroll = rememberScrollState()
+                            Box(Modifier.padScroll(scroll).verticalScroll(scroll).firstFocus()) {
+                                SetupScreen(
+                                    setup = setup,
+                                    dictionary = dictionary,
+                                    reader = reader,
+                                    onTurnOn = ::openAccessibilitySettings,
+                                    onOpenAppInfo = ::openAppInfo,
+                                    onConnectAnki = { ankiPermission.launch(AnkiBridge.PERMISSION) },
+                                    onInstallAnki = ::openAnkiDroidListing,
+                                    onRetryDownloads = model::retryDownloads,
+                                    wifiOnly = prefs.wifiOnly,
+                                    onWifiOnly = model::setWifiOnly,
+                                    askKeepDialogue = !prefs.keepDialogueAsked,
+                                    onKeepDialogue = { yes -> model.updatePrefs { it.copy(keepDialogue = yes, keepDialogueAsked = true) } },
+                                )
+                            }
                         }
-                        showPractice -> Box(Modifier.verticalScroll(rememberScrollState())) {
-                            ReadyScreen(
-                                setup = setup,
-                                dictionaryTitles = (dictionary as? DictState.Ready)?.dictionaries?.joinToString { it.title } ?: "",
-                                practice = practice,
-                                shortcut = shortcutLabel(prefs),
-                                onTapCharacter = model::lookupPractice,
-                                onAddCard = model::addPracticeCard,
-                                onDone = {
-                                    model.finishPractice()
-                                    page = Page.HOME
-                                },
-                            )
+                        showPractice -> {
+                            val scroll = rememberScrollState()
+                            Box(Modifier.padScroll(scroll).verticalScroll(scroll).firstFocus()) {
+                                ReadyScreen(
+                                    setup = setup,
+                                    dictionaryTitles = (dictionary as? DictState.Ready)?.dictionaries?.joinToString { it.title } ?: "",
+                                    practice = practice,
+                                    shortcut = shortcutLabel(prefs),
+                                    onTapCharacter = model::lookupPractice,
+                                    onAddCard = model::addPracticeCard,
+                                    onDone = {
+                                        model.finishPractice()
+                                        page = Page.HOME
+                                    },
+                                )
+                            }
                         }
                         page == Page.HOME -> LinesScreen(
                             lines = lines,
@@ -262,6 +269,19 @@ class MainActivity : ComponentActivity() {
                             onTranslate = model::translateLine,
                             onExplain = model::explainLine,
                             onBack = ::back,
+                            pad = LinePad(
+                                onFocused = model.lineLookup::startCursor,
+                                onStep = { forward -> model.lineLookup.move(if (forward) Move.RIGHT else Move.LEFT) },
+                                onCard = { model.lineLookup.addCard() },
+                                onAudio = { model.lineLookup.playAudio() },
+                                onNote = {
+                                    if (lookup.selected) {
+                                        model.noteFromLine(lookup.entryIndex)
+                                        page = Page.NOTE_NEW
+                                    }
+                                },
+                                onEntry = { next -> if (next) model.lineLookup.nextEntry() else model.lineLookup.previousEntry() },
+                            ),
                         )
                         page == Page.STATS -> saved.SaveableStateProvider(Page.STATS) {
                             StatsScreen(

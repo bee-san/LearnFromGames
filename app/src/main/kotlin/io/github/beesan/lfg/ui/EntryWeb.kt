@@ -226,6 +226,17 @@ class EntryWebView(
     }
 }
 
+/** Scrolls an [EntryList] from outside it: the pad's shoulder triggers, a page at a time. */
+class EntryScroller {
+    internal var view: EntryWebView? = null
+
+    /** A good part of a page down, or up. */
+    fun page(down: Boolean) {
+        val view = view ?: return
+        view.scrollBy(0, (if (down) 0.7f else -0.7f).times(view.height).toInt())
+    }
+}
+
 /** Every entry of a lookup, each with its own buttons: [EntryWebView.showList] in Compose. */
 @Composable
 fun EntryList(
@@ -235,9 +246,10 @@ fun EntryList(
     onLink: (EntryLink, Int) -> Unit,
     modifier: Modifier = Modifier,
     notes: Boolean = true,
+    scroller: EntryScroller? = null,
 ) {
     AndroidView(
-        factory = { EntryWebView(it, media, onLink) },
+        factory = { EntryWebView(it, media, onLink).also { view -> scroller?.view = view } },
         update = { it.showList(state.entries, styles, state.buttons.map { b -> b.htmlState() }, state.entryIndex, state.message, Lfg.palette, notes, state.vnQuestion?.title) },
         modifier = modifier,
     )

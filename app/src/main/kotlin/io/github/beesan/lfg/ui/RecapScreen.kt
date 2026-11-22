@@ -43,14 +43,15 @@ fun RecapScreen(
     onBack: () -> Unit,
 ) {
     val time = remember { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()) }
-    Column(Modifier.fillMaxSize()) {
+    val scroll = rememberScrollState()
+    Column(Modifier.fillMaxSize().padScroll(scroll)) {
         PageHeader("Recap") {
             if (hasKey) LfgButton(if (state.recap == null) "Write" else "Write again", onWrite, enabled = !state.busy && state.gameId != null)
             LfgButton("Back", onBack)
         }
         HorizontalDivider(color = Lfg.Border)
         Column(
-            Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 24.dp),
+            Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll).firstFocus().padding(top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             val game = games.firstOrNull { it.id == state.gameId }

@@ -2,12 +2,13 @@
 package io.github.beesan.lfg.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,7 +16,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
@@ -26,6 +29,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -90,7 +99,8 @@ fun LinesScreen(
     val time = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val zone = remember { ZoneId.systemDefault() }
     val today = remember(lines.size) { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, zone) }
-    Column(Modifier.fillMaxSize()) {
+    val list = rememberLazyListState()
+    Column(Modifier.fillMaxSize().padScroll(list).firstFocus()) {
         PageHeader("Lines") {
             LfgButton("Notes", onNotes)
             LfgButton("Recap", onRecap)
@@ -112,18 +122,18 @@ fun LinesScreen(
             if (loaded) Text("No lines yet. Open a game. Tap a word, or press $shortcut.", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 16.dp))
             return
         }
-        LazyColumn {
+        LazyColumn(state = list) {
             var lastGroup = ""
             for (line in lines) {
                 val group = MainViewModel.dayLabel(ReadingStats.dayOf(line.timestamp, zone), today) + " · " + line.gameName
                 if (group != lastGroup) {
                     lastGroup = group
                     item(key = "g:" + line.id) {
-                        Text(group, color = Lfg.Dim, fontSize = 13.sp, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
+                        Text(group, color = Lfg.Dim, fontSize = 13.sp, modifier = Modifier.padding(start = 8.dp, top = 14.dp, bottom = 2.dp))
                     }
                 }
                 item(key = line.id) {
-                    Row(Modifier.fillMaxWidth().clickable { onOpenLine(line) }.padding(vertical = 10.dp)) {
+                    Row(Modifier.fillMaxWidth().focusRing(RoundedCornerShape(6.dp), inside = true).clickable { onOpenLine(line) }.padding(horizontal = 8.dp, vertical = 10.dp)) {
                         Text(time.format(Date(line.createdAt)), color = Lfg.Dim, fontSize = 13.sp, modifier = Modifier.width(52.dp).padding(top = 4.dp))
                         Column {
                             Text(line.lineText, color = Lfg.Text, fontSize = 17.sp, lineHeight = 26.sp)
@@ -138,10 +148,37 @@ fun LinesScreen(
     }
 }
 
-/** A sentence whose every character can be tapped, with the looked-up word marked. */
+/**
+ * A sentence whose every character can be tapped, with the looked-up word
+ * marked. With the pad it takes focus, and left and right move the word:
+ * by [onStep] (forward or not) where there is a cursor that knows words,
+ * otherwise a character at a time. [onFocused] runs as the pad comes to it.
+ */
 @Composable
-fun TappableSentence(sentence: String, spanStart: Int, spanEnd: Int, onTapCharacter: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun TappableSentence(
+    sentence: String,
+    spanStart: Int,
+    spanEnd: Int,
+    onTapCharacter: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    onStep: ((Boolean) -> Unit)? = null,
+    onFocused: () -> Unit = {},
+) {
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val step = { forward: Boolean ->
+        if (onStep != null) {
+            onStep(forward)
+        } else if (sentence.isNotEmpty()) {
+            val selected = spanEnd > spanStart
+            var next = when {
+                !selected -> 0
+                forward -> spanStart + Character.charCount(sentence.codePointAt(spanStart))
+                else -> spanStart - 1
+            }
+            if (next in sentence.indices && Character.isLowSurrogate(sentence[next]) && next > 0) next--
+            if (next in sentence.indices) onTapCharacter(next)
+        }
+    }
     val text = buildAnnotatedString {
         append(sentence)
         if (spanEnd > spanStart && spanEnd <= sentence.length) addStyle(SpanStyle(background = Lfg.Wash, color = Lfg.Accent), spanStart, spanEnd)
@@ -152,7 +189,20 @@ fun TappableSentence(sentence: String, spanStart: Int, spanEnd: Int, onTapCharac
         fontSize = 24.sp,
         lineHeight = 44.sp,
         onTextLayout = { layout = it },
-        modifier = modifier.pointerInput(sentence) {
+        modifier = modifier.focusRing(RoundedCornerShape(6.dp), inside = true)
+            .onFocusChanged { if (it.isFocused) onFocused() }
+            .onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                when (event.key) {
+                    Key.DirectionRight -> step(true)
+                    Key.DirectionLeft -> step(false)
+                    else -> return@onKeyEvent false
+                }
+                true
+            }
+            .focusable()
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .pointerInput(sentence) {
             detectTapGestures { position ->
                 val result = layout ?: return@detectTapGestures
                 // getOffsetForPosition rounds to the nearest caret; the character under the finger is the one whose box holds it.
@@ -165,6 +215,16 @@ fun TappableSentence(sentence: String, spanStart: Int, spanEnd: Int, onTapCharac
         },
     )
 }
+
+/** What the pad does on a stored line's page. */
+class LinePad(
+    val onFocused: () -> Unit,
+    val onStep: (Boolean) -> Unit,
+    val onCard: () -> Unit,
+    val onAudio: () -> Unit,
+    val onNote: () -> Unit,
+    val onEntry: (Boolean) -> Unit,
+)
 
 fun cardButtonLabel(button: CardButton) = when (button) {
     CardButton.ADD -> "Add card"
@@ -189,16 +249,47 @@ fun LineLookupScreen(
     onTranslate: () -> Unit,
     onExplain: () -> Unit,
     onBack: () -> Unit,
+    /** The pad, as over a game: a cursor over the line, a card, the word said, a note, and the entries in turn. */
+    pad: LinePad? = null,
 ) {
     val line = state.lines.firstOrNull()
-    Column(Modifier.fillMaxSize()) {
+    val scroll = rememberScrollState()
+    val entries = remember { EntryScroller() }
+    Column(
+        Modifier.fillMaxSize().padScroll(scroll).onKeyEvent { event ->
+            if (pad == null) return@onKeyEvent false
+            val down = event.type == KeyEventType.KeyDown
+            when (event.key) {
+                Key.ButtonL1 -> if (down) pad.onEntry(false)
+                Key.ButtonR1 -> if (down) pad.onEntry(true)
+                Key.ButtonY -> if (down) pad.onAudio()
+                // The triggers page through the entries, as the right stick does over a game.
+                Key.ButtonL2 -> if (down) entries.page(false)
+                Key.ButtonR2 -> if (down) entries.page(true)
+                // On release, as over a game: the note's fields must not get this key's up.
+                Key.ButtonX -> if (!down) pad.onNote()
+                else -> return@onKeyEvent false
+            }
+            true
+        },
+    ) {
         PageHeader(line?.gameName ?: "Line") { LfgButton("Back", onBack) }
         HorizontalDivider(color = Lfg.Border)
         if (line == null) return
-        Row(Modifier.fillMaxWidth().weight(1f).padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+        Row(Modifier.fillMaxWidth().weight(1f).padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             // An explanation runs long: the column scrolls.
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                TappableSentence(line.text, state.spanStart, if (state.selected) state.markEnd else 0, onTap)
+            Column(Modifier.weight(1f).verticalScroll(scroll).firstFocus().padding(vertical = 6.dp)) {
+                TappableSentence(
+                    line.text, state.spanStart, if (state.selected) state.markEnd else 0, onTap,
+                    // A, on the line: the card of the entry shown.
+                    modifier = Modifier.onKeyEvent { event ->
+                        if (pad == null || event.key != Key.ButtonA) return@onKeyEvent false
+                        if (event.type == KeyEventType.KeyDown && state.selected) pad.onCard()
+                        true
+                    },
+                    onStep = pad?.onStep,
+                    onFocused = { pad?.onFocused?.invoke() },
+                )
                 if (!state.selected) Text("Tap a word.", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 10.dp))
                 if (ai) {
                     HorizontalDivider(color = Lfg.Border, modifier = Modifier.padding(top = 18.dp))
@@ -227,9 +318,9 @@ fun LineLookupScreen(
                     explanation.error?.let { Text(it, color = Lfg.Warn, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
                 }
             }
-            Column(Modifier.weight(1.2f).fillMaxHeight()) {
+            Column(Modifier.weight(1.2f).fillMaxHeight().padding(top = 6.dp)) {
                 if (state.selected) {
-                    EntryList(state, styles, media, onLink, Modifier.fillMaxWidth().weight(1f))
+                    EntryList(state, styles, media, onLink, Modifier.fillMaxWidth().weight(1f), scroller = entries)
                     state.message.takeIf { state.entries.isNotEmpty() }?.let {
                         Text(it, color = Lfg.Dim, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
                     }
