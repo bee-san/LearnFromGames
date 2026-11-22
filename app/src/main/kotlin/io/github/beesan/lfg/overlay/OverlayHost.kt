@@ -783,9 +783,12 @@ class OverlayHost(
         }
     }
 
-    private fun hints(context: Context): TextView {
+    private fun hints(context: Context): TextView = context.keyHints(hintsText(context))
+
+    /** The hints as Settings has the buttons now: read each time they show, since Controls can change under them. */
+    private fun hintsText(context: Context): String {
         val swap = prefs().swapConfirm
-        return context.keyHints(
+        return keyHintsText(
             if (swap) "B" else "A", if (swap) "A" else "B",
             listen = (context.applicationContext as? io.github.beesan.lfg.App)?.wordAudio?.info?.value != null,
             wholeWord = prefs().picking.wholeWord,
@@ -857,6 +860,7 @@ class OverlayHost(
             showEntries(entry, state)
             message.text = state.message.takeIf { state.entries.isNotEmpty() } ?: ""
             message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
+            if (state.controllerMode) hints.text = hintsText(context)
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.GONE
         }
     }
@@ -1053,6 +1057,7 @@ class OverlayHost(
         fun show(stripsOn: Boolean) {
             showSession(session?.first, session?.second)
             stripsToggle.text = if (stripsOn) "Tap strips on" else "Tap strips off"
+            if (state.controllerMode) hints.text = hintsText(context)
             hints.visibility = if (state.controllerMode) View.VISIBLE else View.INVISIBLE
             tip.visibility = if (state.controllerMode) View.GONE else View.VISIBLE
             tip.text = "Tap a word, here or on the game."
