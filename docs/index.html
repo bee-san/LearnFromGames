@@ -259,10 +259,10 @@ h1 em { font-style: normal; background: linear-gradient(180deg, #c6ff7a 0%, #5cb
 .sky { position: absolute; inset: 0; background: linear-gradient(180deg, #2b3a63 0%, #6d5a86 42%, #e59c74 70%, #f2c48d 78%); }
 .sun { position: absolute; width: 16%; aspect-ratio: 1; border-radius: 50%; left: 64%; top: 52%; background: #ffe2a8; filter: blur(1px); box-shadow: 0 0 60px 20px rgba(255, 210, 150, 0.45); }
 .poles { position: absolute; inset: 0; overflow: hidden; }
-.pole { position: absolute; bottom: 18%; width: 1.2%; height: 62%; background: #1d1a2a; animation: pass 2.6s linear infinite; }
+.pole { position: absolute; bottom: 18%; width: 1.2%; height: 62%; background: #1d1a2a; left: 0; animation: pass 2.6s linear infinite; will-change: transform; }
 .pole::before { content: ""; position: absolute; top: 6%; left: -280%; width: 660%; height: 4%; background: #1d1a2a; }
 .pole:nth-child(2) { animation-delay: -1.3s; }
-@keyframes pass { from { left: 108%; } to { left: -6%; } }
+@keyframes pass { from { transform: translateX(9000%); } to { transform: translateX(-500%); } }
 .wire { position: absolute; left: 0; right: 0; top: 34%; height: 1px; background: rgba(29, 26, 42, 0.6); }
 .ground { position: absolute; left: 0; right: 0; bottom: 0; height: 20%; background: #2a2433; }
 .frame { position: absolute; inset: 0; border: 0 solid #3a3044; border-width: 4% 3% 0 3%; box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.5); pointer-events: none; }
@@ -1428,7 +1428,7 @@ cd LearnFromGames
       <div class="page-head"><span class="num">6</span><h2>Making cards <span class="jp" lang="ja">カード</span></h2></div>
       <div class="two wide-l">
         <figure class="fig">
-          <img src="screens.png" width="1336" height="1524" loading="lazy" alt="A game's dialogue box with the word 景色 marked across a line break, and its entry with an Add card button below">
+          <img src="screens.webp" width="1336" height="1524" loading="lazy" alt="A game's dialogue box with the word 景色 marked across a line break, and its entry with an Add card button below">
         </figure>
         <div>
           <p class="lede">One press. The card lands in AnkiDroid with:</p>
@@ -1449,7 +1449,7 @@ cd LearnFromGames
         <img src="stats.png" width="1920" height="1080" loading="lazy" alt="The Stats screen: 8 h 41 min, 62,350 characters, 7,158 an hour over 30 days, with a bar for each day">
       </figure>
       <div class="two widgets-row">
-        <figure class="fig"><img src="widgets.png" width="1383" height="804" loading="lazy" alt="Two widgets: today's reading time and characters as rings, and the last seven days as bars"></figure>
+        <figure class="fig"><img src="widgets.webp" width="1383" height="804" loading="lazy" alt="Two widgets: today's reading time and characters as rings, and the last seven days as bars"></figure>
         <p class="note">Set daily goals for time, characters and cards. Two home screen widgets show today as rings and the week as bars.</p>
       </div>
     </div></div></div>
@@ -1751,12 +1751,15 @@ cd LearnFromGames
       if (hit(5) || hit(13)) advance();
       prev[p] = now;
     }
-    requestAnimationFrame(poll);
+    if (pads.length && Array.prototype.some.call(pads, Boolean)) requestAnimationFrame(poll); else polling = false;
   }
+  var polling = false;
+  function startPoll() { if (!polling) { polling = true; requestAnimationFrame(poll); } }
   window.addEventListener("gamepadconnected", function () {
+    startPoll();
     $("keys").innerHTML = "Gamepad: <kbd>D-pad</kbd> word <i>·</i> <kbd>A</kbd> card <i>·</i> <kbd>B</kbd> close <i>·</i> <kbd>R1</kbd> next line";
   });
-  if (navigator.getGamepads) requestAnimationFrame(poll);
+  if (navigator.getGamepads && Array.prototype.some.call(navigator.getGamepads(), Boolean)) startPoll();
 
   // The shell's colour, remembered for this browser only.
   var thor = $("handheld"), shellBtns = document.querySelectorAll(".shells button");
@@ -1811,23 +1814,40 @@ cd LearnFromGames
   var cv = document.getElementById("bubbles"), cx = cv.getContext("2d"), W, H, bubbles = [];
   function size() { var dpr = Math.min(2, window.devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; cx.setTransform(dpr, 0, 0, dpr, 0, 0); }
   function mk(any) { var r = 5 + Math.pow(Math.random(), 2.2) * 42; return { x: Math.random() * W, y: any ? Math.random() * H : H + r + Math.random() * 200, r: r, v: .15 + Math.random() * .45 + r / 120, ph: Math.random() * 6.28, w: .3 + Math.random() * .8 }; }
-  function draw(b, t) {
-    var x = b.x + Math.sin(t * .0006 * b.w + b.ph) * 14, y = b.y, r = b.r;
-    var g = cx.createRadialGradient(x, y, r * .2, x, y, r);
+  // One bubble is drawn once and stamped; the canvas redraws at 30 fps and rests while the page scrolls,
+  // since every redraw makes the glass windows above it blur again.
+  var R = 48, sprite = document.createElement("canvas"); sprite.width = sprite.height = R * 2;
+  (function () {
+    var s = sprite.getContext("2d"), r = R;
+    var g = s.createRadialGradient(r, r, r * .2, r, r, r);
     g.addColorStop(0, "rgba(255,255,255,0.02)"); g.addColorStop(.78, "rgba(255,255,255,0.10)"); g.addColorStop(.94, "rgba(255,255,255,0.55)"); g.addColorStop(1, "rgba(255,255,255,0)");
-    cx.fillStyle = g; cx.beginPath(); cx.arc(x, y, r, 0, 6.283); cx.fill();
-    var hl = cx.createLinearGradient(x, y - r, x, y); hl.addColorStop(0, "rgba(255,255,255,0.85)"); hl.addColorStop(1, "rgba(255,255,255,0)");
-    cx.fillStyle = hl; cx.beginPath(); cx.ellipse(x - r * .25, y - r * .48, r * .42, r * .22, -.5, 0, 6.283); cx.fill();
+    s.fillStyle = g; s.beginPath(); s.arc(r, r, r, 0, 6.283); s.fill();
+    var hl = s.createLinearGradient(r, 0, r, r); hl.addColorStop(0, "rgba(255,255,255,0.85)"); hl.addColorStop(1, "rgba(255,255,255,0)");
+    s.fillStyle = hl; s.beginPath(); s.ellipse(r - r * .25, r - r * .48, r * .42, r * .22, -.5, 0, 6.283); s.fill();
+  })();
+  function draw(b, t) {
+    var x = b.x + Math.sin(t * .0006 * b.w + b.ph) * 14;
+    cx.drawImage(sprite, x - b.r, b.y - b.r, b.r * 2, b.r * 2);
   }
+  var last = 0, scrolling = 0, running = false;
   function frame(t) {
-    cx.clearRect(0, 0, W, H);
-    bubbles.forEach(function (b) { if (!reduce) { b.y -= b.v; if (b.y < -b.r - 20) Object.assign(b, mk(false)); } draw(b, t || 0); });
-    if (!reduce && !document.hidden) requestAnimationFrame(frame);
+    running = false;
+    if (reduce || document.hidden) return;
+    running = true; requestAnimationFrame(frame);
+    if (t - last < 33 || Date.now() - scrolling < 200) return;
+    var step = last ? Math.min(4, (t - last) / 16.7) : 1; last = t;
+    paint(t, step);
   }
-  size(); for (var i = 0; i < Math.round(Math.min(40, W / 32)); i++) bubbles.push(mk(true));
-  addEventListener("resize", function () { size(); if (reduce) frame(0); });
-  document.addEventListener("visibilitychange", function () { if (!document.hidden && !reduce) requestAnimationFrame(frame); });
-  frame(0);
+  function paint(t, step) {
+    cx.clearRect(0, 0, W, H);
+    bubbles.forEach(function (b) { if (step) { b.y -= b.v * step; if (b.y < -b.r - 20) Object.assign(b, mk(false)); } draw(b, t || 0); });
+  }
+  function start() { if (!running && !reduce && !document.hidden) { running = true; last = 0; requestAnimationFrame(frame); } }
+  size(); for (var i = 0; i < Math.round(Math.min(28, W / 40)); i++) bubbles.push(mk(true));
+  addEventListener("resize", function () { size(); paint(last, 0); });
+  addEventListener("scroll", function () { scrolling = Date.now(); }, { passive: true });
+  document.addEventListener("visibilitychange", start);
+  paint(0, 0); start();
 })();
 </script>
 <script>
