@@ -61,9 +61,35 @@ class Recapper(private val db: LfgDatabase, private val prefs: () -> Prefs, priv
         return row!!
     }
 
+    /** What is happening in the scene being read now, from the [SCENE] lines read last. It is not kept: the scene moves on. */
+    suspend fun scene(gameId: String, gameName: String): String {
+        val p = prefs()
+        val lines = db.lines().ofGame(gameId).takeLast(SCENE)
+        if (lines.isEmpty()) throw OpenRouter.Failure("Nothing has been read in this game yet.")
+        return OpenRouter.ask(p.openRouterKey, p.model, SCENE_SYSTEM, scenePrompt(gameName, lines.map { it.lineText }, p.translateInto)).trim()
+    }
+
     companion object {
         /** Lines sent in one request: well inside gpt-oss's context, with room for the earlier recap and the answer. */
         const val CHUNK = 2000
+
+        /** Lines a scene is told from: a conversation and what led into it. */
+        const val SCENE = 60
+
+        /** The prompt for the scene the newest of [lines] (oldest first) are in. */
+        fun scenePrompt(game: String, lines: List<String>, into: String): String = buildString {
+            append("I’m playing ").append(game.ifBlank { "a game" }).append(", a Japanese game. Here are the lines I read last, oldest first:\n<lines>\n")
+            lines.forEach { append(it.replace('\n', ' ')).append('\n') }
+            append("</lines>\n\nTell me in ").append(into).append(" what is happening in the scene I’m in now, the one the last lines belong to: ")
+            append("who is there, what they are talking about or doing, and where it has got to. Three or four sentences, only from ")
+            append("the lines above: never guess at what comes next.")
+        }
+
+        /** The arcs as text for the lines' screen, newest first: where the story is now is what a returning player wants. */
+        fun storyText(recap: Recap): String = recap.arcs.asReversed().joinToString("\n\n") { arc ->
+            val span = if (arc.from == arc.to || arc.to.isBlank()) arc.from else "${arc.from} – ${arc.to}"
+            listOf(if (span.isBlank()) arc.title else "${arc.title} · $span", arc.summary).filter { it.isNotBlank() }.joinToString("\n")
+        }
         private val DAY = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH)
 
         /** The prompt for the lines read since [earlier]: each day's lines, numbered across all of them. */
@@ -127,5 +153,9 @@ class Recapper(private val db: LfgDatabase, private val prefs: () -> Prefs, priv
         const val SYSTEM =
             "You write recaps of Japanese games for someone learning Japanese who is coming back to one: the story so far, " +
                 "like a TV recap, from only what they have read. You answer with JSON alone."
+
+        const val SCENE_SYSTEM =
+            "You tell someone learning Japanese what is happening in the scene of a Japanese game they are reading, from only " +
+                "what they have read. You answer with the telling alone, in plain text."
     }
 }

@@ -38,7 +38,10 @@ import io.github.beesan.lfg.games.Covers
 import io.github.beesan.lfg.games.Hosts
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
+import io.github.beesan.lfg.ask.Recap
+import io.github.beesan.lfg.ask.Recapper
 import io.github.beesan.lfg.overlay.OverlayHost
+import kotlinx.serialization.json.Json
 import io.github.beesan.lfg.overlay.PickFor
 import io.github.beesan.lfg.overlay.Picked
 import io.github.beesan.lfg.ui.MainActivity
@@ -142,6 +145,22 @@ class LfgAccessibilityService : AccessibilityService() {
                         }
                     }
                     overlays.onAnswer(id, what, result.getOrNull(), result.exceptionOrNull()?.let { it.message ?: "That did not work. Try again." })
+                }
+            },
+            onRecapAsked = { gameId, name, what ->
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching {
+                            when (what) {
+                                OverlayHost.RecapOf.SCENE -> app.recapper.scene(gameId, name)
+                                else -> {
+                                    val recap = Json.decodeFromString<Recap>(app.recapper.write(gameId, name).json)
+                                    if (what == OverlayHost.RecapOf.LAST) recap.last else Recapper.storyText(recap)
+                                }
+                            }.ifBlank { error("The recap came back empty. Try again.") }
+                        }
+                    }
+                    overlays.onRecap(what, result.getOrNull(), result.exceptionOrNull()?.let { it.message ?: "That did not work. Try again." })
                 }
             },
             styles = { styles },

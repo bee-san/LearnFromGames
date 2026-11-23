@@ -71,6 +71,8 @@ class OverlayHost(
     private val onPickBox: () -> Unit,
     /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
     private val onAsk: (lineId: String, what: Ask) -> Unit,
+    /** A recap chosen on the lines' screen for the game being read; it comes back through [onRecap]. */
+    private val onRecapAsked: (gameId: String, gameName: String, what: RecapOf) -> Unit,
     /** Taps a point of a screen, as a finger would, once a window of ours is on top there: only ever our own focus window. */
     private val tapOn: (displayId: Int, x: Int, y: Int) -> Unit,
     private val styles: () -> List<EntryHtml.Style>,
@@ -84,6 +86,9 @@ class OverlayHost(
 ) {
     /** What the lines' screen can ask the model about a line. */
     enum class Ask { TRANSLATE, EXPLAIN }
+
+    /** What Recap on the lines' screen can tell: the scene being read, the last session, or the whole story so far. */
+    enum class RecapOf(val label: String) { SCENE("Scene"), LAST("Last time"), STORY("Story so far") }
 
     private val displays = service.getSystemService(DisplayManager::class.java)
     private val managers = HashMap<Int, Pair<Context, WindowManager>>()
@@ -326,6 +331,8 @@ class OverlayHost(
         // The cursor is on the game's own text, so its entry is over the game.
         if (next.controllerMode && !wasController) pickedOnPanel = false
         val entered = next.controllerMode && !wasController
+        // A word picked while the recap is up: its entry takes the recap's place.
+        if (next.selected && (!state.selected || next.line != state.line || next.spanStart != state.spanStart || next.selectedLine?.lineId != state.selectedLine?.lineId)) recapOpen = false
         state = next
         if (entered) bringController()
         if (wasController && !next.controllerMode) input.release()
@@ -1058,6 +1065,11 @@ class OverlayHost(
         private val message = context.label(12.5f, Ink.DIM)
         private val hints = hints(context)
         private val tip = context.label(12.5f, Ink.DIM)
+
+        /** The recap under the lines: which one is asked, then its text. */
+        private val recap = LinearLayout(context)
+        private val recapKinds = RecapOf.values().associateWith { what -> context.pill(what.label, primary = false, sizeSp = 13f) { askRecap(what) } }
+        private val recapText = context.label(15.5f, Ink.TEXT)
         private val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
 
         private var rows: List<Row> = emptyList()
@@ -1089,6 +1101,8 @@ class OverlayHost(
             // Crop: draw the box the game is read in, so only its dialogue goes to the reader. While
             // the box is being drawn it is Cancel: a box drawn by finger has no other way out until it is drawn.
             top.addView(crop, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
+            // Recap: asks which (the scene, last time, the story so far) and tells it under the lines.
+            top.addView(context.pill("Recap", primary = false, sizeSp = 13f) { toggleRecap() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
             top.addView(context.pill("Note", primary = false, sizeSp = 13f) { beginNote(Noting(newestOnScreen(), null), "Note on " + title.text) }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
             top.addView(context.pill("LFG", primary = false, sizeSp = 13f) { openApp() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
             header.addView(top)
@@ -1117,12 +1131,27 @@ class OverlayHost(
             sheetBar.setPadding(pad, context.dp(6f), context.dp(12f), context.dp(6f))
             sheetTitle.letterSpacing = 0.08f
             sheetBar.addView(sheetTitle, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            sheetBar.addView(context.pill("Close", primary = false, sizeSp = 12.5f) { controller.clear() })
+            sheetBar.addView(context.pill("Close", primary = false, sizeSp = 12.5f) { if (recapOpen) toggleRecap() else controller.clear() })
             sheet.addView(sheetBar)
             sheet.addView(divider(context))
             sheet.addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
             note.visibility = View.GONE
             sheet.addView(note, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            recap.orientation = VERTICAL
+            val kinds = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                setPadding(pad, context.dp(10f), pad, context.dp(4f))
+            }
+            for (button in recapKinds.values) kinds.addView(button, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { rightMargin = context.dp(8f) })
+            recap.addView(kinds)
+            recapText.setLineSpacing(context.dp(5f).toFloat(), 1f)
+            recapText.setPadding(pad, context.dp(8f), pad, context.dp(16f))
+            recap.addView(ScrollView(context).apply {
+                isFocusable = false
+                addView(recapText)
+            }, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+            recap.visibility = View.GONE
+            sheet.addView(recap, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
             message.setPadding(pad, context.dp(4f), pad, context.dp(6f))
             sheet.addView(message)
             sheet.visibility = View.GONE
@@ -1207,9 +1236,12 @@ class OverlayHost(
             }
 
             val writing = note.visibility == View.VISIBLE
-            val showEntry = entryOnPanel() && !writing
+            val telling = recapOpen && !writing
+            val showEntry = entryOnPanel() && !writing && !telling
             val sheetWas = sheet.visibility == View.VISIBLE
-            sheet.visibility = if (showEntry || writing) View.VISIBLE else View.GONE
+            sheet.visibility = if (showEntry || writing || telling) View.VISIBLE else View.GONE
+            recap.visibility = if (telling) View.VISIBLE else View.GONE
+            if (telling) showRecap()
             sheetBar.visibility = if (writing) View.GONE else View.VISIBLE
             entry.visibility = if (showEntry) View.VISIBLE else View.GONE
             if (showEntry) {
@@ -1223,6 +1255,50 @@ class OverlayHost(
             val opened = sheet.visibility == View.VISIBLE && !sheetWas
             if (!same && (arrived || wasAtEnd)) scroll.post { scroll.scrollTo(0, list.height) }
             else if (opened) scroll.post { marked()?.let { v -> if (v.bottom > scroll.scrollY + scroll.height) scroll.scrollTo(0, v.bottom - scroll.height) } }
+        }
+
+        /** The recap's three choices, and the one chosen: its text, that it is being written, or what went wrong. */
+        private fun showRecap() {
+            sheetTitle.text = "RECAP"
+            val ai = prefs().aiReady
+            val busy = recaps.values.any { it.busy }
+            for ((what, button) in recapKinds) {
+                val chosen = what == recapOf
+                button.visibility = if (ai) View.VISIBLE else View.GONE
+                button.text = if (recaps[what]?.busy == true) what.label + "…" else what.label
+                button.isEnabled = !busy
+                button.alpha = if (busy && !chosen) 0.5f else 1f
+                button.setTextColor(if (chosen) Ink.ON_FILL else Ink.TEXT)
+                button.background = rounded(if (chosen) Ink.FILL else Ink.SURFACE, if (chosen) Ink.FILL else Ink.BORDER_STRONG, context.dp(19f).toFloat())
+            }
+            val answer = recapOf?.let { recaps[it] }
+            recapText.text = when {
+                !ai -> "A recap is written by the model in Settings › Translation, with your OpenRouter key. Press LFG to add one."
+                recapOf == null -> "Which recap? The scene you are in now, the last session, or the whole story so far. " +
+                    "Each is told from only what you have read, so nothing ahead is spoiled."
+                answer?.error != null -> answer.error
+                answer?.text != null -> answer.text
+                else -> "Writing…"
+            }
+            recapText.setTextColor(if (answer?.error != null && ai) Ink.ACCENT else if (answer?.text == null || !ai) Ink.DIM else Ink.TEXT)
+        }
+
+        /** Asks for a recap of the game being read, which its newest kept line names. */
+        private fun askRecap(what: RecapOf) {
+            if (recaps.values.any { it.busy }) return
+            val name = title.text.toString()
+            val line = history.firstOrNull { it.gameName == name }
+            recapOf = what
+            if (line == null) {
+                recaps[what] = Answer(error = "Nothing has been read in this game yet.")
+            } else {
+                // Another game's recaps are not this one's.
+                if (recapGame != line.gameId) recaps.clear()
+                recapGame = line.gameId
+                recaps[what] = Answer(recaps[what]?.text, busy = true)
+                onRecapAsked(line.gameId, line.gameName, what)
+            }
+            refresh()
         }
 
         /** Brings a line's answer into sight: the whole row if it fits, else from its top. */
@@ -1413,6 +1489,28 @@ class OverlayHost(
     private val explanations = HashMap<String, Answer>()
 
     private fun answers(what: Ask) = if (what == Ask.TRANSLATE) translations else explanations
+
+    /** The recap is up under the lines; which one was chosen last, of which game, and what each came back as. */
+    private var recapOpen = false
+    private var recapOf: RecapOf? = null
+    private var recapGame: String? = null
+    private val recaps = HashMap<RecapOf, Answer>()
+
+    /** Recap pressed: the recap is under the lines, in place of a word's entry or a note; pressed again, it is gone. */
+    private fun toggleRecap() {
+        recapOpen = !recapOpen
+        if (recapOpen) {
+            endNote()
+            if (state.selected) controller.clear()
+        }
+        render()
+    }
+
+    /** The recap asked for, from the service. */
+    fun onRecap(what: RecapOf, text: String?, error: String?) {
+        recaps[what] = Answer(text ?: recaps[what]?.text, error = error)
+        panelView?.refresh()
+    }
 
     private fun ask(lineId: String, what: Ask) {
         val asked = answers(what)

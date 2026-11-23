@@ -5,6 +5,7 @@ import io.github.beesan.lfg.ask.Asker
 import io.github.beesan.lfg.ask.Moment
 import io.github.beesan.lfg.ask.OpenRouter
 import io.github.beesan.lfg.ask.Recap
+import io.github.beesan.lfg.ask.Arc
 import io.github.beesan.lfg.ask.Recapper
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.QuestionRow
@@ -85,6 +86,16 @@ class AskTest {
         assertEquals(listOf("b", "x"), recap.moments.map { it.lineId })   // a number past the lines is dropped
         assertEquals("The elder", recap.moments[1].caption)              // an earlier moment keeps its caption
         assertThrows(OpenRouter.Failure::class.java) { Recapper.parse("{}", lines, null) }
+    }
+
+    @Test
+    fun aSceneIsToldFromTheLastLinesAndTheStoryNewestFirst() {
+        val prompt = Recapper.scenePrompt("Quest", listOf("村の長老が待っている。", "橋を\n渡ろう。"), "English")
+        assertTrue(prompt.contains("<lines>\n村の長老が待っている。\n橋を 渡ろう。\n</lines>"))   // a line stays one line
+        assertTrue(prompt.contains("Tell me in English"))
+
+        val story = Recapper.storyText(Recap(arcs = listOf(Arc("The village", "2 November 2026", "2 November 2026", "You arrive."), Arc("The sword", "2 November 2026", "3 November 2026", "You find it."))))
+        assertEquals("The sword · 2 November 2026 – 3 November 2026\nYou find it.\n\nThe village · 2 November 2026\nYou arrive.", story)
     }
 
     @Test
