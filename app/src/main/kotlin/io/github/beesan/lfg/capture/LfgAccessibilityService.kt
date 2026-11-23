@@ -198,6 +198,8 @@ class LfgAccessibilityService : AccessibilityService() {
                 )
                 // A new line on screen ends the sound of the one before it.
                 reading.appearedAtMs.maxOrNull()?.let { app.media.onNextLine(it) }
+                // The clean picture the mark and the entry stood aside for has been read.
+                endAside(read = true)
                 overlays.onScreen(reading.displayId, true, front != null)
                 // The box was drawn from lookup: lookup comes back on the first lines read in it.
                 if (reading.lines.isNotEmpty() && afterBox?.isActive == true) {
@@ -830,6 +832,20 @@ class LfgAccessibilityService : AccessibilityService() {
     /** Screenshots are copied out of the graphics memory here, not on the thread that draws the overlays. */
     private val shots = java.util.concurrent.Executors.newSingleThreadExecutor()
 
+    /** Since when the mark and the entry have been off the game's screen for a clean picture of it; 0 when they are not. */
+    private var asideSince = 0L
+
+    /** When they last stood aside for nothing: the clean picture had the same text. Not tried again for a while. */
+    private var asideForNothing = 0L
+
+    /** [read]: a clean picture was read and gave the lines now shown. */
+    private fun endAside(read: Boolean = false) {
+        if (asideSince == 0L) return
+        asideForNothing = if (read) 0L else android.os.SystemClock.uptimeMillis()
+        asideSince = 0L
+        overlays.aside = false
+    }
+
     private suspend fun captureLoop() {
         var lastFront: String? = null
         var missed = 0
@@ -839,6 +855,8 @@ class LfgAccessibilityService : AccessibilityService() {
             // A screen that has not changed for a while, or has gone on with no text in it, is looked at half
             // as often, until it does or has.
             delay(if (stillLooks >= RESTING_AFTER) INTERVAL_MS * 2 else INTERVAL_MS)
+            // Whatever became of the clean picture, the mark and the entry are not kept away for long.
+            if (asideSince != 0L && android.os.SystemClock.uptimeMillis() - asideSince > ASIDE_MS) endAside()
             if (++ticks % PERF_EVERY == 0) Perf.report().takeIf { it.isNotEmpty() }?.let { Log.i("LfgPerf", it) }
             val now = try {
                 Perf.measure("front") { findFront() }
@@ -877,19 +895,48 @@ class LfgAccessibilityService : AccessibilityService() {
             if (now == null || Readers.reader == null) continue
             // A reading asked for is taking its own picture: Android allows only about three a second.
             if (shooting) continue
-            // While a word is being read, the screen is the player's; and the cursor must not move under them.
-            if (controller.state.value.controllerMode) continue
-
+            // The game is read while a word is looked up too: text that changes behind the entry is the
+            // text the entry should be on (LookupController.setLines moves it there).
             val windowShot = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
-            // A picture of the whole screen would show our own mark and popup; one of the game's window does not.
-            if (!windowShot && overlays.drawingOnGame) continue
             val shotAt = System.nanoTime()
             val window = if (windowShot) uncopiedShot(now.windowId, null) else null
             val whole = window == null
-            val frame = window ?: (if (overlays.drawingOnGame) null else uncopiedShot(null, now.displayId)) ?: continue
+            // No picture of the whole screen is any use while a box is being drawn on it.
+            if (whole && overlays.picking) continue
+            val frame = window ?: uncopiedShot(null, now.displayId) ?: continue
             Perf.add("shot", System.nanoTime() - shotAt)
             // Where this game's dialogue is, if the player has drawn it: only that is read.
             val area = dialogueBox(now.game, now.displayId)
+            // A picture of the game's window has nothing of ours in it. One of the whole screen (all there is
+            // before Android 14) shows our mark and entry, and cannot be read: it is only watched for the text
+            // around them changing. When it has, they stand aside for one clean picture, read as any other.
+            val drawn = if (whole) overlays.drawnOn(now.displayId) else emptyList()
+            if (drawn.isNotEmpty()) {
+                stillLooks = 0
+                try {
+                    val changed = withContext(Dispatchers.Default) {
+                        pipeline.watch(
+                            frame.hash, frame::bitmap, 0, 0, area,
+                            drawn + listOfNotNull(overlays.noticeOn(now.displayId)),
+                        )
+                    }
+                    // A game whose picture never matches its last clean one would have them blink for ever.
+                    val lately = asideForNothing != 0L && android.os.SystemClock.uptimeMillis() - asideForNothing < ASIDE_AGAIN_MS
+                    if (changed && !lately) {
+                        Log.i(TAG, "the text changed behind the entry: reading it")
+                        asideSince = android.os.SystemClock.uptimeMillis()
+                        overlays.aside = true
+                        // It has held still already: read on the first clean picture.
+                        pipeline.readNext()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "watching a frame failed", e)
+                } finally {
+                    frame.close()
+                }
+                continue
+            }
+            pipeline.endWatch()
             try {
                 val still = withContext(Dispatchers.Default) {
                     Perf.measure("frame") {
@@ -905,6 +952,8 @@ class LfgAccessibilityService : AccessibilityService() {
                     }
                 }
                 stillLooks = if (still) stillLooks + 1 else 0
+                // The clean picture showed nothing new to wait for: the mark and the entry come back as they were.
+                if (asideSince != 0L && !pipeline.settling) endAside()
             } catch (e: Exception) {
                 Log.w(TAG, "reading a frame failed", e)
             } finally {
@@ -1249,6 +1298,12 @@ class LfgAccessibilityService : AccessibilityService() {
 
         // Android answers a service's screenshot request at most once per 333 ms.
         private const val INTERVAL_MS = 350L
+
+        /** The longest the mark and the entry stay off the screen for a clean picture of it. */
+        private const val ASIDE_MS = 2_000L
+
+        /** After standing aside for a picture that had nothing new, how long before they do again. */
+        private const val ASIDE_AGAIN_MS = 10_000L
 
         /** How long a region read waits through a black screen before taking it for an app that blocks pictures. */
         private const val BLACK_GIVE_UP_MS = 15_000L

@@ -129,21 +129,42 @@ class LookupController(
 
     private fun onScreen(state: LookupState) = if (away != null) state.lines.dropLast(1) else state.lines
 
-    /** New text on screen. The selection belongs to the old text, so it goes. */
+    /**
+     * New text on screen, which is read while a word is looked up too. A word
+     * whose line is still there stays chosen; one whose line has gone is
+     * replaced by the first word of the new text, so the entry follows the game.
+     */
     fun setLines(lines: List<LookupLine>) {
-        val shown = onScreen(_state.value)
+        val before = _state.value
+        val shown = onScreen(before)
         if (lines.map { it.text } == shown.map { it.text } && lines.map { it.lineId } == shown.map { it.lineId }) {
             // The same lines read again (their boxes may have shifted by a pixel): keep the selection.
             _state.update { it.copy(lines = lines + listOfNotNull(away)) }
             return
         }
-        val controller = _state.value.controllerMode
+        val picked = before.selectedLine
+        if (picked != null) {
+            // The word's line as it was up to the word's end, with other lines changed around it or more
+            // of itself typed out after it; or the earlier line looked into, which is not on screen at all.
+            val still = if (before.line >= shown.size) lines.size else lines.indexOfFirst {
+                it.lineId != null && it.lineId == picked.lineId && before.spanEnd <= it.text.length &&
+                    it.text.regionMatches(0, picked.text, 0, before.spanEnd)
+            }
+            if (still >= 0) {
+                val next = lines + listOfNotNull(away)
+                _state.update { it.copy(lines = next, line = still) }
+                if (cursor != null) cursor = cursorOver(next)
+                return
+            }
+        }
         selecting?.cancel()
         resting?.cancel()
         cursor = null
         away = null
-        _state.value = LookupState(lines = lines, controllerMode = controller)
-        if (controller) enterControllerMode()
+        _state.value = LookupState(lines = lines, controllerMode = before.controllerMode)
+        if (before.controllerMode) enterControllerMode()
+        // A word chosen by touch is followed by the new text's first word too: the entry was up, and stays up.
+        else if (picked != null) cursorOver(lines).first()?.let { lookUp(it.line, it.index) }
     }
 
     /**

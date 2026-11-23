@@ -162,6 +162,21 @@ class OverlayHost(
      */
     val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || picker != null
 
+    /** Where the mark and the entry are on the game's screen, in display pixels: what a picture of it shows of ours. */
+    fun drawnOn(displayId: Int): List<Box> = if (displayId != gameDisplay) emptyList() else
+        (marks + listOfNotNull(shade, popup)).filter { it.shown }.map { Box(it.x, it.y, it.x + it.width, it.y + it.height) }
+
+    /**
+     * The mark and the entry are off the game's screen while this is set, and the word stays chosen:
+     * the text behind them has changed, and a picture without them is wanted to read it from.
+     */
+    var aside = false
+        set(value) {
+            if (field == value) return
+            field = value
+            render()
+        }
+
     /** Where a notice is showing on [displayId], in display pixels, or null for none. */
     fun noticeOn(displayId: Int): Box? = notice?.takeIf { it.shown && noticeDisplay == displayId }?.let { Box(it.x, it.y, it.x + it.width, it.y + it.height) }
 
@@ -449,7 +464,7 @@ class OverlayHost(
         }
 
         // The mark around the looked-up word: one piece for each row it is on.
-        val spans = if (gameInFront && state.selected) state.selectedLine?.geometry?.spanBoxes(state.spanStart, state.markEnd) ?: emptyList() else emptyList()
+        val spans = if (gameInFront && state.selected && !aside) state.selectedLine?.geometry?.spanBoxes(state.spanStart, state.markEnd) ?: emptyList() else emptyList()
         spans.forEachIndexed { i, piece ->
             val win = marks.getOrNull(i) ?: Win(
                 View(host.first).apply { background = rounded(Ink.WASH, Ink.ACCENT, host.first.dp(3f).toFloat(), host.first.dp(1.5f)) },
@@ -464,7 +479,7 @@ class OverlayHost(
         // unless the word was picked on the lines' screen or Settings puts every entry there.
         val other = otherDisplay()
         if (other != Display.INVALID_DISPLAY) renderPanel(other) else panel?.hide()
-        if (entryOverGame(other) && !(pickedOnPanel && panel?.shown == true)) renderPopup(host, span) else hidePopup()
+        if (!aside && entryOverGame(other) && !(pickedOnPanel && panel?.shown == true)) renderPopup(host, span) else hidePopup()
 
         // Lookup mode: a window that can take focus, and so the controller. It is also up for a
         // moment whenever the controller has to be brought back to the game's screen.

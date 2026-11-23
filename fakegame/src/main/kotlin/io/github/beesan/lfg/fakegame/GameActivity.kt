@@ -43,6 +43,9 @@ import kotlin.math.sin
  * Started with `--ez busy true`, petals drift behind a see-through box and a
  * ▼ blinks after a page that has finished typing, as in many real games: what
  * the first pass must not take for new text.
+ *
+ * Started with `--ei auto 8000`, it turns the page by itself every eight
+ * seconds, as a game in auto mode does while a word is being looked up.
  */
 class GameActivity : Activity() {
     private lateinit var game: GameView
@@ -61,6 +64,14 @@ class GameActivity : Activity() {
         }
         game.busy = intent.getBooleanExtra("busy", false)
         if (game.busy) game.box.color = 0xC00C141B.toInt()
+        // Auto mode, as a visual novel has: the next page by itself, with no button pressed.
+        val auto = intent.getIntExtra("auto", 0).toLong()
+        if (auto > 0) game.postDelayed(object : Runnable {
+            override fun run() {
+                game.advance()
+                game.postDelayed(this, auto)
+            }
+        }, auto)
         setContentView(game)
         window.decorView.windowInsetsController?.hide(WindowInsets.Type.systemBars())
     }

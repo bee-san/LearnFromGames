@@ -44,6 +44,9 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
     var restless = false
         private set
 
+    /** Whether text that is not the text last settled is on screen, waiting to hold still. */
+    val pending: Boolean get() = candidate.isNotEmpty() && !same(candidate, lastSettled)
+
     /** Set by [settleNext]: the next new text settles as soon as it is seen. */
     private var eager = false
 

@@ -162,6 +162,75 @@ class ReadingPipeline(
         eager = true
     }
 
+    /** Whether new text has been seen that is still waited for to hold still. */
+    val settling: Boolean get() = detector.pending
+
+    /** What [watch] goes by: the picture last watched, what of ours was on it, and the text around ours as last read and at the last look. */
+    private var watchHash = 0L
+    private var watchOurs: List<Box> = emptyList()
+    private var watchFirst: String? = null
+    private var watchLast: String? = null
+
+    /** The pictures watched are copied here: [buffer] keeps the last clean one, which they are held against. */
+    private var watchBuffer: IntArray? = null
+
+    /**
+     * A look at a picture that has our own mark and entry on it ([ours], display pixels), which cannot
+     * be read as it is: whether the text around them is no longer the text of the last clean picture,
+     * and has held still for two looks. The caller then takes them off the screen for a clean picture,
+     * which [onFrame] reads. Nothing here is kept or settled: the pipeline's own state stays at the
+     * last clean picture.
+     *
+     * Both pictures are compared with ours painted out of them, so what is under the entry counts for
+     * nothing either way; when ours move, the clean picture is painted afresh. A picture taken as they
+     * moved has them in two places and looks changed: the next look does not agree with it, and it is
+     * let go.
+     */
+    suspend fun watch(
+        hash: Long, picture: () -> Bitmap?, offsetX: Int = 0, offsetY: Int = 0, area: Box? = null, ours: List<Box>,
+    ): Boolean {
+        if (reader() == null) return false
+        val moved = ours != watchOurs
+        if (!moved && hash != 0L && hash == watchHash) return false
+        val bitmap = picture() ?: return false
+        val size = bitmap.width * bitmap.height
+        val pixels = watchBuffer?.takeIf { it.size == size } ?: IntArray(size).also { watchBuffer = it }
+        val whole = Frame(bitmap.width, bitmap.height, pixels)
+        val cut = area?.let { DialogueBox.reading(it.moved(-offsetX, -offsetY), bitmap.width, bitmap.height) }
+        suspend fun signature(): String {
+            for (box in ours) blank(whole, box.moved(-offsetX, -offsetY))
+            val frame = if (cut == null) whole else whole.cut(cut.left, cut.top, cut.width, cut.height, cutBuffer).also { cutBuffer = it.argb }
+            return Perf.measure("watch") { probe().signature(frame) }
+        }
+        if (moved || watchFirst == null) {
+            watchOurs = ours
+            watchLast = null
+            // Text seen since the last reading and not yet read (it was still being typed) has changed already.
+            val clean = buffer?.takeIf { it.size == size && !detector.pending }
+            watchFirst = if (clean == null) "" else {
+                System.arraycopy(clean, 0, pixels, 0, size)
+                signature()
+            }
+        }
+        pixelsOf(bitmap, pixels)
+        val now = signature()
+        watchHash = hash
+        val changed = !SettleDetector.same(now, watchFirst ?: "")
+        val held = watchLast?.let { SettleDetector.same(now, it) } == true
+        watchLast = now
+        if (!(changed && held)) return false
+        endWatch()
+        return true
+    }
+
+    /** Ours are off the screen: the next watch starts from what it sees. */
+    fun endWatch() {
+        watchHash = 0L
+        watchOurs = emptyList()
+        watchFirst = null
+        watchLast = null
+    }
+
     /** Forget what was on screen, so the next settled frame is read even if it is the same text. */
     fun forget() {
         detector.reset()
