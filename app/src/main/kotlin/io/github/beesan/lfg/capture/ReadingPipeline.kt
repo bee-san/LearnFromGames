@@ -177,7 +177,7 @@ class ReadingPipeline(
     /**
      * A look at a picture that has our own mark and entry on it ([ours], display pixels), which cannot
      * be read as it is: whether the text around them is no longer the text of the last clean picture,
-     * and has held still for two looks. The caller then takes them off the screen for a clean picture,
+     * and has held still for two looks or come whole. The caller then takes them off the screen for a clean picture,
      * which [onFrame] reads. Nothing here is kept or settled: the pipeline's own state stays at the
      * last clean picture.
      *
@@ -216,9 +216,15 @@ class ReadingPipeline(
         val now = signature()
         watchHash = hash
         val changed = !SettleDetector.same(now, watchFirst ?: "")
-        val held = watchLast?.let { SettleDetector.same(now, it) } == true
+        val last = watchLast
+        val held = last?.let { SettleDetector.same(now, it) } == true
+        // Text that came whole and ends where a sentence does is not waited on for a second look, as in
+        // [SettleDetector]: Android gives a picture every third of a second at most, and that look is one.
+        // Not on the look ours moved at: a picture of them in two places has the entry's own text in it.
+        val growing = !last.isNullOrEmpty() && now != last && now.startsWith(last)
+        val atOnce = !moved && last != null && !growing && SettleDetector.ended(now, watchFirst ?: "")
         watchLast = now
-        if (!(changed && held)) return false
+        if (!(changed && (held || atOnce))) return false
         endWatch()
         return true
     }

@@ -198,6 +198,7 @@ class LfgAccessibilityService : AccessibilityService() {
                 )
                 // A new line on screen ends the sound of the one before it.
                 reading.appearedAtMs.maxOrNull()?.let { app.media.onNextLine(it) }
+                if (asideSince != 0L) Log.i(TAG, "read behind the entry in ${android.os.SystemClock.uptimeMillis() - asideSince} ms")
                 // The clean picture the mark and the entry stood aside for has been read.
                 endAside(read = true)
                 overlays.onScreen(reading.displayId, true, front != null)
