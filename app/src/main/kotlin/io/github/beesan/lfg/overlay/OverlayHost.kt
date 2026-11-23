@@ -25,6 +25,8 @@ import android.widget.TextView
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.TapGate
+import io.github.beesan.lfg.core.WheelAction
+import io.github.beesan.lfg.core.WheelAim
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.Entry
@@ -67,10 +69,15 @@ class OverlayHost(
     private val onReadButtonHeld: () -> Unit,
     /** A box was drawn on the screen and something chosen for it ([RegionPicker]). */
     private val onPicked: (Picked) -> Unit,
-    /** In lookup mode over a game, the button for its dialogue box was pressed: the box is to be drawn. */
-    private val onPickBox: () -> Unit,
+    /**
+     * A box is to be drawn over the game: its dialogue box, from lookup mode, Crop or the wheel, or with [once] a
+     * box read a single time. With [pad] the controller draws it as well as a finger.
+     */
+    private val onPickBox: (pad: Boolean, once: Boolean) -> Unit,
     /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
     private val onAsk: (lineId: String, what: Ask) -> Unit,
+    /** A question about the game in front, asked from the wheel; the answer comes back through [onGameAnswer]. */
+    private val onAskGame: (question: String) -> Unit,
     /** A recap chosen on the lines' screen for the game being read; it comes back through [onRecap]. */
     private val onRecapAsked: (gameId: String, gameName: String, what: RecapOf) -> Unit,
     /** Taps a point of a screen, as a finger would, once a window of ours is on top there: only ever our own focus window. */
@@ -157,7 +164,7 @@ class OverlayHost(
         onNote = { startNote(state.entryIndex) },
         onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(0, dy) },
         // An ordinary app has no dialogue box: its regions are read when asked, from the read button.
-        onBox = { if (gameInFront && !asking) onPickBox() },
+        onBox = { if (gameInFront && !asking) onPickBox(true, false) },
         chordActive = chordActive,
     )
 
@@ -165,7 +172,10 @@ class OverlayHost(
      * True while something of ours is drawn on the game's screen, so a picture of that screen would include it.
      * A notice is not counted: it is cut out of the picture instead ([noticeOn]), so it never holds reading up.
      */
-    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || picker != null
+    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || covering
+
+    /** True while the game's screen is covered by a box being drawn, the wheel or its card: a picture of the whole screen is no use. */
+    val covering: Boolean get() = picker != null || wheelUp
 
     /** Where the mark and the entry are on the game's screen, in display pixels: what a picture of it shows of ours. */
     fun drawnOn(displayId: Int): List<Box> = if (displayId != gameDisplay) emptyList() else
@@ -291,6 +301,13 @@ class OverlayHost(
         stripsOn = tapStrips
         gameInFront = inFront
         this.asking = asking && inFront
+        // The game has gone: what the wheel was opened over is not there to act on.
+        if (!inFront || this.asking) {
+            wheelOpen = false
+            wheelHeld = false
+            closeCard()
+            pickerPad = pickerPad && picker != null
+        }
         render()
     }
 
@@ -421,13 +438,16 @@ class OverlayHost(
         if (palette != Ink.palette) {
             Ink.palette = palette
             noting = null
-            (marks + listOfNotNull(popup, shade, panel)).forEach { it.remove() }
+            if (cardFor == WheelAction.NOTE) cardFor = null
+            (marks + listOfNotNull(popup, shade, panel, card)).forEach { it.remove() }
             marks.clear()
             popup = null
             popupView = null
             shade = null
             panel = null
             panelView = null
+            card = null
+            cardView = null
         } else if (glass != popupGlass && popupView != null) {
             // The popup takes its ground when made.
             listOfNotNull(popup, shade).forEach { it.remove() }
@@ -446,9 +466,10 @@ class OverlayHost(
             it.addParked()
         }
 
-        // Tap strips: one per row of text with a place on screen.
+        // Tap strips: one per row of text with a place on screen. Not under the wheel or its card, which a
+        // strip made after them would lie over.
         var used = 0
-        if (stripsOn && TapGate.open(prefs().tapLookup, hasController(), state.controllerMode, asking)) {
+        if (stripsOn && !wheelUp && TapGate.open(prefs().tapLookup, hasController(), state.controllerMode, asking)) {
             lines.forEachIndexed { index, line ->
                 for (box in line.geometry?.rows ?: emptyList()) {
                     if (box.width <= 0 || box.height <= 0) continue
@@ -486,11 +507,14 @@ class OverlayHost(
         // unless the word was picked on the lines' screen or Settings puts every entry there.
         val other = otherDisplay()
         if (other != Display.INVALID_DISPLAY) renderPanel(other) else panel?.hide()
-        if (!aside && entryOverGame(other) && !(pickedOnPanel && panel?.shown == true)) renderPopup(host, span) else hidePopup()
+        if (!aside && !wheelUp && entryOverGame(other) && !(pickedOnPanel && panel?.shown == true)) renderPopup(host, span) else hidePopup()
 
         // Lookup mode: a window that can take focus, and so the controller. It is also up for a
-        // moment whenever the controller has to be brought back to the game's screen.
-        val holding = state.controllerMode && gameInFront && noting == null
+        // moment whenever the controller has to be brought back to the game's screen. The wheel, its
+        // card and a box drawn from the wheel hold the controller too, but not while a note or a
+        // question is written: the card takes the focus then, for the keyboard.
+        val padOurs = wheelOpen || (cardFor != null && !cardTyping()) || pickerPad
+        val holding = (state.controllerMode || padOurs) && gameInFront && noting == null
         if (holding || bringing) {
             // Over a game it covers the whole screen, seen through: a tap that misses the words and the entry
             // lands on it and not on the game, and nothing but our own windows is left to take the buttons.
@@ -502,6 +526,16 @@ class OverlayHost(
         } else {
             cover.hide()
         }
+        // The wheel is drawn in that window, which has the controller: the corner our own tap lands on to
+        // bring the controller is its own.
+        (cover.view as FocusView).wheel.let { wheel ->
+            wheel.visibility = if (wheelOpen) View.VISIBLE else View.GONE
+            if (wheelOpen) {
+                wheel.holes = wheelLine?.geometry?.rows.orEmpty()
+                wheel.hint = wheelHint()
+            }
+        }
+        renderCard(host)
     }
 
     /** True for the moment [bringController] has the focus window up to be tapped. */
@@ -688,14 +722,21 @@ class OverlayHost(
      * dialogue box. From lookup mode ([lookup]) the controller draws it as well
      * as a finger.
      */
-    fun pickRegion(displayId: Int, game: PickFor? = null, lookup: Boolean = false) {
-        val host = manager(displayId) ?: return
-        val screen = bounds(displayId) ?: return
+    fun pickRegion(displayId: Int, game: PickFor? = null, lookup: Boolean = false, once: Boolean = false) {
+        val host = manager(displayId) ?: run {
+            padPickFailed()
+            return
+        }
+        val screen = bounds(displayId) ?: run {
+            padPickFailed()
+            return
+        }
         picker?.remove()
-        // The controller is ours only in lookup mode, and only on the game's screen.
+        // The controller is ours in lookup mode, or from the wheel, and only on the game's screen.
         val pad = lookup && displayId == gameDisplay
         if (pad) input.release()
-        val view = RegionPicker(host.first, game, pad, prefs().swapConfirm, ::ownTouch) { picked ->
+        pickerPad = pad
+        val view = RegionPicker(host.first, game, pad, prefs().swapConfirm, ::ownTouch, once) { picked ->
             closePicker()
             onPicked(picked)
         }
@@ -704,6 +745,7 @@ class OverlayHost(
         pickerView = view
         win.place(0, 0, screen.width, screen.height)
         panelView?.crop?.text = "Cancel"
+        render()
     }
 
     /** Whether a box is being drawn. */
@@ -715,6 +757,18 @@ class OverlayHost(
         picker = null
         pickerView = null
         panelView?.crop?.text = "Crop"
+        // Drawn from the wheel, the controller goes back to the game.
+        if (pickerPad) {
+            pickerPad = false
+            render()
+        }
+    }
+
+    /** A box was to be drawn from the wheel, and there turned out to be nothing to draw it on: the controller is the game's again. */
+    fun padPickFailed() {
+        if (!pickerPad || picker != null) return
+        pickerPad = false
+        render()
     }
 
     fun destroy() {
@@ -725,7 +779,7 @@ class OverlayHost(
         picker?.remove()
         pickerView = null
         readButton?.remove()
-        (strips + marks + listOfNotNull(popup, shade, focus, panel)).forEach { it.remove() }
+        (strips + marks + listOfNotNull(popup, shade, focus, panel, card)).forEach { it.remove() }
         strips.clear()
         marks.clear()
     }
@@ -764,18 +818,24 @@ class OverlayHost(
     }
 
     @SuppressLint("ViewConstructor")
-    private inner class FocusView(context: Context) : View(context) {
+    private inner class FocusView(context: Context) : android.widget.FrameLayout(context) {
+        /** The wheel, drawn here while it is up: this window has the controller it is pointed with. */
+        val wheel = WheelView(context, onPick = ::pickWheel, onDismiss = ::putAwayWheel).apply { visibility = View.GONE }
+
         init {
             isFocusable = true
             isFocusableInTouchMode = true
+            addView(wheel, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        }
+
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) ownTouch()
+            return super.dispatchTouchEvent(event)
         }
 
         // Our own tap, bringing the controller here: it is not a tap on the game.
         @SuppressLint("ClickableViewAccessibility")
-        override fun onTouchEvent(event: MotionEvent): Boolean {
-            ownTouch()
-            return true
-        }
+        override fun onTouchEvent(event: MotionEvent): Boolean = true
 
         // The window with focus decides whether the system bars show. A game hides them; taking
         // the controller from it must not bring them back and shift the picture under the mark.
@@ -798,12 +858,13 @@ class OverlayHost(
             }
         }
 
-        // While a box is being drawn the controller draws it; lookup under it stays as it is.
+        // While a box is being drawn the controller draws it, and while the wheel or its card is up the
+        // controller is theirs; lookup under them stays as it is.
         override fun dispatchKeyEvent(event: KeyEvent): Boolean =
-            (pickerView?.onKey(event) ?: input.onKey(event)) || super.dispatchKeyEvent(event)
+            (pickerView?.onKey(event) ?: wheelKey(event) ?: input.onKey(event)) || super.dispatchKeyEvent(event)
 
         override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean =
-            (pickerView?.onMotion(event) ?: input.onMotion(event)) || super.dispatchGenericMotionEvent(event)
+            (pickerView?.onMotion(event) ?: wheelMotion(event) ?: input.onMotion(event)) || super.dispatchGenericMotionEvent(event)
     }
 
     /**
@@ -993,13 +1054,16 @@ class OverlayHost(
             return
         }
         noting = next
-        if (panel?.shown == true) {
-            panelView?.showNote(heading)
-            panel?.setFocusable(true)
-        } else {
-            popupView?.showNote(heading)
-            popup?.setFocusable(true)
+        if (next.entry == null) {
+            // On a line or on the game, from the wheel: written in the card over the game, which has no entry to hold it.
+            wheelOpen = false
+            cardFor = WheelAction.NOTE
+            render()
+            cardView?.showNote(heading)
+            return
         }
+        popupView?.showNote(heading)
+        popup?.setFocusable(true)
         render()
     }
 
@@ -1017,6 +1081,11 @@ class OverlayHost(
         panelView?.hideNote()
         popup?.setFocusable(false)
         panel?.setFocusable(false)
+        if (cardFor == WheelAction.NOTE) {
+            cardFor = null
+            card?.setFocusable(false)
+            card?.hide()
+        }
     }
 
     private fun showEntries(view: EntryWebView, state: LookupState) =
@@ -1046,7 +1115,7 @@ class OverlayHost(
     @SuppressLint("ViewConstructor")
     private inner class PanelView(context: Context) : LinearLayout(context) {
         val crop = context.pill("Crop", primary = false, sizeSp = 13f) {
-            if (picking) closePicker() else if (gameInFront) onPickBox()
+            if (picking) closePicker() else if (gameInFront) onPickBox(false, false)
         }
 
         private val pad = context.dp(16f)
@@ -1285,20 +1354,8 @@ class OverlayHost(
 
         /** Asks for a recap of the game being read, which its newest kept line names. */
         private fun askRecap(what: RecapOf) {
-            if (recaps.values.any { it.busy }) return
             val name = title.text.toString()
-            val line = history.firstOrNull { it.gameName == name }
-            recapOf = what
-            if (line == null) {
-                recaps[what] = Answer(error = "Nothing has been read in this game yet.")
-            } else {
-                // Another game's recaps are not this one's.
-                if (recapGame != line.gameId) recaps.clear()
-                recapGame = line.gameId
-                recaps[what] = Answer(recaps[what]?.text, busy = true)
-                onRecapAsked(line.gameId, line.gameName, what)
-            }
-            refresh()
+            askRecapOf(history.firstOrNull { it.gameName == name }, what)
         }
 
         /** Brings a line's answer into sight: the whole row if it fits, else from its top. */
@@ -1506,10 +1563,31 @@ class OverlayHost(
         render()
     }
 
+    /**
+     * Asks for a recap of the game whose newest kept line is [line], on the
+     * lines' screen or in the wheel's card; null when nothing has been read in it.
+     */
+    private fun askRecapOf(line: GameLine?, what: RecapOf) {
+        if (recaps.values.any { it.busy }) return
+        recapOf = what
+        if (line == null) {
+            recaps[what] = Answer(error = "Nothing has been read in this game yet.")
+        } else {
+            // Another game's recaps are not this one's.
+            if (recapGame != line.gameId) recaps.clear()
+            recapGame = line.gameId
+            recaps[what] = Answer(recaps[what]?.text, busy = true)
+            onRecapAsked(line.gameId, line.gameName, what)
+        }
+        panelView?.refresh()
+        if (cardFor == WheelAction.RECAP) render()
+    }
+
     /** The recap asked for, from the service. */
     fun onRecap(what: RecapOf, text: String?, error: String?) {
         recaps[what] = Answer(text ?: recaps[what]?.text, error = error)
         panelView?.refresh()
+        if (cardFor == WheelAction.RECAP) render()
     }
 
     private fun ask(lineId: String, what: Ask) {
@@ -1526,6 +1604,469 @@ class OverlayHost(
         asked[lineId] = Answer(text ?: asked[lineId]?.text, error = error)
         panelView?.refresh()
         panelView?.reveal(lineId)
+        if (cardFor == WheelAction.TRANSLATE || cardFor == WheelAction.EXPLAIN) render()
+    }
+
+    // ── the wheel ────────────────────────────────────────────────────────────
+
+    /** The wheel is up over the game. */
+    private var wheelOpen = false
+
+    /** The shortcut that opened the wheel is still down: letting it go picks the slice pointed at. */
+    private var wheelHeld = false
+
+    /** The line the wheel, and what it opens, act on: the word's line, else the newest kept line on screen. */
+    private var wheelLine: LookupLine? = null
+
+    /** The D-pad's ways held while the wheel is up: two together point on a slant. */
+    private val padHeld = HashSet<Int>()
+
+    /** What the card over the game shows, opened from the wheel; null while there is none. */
+    private var cardFor: WheelAction? = null
+    private var card: Win? = null
+    private var cardView: AnswerCard? = null
+
+    /** In the recap's card, the choice the controller is on. */
+    private var recapCursor = 0
+
+    /** The question asked from the wheel, and what came back. */
+    private var gameAnswer: Answer? = null
+
+    /** A box is being drawn with the controller, from the wheel or lookup: the controller is LFG's until it is drawn. */
+    private var pickerPad = false
+
+    /** The D-pad's last way on the HAT axes in the card, to step once a push. */
+    private var cardHat = 0
+    private var cardScrollSpeed = 0f
+    private val cardScroller = object : Runnable {
+        override fun run() {
+            if (cardScrollSpeed == 0f) return
+            cardView?.scroll?.scrollBy(0, (cardScrollSpeed * 40).toInt())
+            handler.postDelayed(this, 32)
+        }
+    }
+
+    private val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+
+    /** Whether the wheel or a card opened from it is up. */
+    val wheelUp: Boolean get() = wheelOpen || cardFor != null
+
+    /** Whether the wheel itself is up, rather than a card opened from it. */
+    val wheelShown: Boolean get() = wheelOpen
+
+    /** Whether the wheel can open now: over a game, with nothing else being drawn or written on it. */
+    val canOpenWheel: Boolean
+        get() = gameInFront && !asking && gameDisplay != Display.INVALID_DISPLAY && picker == null && noting == null
+
+    private fun focusView(): FocusView? = focus?.view as? FocusView
+
+    /** A note or a question is being written in the card: it has the focus, for the keyboard. */
+    private fun cardTyping() = cardFor == WheelAction.NOTE || (cardFor == WheelAction.ASK && prefs().aiReady && prefs().ask)
+
+    /**
+     * Opens the wheel over the game, as the shortcut is held; false when it
+     * cannot open now. It acts on the line of the word looked up, else the
+     * newest line on screen.
+     */
+    fun openWheel(): Boolean {
+        if (!canOpenWheel) return false
+        closeCard()
+        wheelLine = state.selectedLine?.takeIf { state.selected }
+            ?: state.lines.lastOrNull { it.geometry != null && it.lineId != null }
+            ?: state.lines.lastOrNull { it.geometry != null }
+        wheelOpen = true
+        wheelHeld = true
+        padHeld.clear()
+        focusView()?.wheel?.hover = null
+        // Lookup under the wheel stops where it is: nothing may keep stepping while the wheel has the controller.
+        input.release()
+        render()
+        bringController()
+        return true
+    }
+
+    /** The shortcut that opened the wheel was let go: the slice pointed at is picked, or, with none, the wheel stays to be pointed at and chosen with A. */
+    fun letGoWheel() {
+        if (!wheelOpen) return
+        wheelHeld = false
+        val hover = focusView()?.wheel?.hover
+        if (hover != null) pickWheel(WheelAction.entries[hover]) else render()
+    }
+
+    /** The wheel and its card go, with nothing more done. */
+    fun putAwayWheel() {
+        if (!wheelUp) return
+        wheelOpen = false
+        wheelHeld = false
+        closeCard()
+        render()
+    }
+
+    private fun closeCard() {
+        if (cardFor == null) return
+        if (cardFor == WheelAction.NOTE) {
+            endNote()
+            return
+        }
+        cardFor = null
+        cardScrollSpeed = 0f
+        handler.removeCallbacks(cardScroller)
+        card?.setFocusable(false)
+        card?.hide()
+    }
+
+    private fun wheelHint(): String {
+        val swap = prefs().swapConfirm
+        val close = if (swap) "A" else "B"
+        return if (wheelHeld) "Point with a stick or the D-pad, then let go    $close Put away"
+        else "Point with a stick or the D-pad    ${if (swap) "B" else "A"} Choose    $close Put away"
+    }
+
+    private fun pickWheel(action: WheelAction) {
+        wheelOpen = false
+        wheelHeld = false
+        val line = wheelLine
+        when (action) {
+            // The box is drawn with the controller too, which stays LFG's from the wheel to the box.
+            WheelAction.CROP, WheelAction.READ_ONCE -> {
+                pickerPad = true
+                render()
+                onPickBox(true, action == WheelAction.READ_ONCE)
+            }
+            WheelAction.NOTE -> {
+                val kept = line?.takeIf { it.lineId != null }
+                beginNote(Noting(kept, null), if (kept != null) "Note on this line" else "Note on " + (line?.gameName?.ifBlank { null } ?: "this game"))
+            }
+            else -> openCard(action)
+        }
+    }
+
+    /** The card for [action], asking for its answer if there is none yet. */
+    private fun openCard(action: WheelAction) {
+        cardFor = action
+        recapCursor = recapOf?.ordinal ?: 0
+        val id = wheelLine?.lineId
+        val ai = prefs().aiReady
+        when (action) {
+            WheelAction.TRANSLATE -> if (ai && id != null && translations[id]?.text == null && savedTranslation(id) == null) ask(id, Ask.TRANSLATE)
+            WheelAction.EXPLAIN -> if (ai && id != null && explanations[id]?.text == null) ask(id, Ask.EXPLAIN)
+            // A fresh question each time, unless one is still being answered.
+            WheelAction.ASK -> if (gameAnswer?.busy != true) gameAnswer = null
+            else -> Unit
+        }
+        render()
+    }
+
+    private fun savedTranslation(lineId: String): String? = history.firstOrNull { it.id == lineId }?.translation?.ifBlank { null }
+
+    /** The newest kept line of the game the wheel was opened over: which game a recap or the lines are of. */
+    private fun gameLineNow(): GameLine? {
+        val line = wheelLine
+        return history.firstOrNull { line?.gameId != null && it.gameId == line.gameId }
+            ?: (line?.gameName ?: session?.first)?.let { name -> history.firstOrNull { it.gameName == name } }
+    }
+
+    private fun askGame(question: String) {
+        val asked = question.trim()
+        if (asked.isEmpty() || gameAnswer?.busy == true) return
+        gameAnswer = Answer(busy = true)
+        render()
+        onAskGame(asked)
+    }
+
+    /** The answer to a question asked from the wheel, from the service. */
+    fun onGameAnswer(text: String?, error: String?) {
+        gameAnswer = Answer(text ?: gameAnswer?.text, error = error)
+        if (cardFor == WheelAction.ASK) render()
+    }
+
+    /** The card over the game, sized to what it says and kept off the line it is about. */
+    private fun renderCard(host: Pair<Context, WindowManager>) {
+        val what = cardFor
+        if (what == null || !gameInFront) {
+            card?.hide()
+            return
+        }
+        val context = host.first
+        val screen = bounds(gameDisplay) ?: return
+        val view = cardView ?: AnswerCard(
+            context,
+            onClose = { putAwayWheel() },
+            onAsk = ::askGame,
+            onSaveNote = { text, keep -> saveNote(text, keep) },
+            onNoteBack = { endNote(); render() },
+        ).also { made ->
+            cardView = made
+            // A tap beside it puts it away, as one beside the entry does; not while writing, as the keyboard is beside it.
+            made.setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE && !cardTyping()) putAwayWheel()
+                event.actionMasked == MotionEvent.ACTION_OUTSIDE
+            }
+        }
+        val win = card ?: Win(view, host.second, POPUP_FLAGS).also { card = it }
+        if (what != WheelAction.NOTE) view.show(cardContent(what))
+        val edge = context.dp(10f)
+        val landscape = screen.width > screen.height
+        // Landscape: a box at the right of the screen, as tall as what it says, from the top, where a
+        // game's dialogue seldom is. Portrait: the width of the screen, above or below the line.
+        val width = if (landscape) minOf(context.dp(480f), screen.width * 42 / 100) else screen.width - 2 * edge
+        val most = if (landscape) screen.height - 2 * edge else screen.height * 62 / 100
+        val height = if (what == WheelAction.NOTE) {
+            minOf(most, context.dp(330f))
+        } else {
+            view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            view.measuredHeight.coerceIn(context.dp(96f), most)
+        }
+        val x: Int
+        val y: Int
+        if (landscape) {
+            x = screen.width - width - edge
+            y = edge
+        } else {
+            // Above the line when it fits, else below, else at the top; with no line on screen, in the upper part.
+            val line = wheelLine?.geometry?.rows?.reduceOrNull { a, b -> a.union(b) }
+            val gap = context.dp(12f)
+            x = edge
+            y = when {
+                line == null -> (screen.height - height) / 4
+                line.top - gap - edge >= height -> line.top - gap - height
+                screen.height - line.bottom - gap - edge >= height -> line.bottom + gap
+                else -> edge
+            }.coerceAtLeast(edge)
+        }
+        win.setFocusable(cardTyping())
+        win.place(x, y, width, height)
+    }
+
+    /** What the card says for [what], as things stand. */
+    private fun cardContent(what: WheelAction): CardContent {
+        val p = prefs()
+        val confirm = if (p.swapConfirm) "B" else "A"
+        val close = if (p.swapConfirm) "A" else "B"
+        val pad = hasController()
+        fun keys(text: String) = if (pad) text else ""
+        val line = wheelLine
+        val id = line?.lineId
+        return when (what) {
+            WheelAction.TRANSLATE, WheelAction.EXPLAIN -> {
+                val translate = what == WheelAction.TRANSLATE
+                val kind = if (translate) Ask.TRANSLATE else Ask.EXPLAIN
+                val answer = id?.let { answers(kind)[it] }
+                val known = answer?.text ?: if (translate) id?.let(::savedTranslation) else null
+                val doing = if (translate) "translated" else "explained"
+                val (text, color) = when {
+                    line == null -> "Nothing has been read on this screen yet." to Ink.DIM
+                    id == null -> "This text is not kept as one of the game's lines, so it cannot be $doing." to Ink.DIM
+                    !p.aiReady -> "${what.label} uses the model in Settings › Translation, with your OpenRouter key." to Ink.DIM
+                    answer?.error != null -> answer.error to Ink.ACCENT
+                    known != null -> known to Ink.TEXT
+                    else -> (if (translate) "Translating…" else "Explaining…") to Ink.DIM
+                }
+                val other = if (translate) WheelAction.EXPLAIN else WheelAction.TRANSLATE
+                val usable = p.aiReady && id != null
+                CardContent(
+                    title = if (translate) "Translation" else "Explanation",
+                    line = line?.text,
+                    body = text,
+                    bodyColor = color,
+                    pills = if (!usable) emptyList() else listOf(
+                        CardPill(if (answer?.busy == true) "${what.label}…" else "Again", enabled = answer?.busy != true) { id?.let { ask(it, kind) }; render() },
+                        CardPill(other.label) { openCard(other) },
+                    ),
+                    hints = keys(if (usable) "$confirm ${other.label}    $close Close    ▲ ▼ Scroll" else "$close Close"),
+                )
+            }
+            WheelAction.RECAP -> {
+                val game = gameLineNow()
+                val mine = game != null && recapGame == game.gameId
+                val busy = recaps.values.any { it.busy }
+                val chosen = recapOf.takeIf { mine }
+                val answer = chosen?.let { recaps[it] }
+                val (text, color) = when {
+                    !p.aiReady -> "A recap is written by the model in Settings › Translation, with your OpenRouter key." to Ink.DIM
+                    game == null -> "Nothing has been read in this game yet." to Ink.DIM
+                    chosen == null -> "Which recap? The scene you are in now, the last session, or the whole story so far. " +
+                        "Each is told from only what you have read, so nothing ahead is spoiled." to Ink.DIM
+                    answer?.error != null -> answer.error to Ink.ACCENT
+                    answer?.text != null -> answer.text to Ink.TEXT
+                    else -> "Writing…" to Ink.DIM
+                }
+                CardContent(
+                    title = "Recap",
+                    choices = if (!p.aiReady || game == null) emptyList() else RecapOf.entries.map { kind ->
+                        CardChoice(
+                            if (mine && recaps[kind]?.busy == true) kind.label + "…" else kind.label,
+                            chosen = kind == chosen, marked = pad && kind.ordinal == recapCursor, enabled = !busy,
+                        ) {
+                            recapCursor = kind.ordinal
+                            askRecapOf(game, kind)
+                        }
+                    },
+                    body = text,
+                    bodyColor = color,
+                    hints = keys(if (p.aiReady && game != null) "◀ ▶ Choose    $confirm Tell    $close Close    ▲ ▼ Scroll" else "$close Close"),
+                )
+            }
+            WheelAction.ASK -> {
+                val answer = gameAnswer
+                val (text, color) = when {
+                    !p.aiReady -> "Ask uses the model in Settings › Translation, with your OpenRouter key." to Ink.DIM
+                    !p.ask -> "Turn on Ask in Settings › Translation." to Ink.DIM
+                    answer?.busy == true -> "Asking…" to Ink.DIM
+                    answer?.error != null -> answer.error to Ink.ACCENT
+                    answer?.text != null -> answer.text to Ink.TEXT
+                    else -> "Answered from walkthroughs and wikis on the web, without spoiling anything past the lines you have read." to Ink.DIM
+                }
+                CardContent(title = "Ask about this game", question = p.aiReady && p.ask, body = text, bodyColor = color)
+            }
+            WheelAction.LINES -> {
+                val game = gameLineNow()
+                val lines = if (game == null) emptyList() else history.filter { it.gameId == game.gameId }.take(LINES_SHOWN).reversed()
+                CardContent(
+                    title = "Lines" + (game?.gameName?.ifBlank { null }?.let { " · $it" } ?: ""),
+                    rows = lines.map {
+                        CardRow(clock.format(java.util.Date(it.createdAt)), it.lineText, translations[it.id]?.text ?: it.translation?.ifBlank { null }, current = it.id == id)
+                    },
+                    body = if (lines.isEmpty()) "Nothing has been read in this game yet." else null,
+                    bodyColor = Ink.DIM,
+                    pills = listOf(CardPill("Open LFG") { putAwayWheel(); openApp() }),
+                    hints = keys("$confirm Open LFG    $close Close    ▲ ▼ Scroll"),
+                )
+            }
+            else -> CardContent(title = what.label)
+        }
+    }
+
+    /** A key while the wheel or its card holds the controller; null when neither does. */
+    private fun wheelKey(event: KeyEvent): Boolean? = when {
+        wheelOpen -> wheelOpenKey(event)
+        cardFor != null && !cardTyping() -> cardKey(event)
+        else -> null
+    }
+
+    private fun wheelMotion(event: MotionEvent): Boolean? = when {
+        wheelOpen -> pointWheel(event)
+        cardFor != null && !cardTyping() -> cardMotion(event)
+        else -> null
+    }
+
+    private fun aim(slice: Int?) {
+        if (slice != null) focusView()?.wheel?.hover = slice
+    }
+
+    private fun wheelOpenKey(event: KeyEvent): Boolean {
+        val down = event.action == KeyEvent.ACTION_DOWN
+        val swap = prefs().swapConfirm
+        val confirm = if (swap) KeyEvent.KEYCODE_BUTTON_B else KeyEvent.KEYCODE_BUTTON_A
+        val close = if (swap) KeyEvent.KEYCODE_BUTTON_A else KeyEvent.KEYCODE_BUTTON_B
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                if (down) padHeld += event.keyCode else padHeld -= event.keyCode
+                // Pointed when pressed; letting one of two go leaves the slant they pointed at.
+                if (down) {
+                    aim(
+                        WheelAim.pad(
+                            KeyEvent.KEYCODE_DPAD_UP in padHeld, KeyEvent.KEYCODE_DPAD_DOWN in padHeld,
+                            KeyEvent.KEYCODE_DPAD_LEFT in padHeld, KeyEvent.KEYCODE_DPAD_RIGHT in padHeld,
+                        ),
+                    )
+                }
+            }
+            confirm, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (down && event.repeatCount == 0) {
+                focusView()?.wheel?.hover?.let { pickWheel(WheelAction.entries[it]) }
+            }
+            // On release, as lookup's own close is: the button's up must not be left for what shows next.
+            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) putAwayWheel()
+            else -> return KeyEvent.isGamepadButton(event.keyCode)
+        }
+        return true
+    }
+
+    /** The sticks and the D-pad on the HAT axes point at a slice; let go, the slice stays pointed at. */
+    private fun pointWheel(event: MotionEvent): Boolean {
+        if (event.source and InputDevice.SOURCE_CLASS_JOYSTICK == 0 || event.action != MotionEvent.ACTION_MOVE) return false
+        aim(WheelAim.slice(event.getAxisValue(MotionEvent.AXIS_HAT_X), event.getAxisValue(MotionEvent.AXIS_HAT_Y)))
+        val lx = event.getAxisValue(MotionEvent.AXIS_X)
+        val ly = event.getAxisValue(MotionEvent.AXIS_Y)
+        val (rx, ry) = rightStick(event)
+        // Whichever stick is pushed farther.
+        aim(if (lx * lx + ly * ly >= rx * rx + ry * ry) WheelAim.slice(lx, ly) else WheelAim.slice(rx, ry))
+        return true
+    }
+
+    /** The right stick: pads disagree on its axes, Z and RZ being the common ones and RX and RY the others. */
+    private fun rightStick(event: MotionEvent): Pair<Float, Float> {
+        val x = event.getAxisValue(MotionEvent.AXIS_Z).takeIf { kotlin.math.abs(it) > 0.2f } ?: event.getAxisValue(MotionEvent.AXIS_RX)
+        val y = event.getAxisValue(MotionEvent.AXIS_RZ).takeIf { kotlin.math.abs(it) > 0.2f } ?: event.getAxisValue(MotionEvent.AXIS_RY)
+        return x to y
+    }
+
+    private fun cardKey(event: KeyEvent): Boolean {
+        val down = event.action == KeyEvent.ACTION_DOWN
+        val swap = prefs().swapConfirm
+        val confirm = if (swap) KeyEvent.KEYCODE_BUTTON_B else KeyEvent.KEYCODE_BUTTON_A
+        val close = if (swap) KeyEvent.KEYCODE_BUTTON_A else KeyEvent.KEYCODE_BUTTON_B
+        val step = service.dp(90f)
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> if (down) cardView?.scrollBy(-step)
+            KeyEvent.KEYCODE_DPAD_DOWN -> if (down) cardView?.scrollBy(step)
+            KeyEvent.KEYCODE_DPAD_LEFT -> if (down && event.repeatCount == 0) moveRecapCursor(-1)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> if (down && event.repeatCount == 0) moveRecapCursor(1)
+            confirm, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (down && event.repeatCount == 0) cardConfirm()
+            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) putAwayWheel()
+            else -> return KeyEvent.isGamepadButton(event.keyCode)
+        }
+        return true
+    }
+
+    private fun cardMotion(event: MotionEvent): Boolean {
+        if (event.source and InputDevice.SOURCE_CLASS_JOYSTICK == 0 || event.action != MotionEvent.ACTION_MOVE) return false
+        val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+        val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
+        val hat = when {
+            hatY <= -0.5f -> KeyEvent.KEYCODE_DPAD_UP
+            hatY >= 0.5f -> KeyEvent.KEYCODE_DPAD_DOWN
+            hatX <= -0.5f -> KeyEvent.KEYCODE_DPAD_LEFT
+            hatX >= 0.5f -> KeyEvent.KEYCODE_DPAD_RIGHT
+            else -> 0
+        }
+        // Once a push, as a key press is.
+        if (hat != cardHat) {
+            cardHat = hat
+            if (hat != 0) cardKey(KeyEvent(KeyEvent.ACTION_DOWN, hat))
+        }
+        // Either stick scrolls, held.
+        val left = event.getAxisValue(MotionEvent.AXIS_Y)
+        val right = rightStick(event).second
+        val speed = when {
+            kotlin.math.abs(right) > 0.2f -> right
+            kotlin.math.abs(left) > 0.4f -> left
+            else -> 0f
+        }
+        val wasIdle = cardScrollSpeed == 0f
+        cardScrollSpeed = speed
+        if (wasIdle && speed != 0f) cardScroller.run()
+        return true
+    }
+
+    private fun moveRecapCursor(by: Int) {
+        if (cardFor != WheelAction.RECAP) return
+        recapCursor = (recapCursor + by).coerceIn(0, RecapOf.entries.size - 1)
+        render()
+    }
+
+    /** The card's main button, A: the other of Translate and Explain, the recap the cursor is on, or the app's lines. */
+    private fun cardConfirm() {
+        when (cardFor) {
+            WheelAction.TRANSLATE -> if (prefs().aiReady && wheelLine?.lineId != null) openCard(WheelAction.EXPLAIN)
+            WheelAction.EXPLAIN -> if (prefs().aiReady && wheelLine?.lineId != null) openCard(WheelAction.TRANSLATE)
+            WheelAction.RECAP -> gameLineNow()?.takeIf { prefs().aiReady }?.let { askRecapOf(it, RecapOf.entries[recapCursor]) }
+            WheelAction.LINES -> {
+                putAwayWheel()
+                openApp()
+            }
+            else -> Unit
+        }
     }
 
     private companion object {
@@ -1542,6 +2083,9 @@ class OverlayHost(
         /** How many of the game's lines the lines' screen lists, and how much unkept text on screen. */
         const val HISTORY_SHOWN = 40
         const val UNKEPT_SHOWN = 12
+
+        /** How many of the game's lines the wheel's Lines card lists. */
+        const val LINES_SHOWN = 15
 
         /** The entry or note under the lines takes this much to the lines' 1. */
         const val SHEET_WEIGHT = 1.35f

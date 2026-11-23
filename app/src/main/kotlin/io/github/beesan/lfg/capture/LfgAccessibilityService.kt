@@ -30,6 +30,7 @@ import io.github.beesan.lfg.core.DialogueBox
 import io.github.beesan.lfg.core.GameStats
 import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.core.ReadingStats
+import io.github.beesan.lfg.core.ShortcutHold
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.Note
@@ -39,6 +40,7 @@ import io.github.beesan.lfg.games.Hosts
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.ask.Recap
+import io.github.beesan.lfg.ask.Asker
 import io.github.beesan.lfg.ask.Recapper
 import io.github.beesan.lfg.overlay.OverlayHost
 import kotlinx.serialization.json.Json
@@ -135,7 +137,8 @@ class LfgAccessibilityService : AccessibilityService() {
             onReadButton = { if (asked != null) endAsked() else ask() },
             onReadButtonHeld = { if (asked?.continuous == true) endAsked() else pickRegion() },
             onPicked = ::onPicked,
-            onPickBox = { pickRegion() },
+            onPickBox = { pad, once -> pickRegion(pad = pad || controller.state.value.controllerMode, once = once) },
+            onAskGame = ::askAboutGame,
             onAsk = { id, what ->
                 scope.launch {
                     val result = withContext(Dispatchers.IO) {
@@ -353,21 +356,35 @@ class LfgAccessibilityService : AccessibilityService() {
             down += event.keyCode
             if (first != second && first in down && second in down && !chordFired) {
                 chordFired = true
-                toggleLookup(anyApp = true)
+                shortcutDown(anyApp = true)
             } else if (event.keyCode != first && event.keyCode != second && event.repeatCount == 0) {
-                // A button meant for the game: the word looked up by touch is done with.
+                // A button meant for the game: the word looked up by touch is done with. Not one pointing the wheel.
                 val state = controller.state.value
-                if (!state.controllerMode && state.selected) controller.clear()
+                if (!state.controllerMode && state.selected && !overlays.wheelUp) controller.clear()
             }
         } else if (event.action == KeyEvent.ACTION_UP) {
             down -= event.keyCode
-            if (first !in down && second !in down) chordFired = false
+            // The first of the pair let go ends the press.
+            if (chordFired && !chordLetGo && (event.keyCode == first || event.keyCode == second)) {
+                chordLetGo = true
+                shortcutUp(anyApp = true)
+            }
+            if (first !in down && second !in down) {
+                chordFired = false
+                chordLetGo = false
+            }
         }
         return false
     }
 
     /** Whether the press of the one-button shortcut now held is ours, so its release is too. */
     private var oneButtonOurs = false
+
+    /** One of the pair of the shortcut has been let go since the pair was pressed. */
+    private var chordLetGo = false
+
+    private val shortcutHold = ShortcutHold()
+    private var holdJob: Job? = null
 
     /**
      * The button of a one-button shortcut. While a game is in front, or lookup
@@ -377,11 +394,69 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun oneButton(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             oneButtonOurs = controller.state.value.controllerMode || front != null || asked != null
-            if (oneButtonOurs) toggleLookup(anyApp = false)
+            if (oneButtonOurs) shortcutDown(anyApp = false)
         } else if (event.action == KeyEvent.ACTION_UP) {
+            if (oneButtonOurs) shortcutUp(anyApp = false)
             return oneButtonOurs.also { oneButtonOurs = false }
         }
         return oneButtonOurs
+    }
+
+    /**
+     * The shortcut went down. Over a game it waits to see whether it is held,
+     * which opens the wheel, and is a tap only when let go soon; anywhere else
+     * it acts at once, as it always has.
+     */
+    private fun shortcutDown(anyApp: Boolean) {
+        holdJob?.cancel()
+        when {
+            // A box being drawn, or the wheel waiting to be pointed at: the shortcut puts it away.
+            overlays.picking -> overlays.closePicker()
+            overlays.wheelShown -> closeOverlay()
+            overlays.canOpenWheel -> {
+                shortcutHold.press(SystemClock.uptimeMillis())
+                holdJob = scope.launch {
+                    delay(ShortcutHold.HOLD_MS)
+                    if (shortcutHold.holdReached(SystemClock.uptimeMillis()) && !overlays.openWheel()) shortcutHold.cancelHold()
+                }
+            }
+            // A note being written in the box from the wheel: nothing else opens over it.
+            overlays.wheelUp -> closeOverlay()
+            else -> toggleLookup(anyApp)
+        }
+    }
+
+    /** The shortcut was let go: a tap turns lookup on or off, or closes the box from the wheel with it; a hold picks on the wheel. */
+    private fun shortcutUp(anyApp: Boolean) {
+        holdJob?.cancel()
+        when (shortcutHold.release()) {
+            ShortcutHold.Release.TAP -> if (overlays.wheelUp) closeOverlay() else toggleLookup(anyApp)
+            ShortcutHold.Release.HOLD -> overlays.letGoWheel()
+            ShortcutHold.Release.NONE -> Unit
+        }
+    }
+
+    /** The shortcut closes what it opened: the wheel or the box it opened, and lookup under them. */
+    private fun closeOverlay() {
+        overlays.putAwayWheel()
+        if (controller.state.value.controllerMode) controller.exitControllerMode()
+    }
+
+    /** A question about the game in front, asked from the wheel. */
+    private fun askAboutGame(question: String) {
+        val game = front?.game ?: run {
+            overlays.onGameAnswer(null, "There is no game in front to ask about.")
+            return
+        }
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { app.asker.ask(game.id, game.title, question, withScreen = false) } }
+            val row = result.getOrNull()
+            val sources = row?.let(Asker::sources).orEmpty().map { it.title.ifBlank { android.net.Uri.parse(it.url).host ?: it.url } }
+            overlays.onGameAnswer(
+                row?.let { it.answer + if (sources.isEmpty()) "" else "\n\nFrom " + sources.distinct().joinToString(", ") },
+                result.exceptionOrNull()?.let { it.message ?: "That did not work. Try again." },
+            )
+        }
     }
 
     /**
@@ -677,7 +752,7 @@ class LfgAccessibilityService : AccessibilityService() {
      * the game's dialogue box, which the game is then read in; over any other
      * app, a region to read once or to keep reading.
      */
-    fun pickRegion(collapse: Boolean = false) {
+    fun pickRegion(collapse: Boolean = false, pad: Boolean = controller.state.value.controllerMode, once: Boolean = false) {
         scope.launch {
             endAsked()
             if (collapse) {
@@ -687,12 +762,14 @@ class LfgAccessibilityService : AccessibilityService() {
             val playing = findFront().also { front = it }
             val display = (playing?.displayId ?: ordinaryFront?.displayId) ?: run {
                 toast("There is no app in front to read.")
+                overlays.padPickFailed()
                 return@launch
             }
             pickingOn = display
             overlays.pickRegion(
-                display, playing?.game?.let { PickFor(it.id, it.title, dialogueBox(it, display)) },
-                lookup = controller.state.value.controllerMode,
+                // A box read once is no game's dialogue box.
+                display, playing?.game?.takeIf { !once }?.let { PickFor(it.id, it.title, dialogueBox(it, display)) },
+                lookup = pad, once = once,
             )
         }
     }
@@ -921,8 +998,8 @@ class LfgAccessibilityService : AccessibilityService() {
             val shotAt = System.nanoTime()
             val window = if (windowShot) uncopiedShot(now.windowId, null) else null
             val whole = window == null
-            // No picture of the whole screen is any use while a box is being drawn on it.
-            if (whole && overlays.picking) continue
+            // No picture of the whole screen is any use while a box is being drawn on it, or the wheel is over it.
+            if (whole && overlays.covering) continue
             val frame = window ?: uncopiedShot(null, now.displayId) ?: continue
             Perf.add("shot", System.nanoTime() - shotAt)
             // Where this game's dialogue is, if the player has drawn it: only that is read.

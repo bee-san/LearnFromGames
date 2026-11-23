@@ -64,6 +64,8 @@ internal class RegionPicker(
     private val swapConfirm: Boolean,
     /** A finger came down here, so the touch is not one on the app behind. */
     private val onTouched: () -> Unit,
+    /** The box is to be read once, and nothing else: Read once on the wheel. */
+    private val once: Boolean = false,
     private val onDone: (Picked) -> Unit,
 ) : FrameLayout(context) {
     private class Option(val label: String, val pick: (Box) -> Picked)
@@ -141,6 +143,8 @@ internal class RegionPicker(
         val size = drawing.box?.let { "${it.width} × ${it.height}" }.orEmpty()
         return when (drawing.stage) {
             BoxDrawing.Stage.AIMING -> when {
+                once && pad -> "Drag a box around the text to read once, or move to one of its corners and press $confirmName. $backName leaves."
+                once -> "Drag a box around the text to read once"
                 game == null -> "Drag a box around the text to read"
                 !pad -> "Drag a box around the dialogue. ${game.title} is then read only there. Cancel on the lines' screen leaves."
                 else -> "Drag a box around the dialogue, or move to one of its corners and press $confirmName. $backName leaves."
@@ -155,6 +159,7 @@ internal class RegionPicker(
     }
 
     private fun optionsNow(): List<Option> = when {
+        once -> listOf(Option("Read once") { Picked.Once(it) }, Option("Cancel") { Picked.Cancelled })
         game == null -> listOf(Option("Read once") { Picked.Once(it) }, Option("Keep reading") { Picked.Keep(it) }, Option("Cancel") { Picked.Cancelled })
         drawing.changed -> listOf(Option("Read only this box") { Picked.ForGame(game, it) }, Option("Read once") { Picked.Once(it) }, Option("Cancel") { Picked.Cancelled })
         else -> listOf(Option("Keep this box") { Picked.Cancelled }, Option("Read the whole screen") { Picked.WholeScreen(game) })
