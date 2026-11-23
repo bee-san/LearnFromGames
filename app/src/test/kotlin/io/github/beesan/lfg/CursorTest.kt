@@ -7,6 +7,7 @@ import io.github.beesan.lfg.core.KeyRepeat
 import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.ReadingStats.Stamp
+import io.github.beesan.lfg.core.SettleDetector
 import io.github.beesan.lfg.core.Selectable
 import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.core.TextCursor
@@ -456,5 +457,57 @@ class CursorTest {
         assertEquals(Box(118, 806, 1242, 882), lines[0].box)
         assertEquals("昨日の夜、森の奥で不思議な光を見たんだ。\n[52,2,2,17]", Vocr.signature(lines))
         assertEquals("", Vocr.signature(Vocr.parse("")))
+    }
+
+    @Test
+    fun vocrSaysWhichBoxesAreColumnsAndHowSureItIs() {
+        val lines = Vocr.parse("116,806,728,90,0,100\tあっ！野生のポッポが\n1688,70,74,548,1,88\t\n1018,48,92,40,0,7\t\n")
+        assertEquals(listOf(false, true, false), lines.map { it.vertical })
+        assertEquals(listOf(100, 88, 7), lines.map { it.conf })
+        assertEquals(Box(1018, 48, 1110, 88), lines[2].box)
+    }
+
+    /** VOCR's own output (lfg_vocr_host) for a field with a dialogue box, then with a bird flying over the trees. */
+    private val field = "116,806,728,90,0,100\tあっ！野生のポッポが\n116,906,520,92,0,100\t飛び出してきた！\n"
+    private val birdOverField = listOf(
+        "1018,48,60,40,0,6\t\n$field",
+        "1018,48,92,40,0,7\t\n1178,526,44,48,0,4\t\n$field",
+        "1178,526,44,48,0,8\t\n$field",
+        "1034,48,44,40,0,5\t\n1178,526,44,48,0,4\t\n$field",
+    )
+
+    @Test
+    fun aBirdFlyingAcrossTheTopIsNotNewText() {
+        val still = Vocr.signature(Vocr.parse(field))
+        assertEquals("あっ！野生のポッポが\n飛び出してきた！", still)
+        for (look in birdOverField) assertEquals(still, Vocr.signature(Vocr.parse(look)))
+        // A sprite the spotter is sure of, read as one character, away from the text.
+        assertEquals(still, Vocr.signature(Vocr.parse("1360,50,116,74,0,42\t無\n$field")))
+        assertEquals(still, Vocr.signature(Vocr.parse("1360,50,116,62,0,90\t\n$field")))
+
+        // The line is read once, and the bird going over it for ten seconds does not read it again.
+        val d = SettleDetector(stillMs = 300)
+        // Whole, and it ends a sentence: read at once.
+        assertTrue(d.offer(still, 400))
+        for (t in 1..30) assertFalse(d.offer(Vocr.signature(Vocr.parse(birdOverField[t % birdOverField.size])), 400L + t * 333))
+    }
+
+    @Test
+    fun whatIsLeftOutOfTheSignatureIsOnlyWhatStandsApart() {
+        // The next row's first character, typed under the line, is the line growing.
+        assertEquals(
+            "あっ！野生のポッポが\n飛",
+            Vocr.signature(Vocr.parse("116,806,728,90,0,100\tあっ！野生のポッポが\n116,906,70,92,0,90\t飛\n")),
+        )
+        // A one-character name plate over the box.
+        assertEquals("母\nおかえりなさい。", Vocr.signature(Vocr.parse("120,740,62,62,0,92\t母\n118,810,600,76,0,124\tおかえりなさい。\n")))
+        // A short line alone on the screen is the text, however short.
+        assertEquals("え", Vocr.signature(Vocr.parse("800,500,70,76,0,110\tえ\n")))
+        // Nothing could be read: where the boxes are is all there is to go by.
+        assertEquals("[3,25,22,2]", Vocr.signature(Vocr.parse("116,806,728,90,0,100\t\n")))
+        // Vertical text, never read, keeps its places beside a horizontal name.
+        assertEquals("ユイ\n[52,2,2,17]\n[50,2,2,17]", Vocr.signature(Vocr.parse("1700,20,100,60,0,90\tユイ\n1688,70,74,548,1,88\t\n1608,70,74,548,1,90\t\n")))
+        // Faint text is never followed, read or not.
+        assertEquals("", Vocr.signature(Vocr.parse("474,218,28,48,0,4\t目日AG巨\n")))
     }
 }

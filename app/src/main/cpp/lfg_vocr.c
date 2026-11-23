@@ -143,8 +143,8 @@ int lfg_vocr_read(lfg_vocr *v, const int32_t *argb, unsigned width, unsigned hei
             /* A line the recogniser cannot take (too wide, say) still counts as a box with no text. */
             if (vocr_run(&v->ctx, &line, text, sizeof text, NULL) != VOCR_OK) text[0] = 0;
         }
-        n = snprintf(out + used, cap - used, "%u,%u,%u,%u\t%s\n", box->x * factor, box->y * factor, box->w * factor,
-                     box->h * factor, text);
+        n = snprintf(out + used, cap - used, "%u,%u,%u,%u,%u,%u\t%s\n", box->x * factor, box->y * factor, box->w * factor,
+                     box->h * factor, (unsigned)box->vertical, (unsigned)box->conf, text);
         if (n < 0 || (size_t)n >= cap - used) {
             out[used] = 0;
             break;
