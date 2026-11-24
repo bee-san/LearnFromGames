@@ -8,6 +8,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.core.view.WindowCompat
 import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.StatsPeriod
+import io.github.beesan.lfg.core.Updates
 import io.github.beesan.lfg.backup.Backup
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
@@ -98,6 +99,9 @@ class MainActivity : ComponentActivity() {
             val vnSearch by model.vnSearch.collectAsStateWithLifecycle()
             val dialogueBoxes by model.dialogueBoxes.collectAsStateWithLifecycle()
             val recording by SoundCapture.running.collectAsStateWithLifecycle()
+            val update by Updates.available.collectAsStateWithLifecycle()
+            LaunchedEffect(Unit) { Updates.check(applicationContext) }
+            val notListening = prefs.sentenceAudio && !recording
             // The colours Settings picked, light or dark as the theme says, "Match system" following the system.
             val palette = Palette.of(prefs.colours, prefs.theme, isSystemInDarkTheme())
             if (Lfg.palette != palette) Lfg.palette = palette
@@ -208,8 +212,12 @@ class MainActivity : ComponentActivity() {
                             reading = setup.serviceOn,
                             shortcut = shortcutLabel(prefs),
                             loaded = linesLoaded,
-                            problem = ("Sentence audio is not listening to game sound yet" to "Start").takeIf { prefs.sentenceAudio && !recording },
-                            onProblem = { microphone.launch(android.Manifest.permission.RECORD_AUDIO) },
+                            problem = if (notListening) ("Sentence audio is not listening to game sound yet" to "Start")
+                                else update?.let { "LFG ${it.version} is out" to "Update" },
+                            onProblem = {
+                                if (notListening) microphone.launch(android.Manifest.permission.RECORD_AUDIO)
+                                else update?.let { open(Intent(Intent.ACTION_VIEW, Uri.parse(it.url))) }
+                            },
                             onTurnOn = ::openAccessibilitySettings,
                             onOpenLine = {
                                 model.openLine(it)
