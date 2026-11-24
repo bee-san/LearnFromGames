@@ -98,7 +98,7 @@ class MainActivity : ComponentActivity() {
             val nameBuilds by model.nameBuilds.collectAsStateWithLifecycle()
             val vnSearch by model.vnSearch.collectAsStateWithLifecycle()
             val dialogueBoxes by model.dialogueBoxes.collectAsStateWithLifecycle()
-            val secondBoxes by model.secondBoxes.collectAsStateWithLifecycle()
+            val extraBoxes by model.extraBoxes.collectAsStateWithLifecycle()
             val boxDraw by model.boxDraw.collectAsStateWithLifecycle()
             val recording by SoundCapture.running.collectAsStateWithLifecycle()
             val update by Updates.available.collectAsStateWithLifecycle()
@@ -433,7 +433,7 @@ class MainActivity : ComponentActivity() {
                         }
                         page == Page.GAMES -> GamesScreen(
                             games, packageName, { model.updateGame(it) }, ::back,
-                            boxes = dialogueBoxes, secondBoxes = secondBoxes, picture = model::lastPicture,
+                            boxes = dialogueBoxes, extraBoxes = extraBoxes, picture = model::lastPicture,
                             onDrawBox = { game, slot ->
                                 model.startBoxDraw(game, slot)
                                 page = Page.BOX_DRAW
@@ -455,10 +455,11 @@ class MainActivity : ComponentActivity() {
                             ),
                         )
                         page == Page.BOX_DRAW -> boxDraw?.let { draw ->
+                            val all = listOf(dialogueBoxes[draw.game.id]) + extraBoxes[draw.game.id].orEmpty()
                             BoxDrawScreen(
                                 draw.game, draw.slot, draw.path,
-                                current = (if (draw.slot == 2) secondBoxes else dialogueBoxes)[draw.game.id],
-                                other = (if (draw.slot == 2) dialogueBoxes else secondBoxes)[draw.game.id],
+                                others = all.filterIndexed { i, _ -> i != draw.slot - 1 }.filterNotNull(),
+                                swapConfirm = prefs.swapConfirm,
                                 onSave = { box ->
                                     model.saveBox(draw.game, draw.slot, box)
                                     back()

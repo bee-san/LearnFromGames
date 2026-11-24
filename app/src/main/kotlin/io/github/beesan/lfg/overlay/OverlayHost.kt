@@ -28,7 +28,8 @@ import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.TapGate
 import io.github.beesan.lfg.core.WheelAction
 import io.github.beesan.lfg.core.WheelAim
-import io.github.beesan.lfg.core.box
+import io.github.beesan.lfg.core.WheelLevels
+import io.github.beesan.lfg.core.WheelSlice
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.Entry
@@ -76,13 +77,13 @@ class OverlayHost(
     private val onPicked: (Picked) -> Unit,
     /**
      * A box is to be drawn over the game: its box [slot] (1, the dialogue box, from lookup mode, Crop or the
-     * wheel; 2 from the wheel), or with [once] a box read a single time. With [pad] the controller draws it as
-     * well as a finger.
+     * wheel; 2 onwards from the wheel), or with [once] a box read a single time. With [pad] the controller draws
+     * it as well as a finger; with [fresh] it is drawn anew, not shown as it is.
      */
-    private val onPickBox: (pad: Boolean, once: Boolean, slot: Int) -> Unit,
+    private val onPickBox: (pad: Boolean, once: Boolean, slot: Int, fresh: Boolean) -> Unit,
     /** The game's box [slot] picked on the wheel: it is read once, now. */
     private val onReadBox: (slot: Int) -> Unit,
-    /** The game in front's box 1 and box 2 on its screen, each null while it is not drawn. */
+    /** The game in front's boxes on its screen, from box 1, which is null while it is not drawn. */
     private val gameBoxes: () -> List<Box?>,
     /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
     private val onAsk: (lineId: String, what: Ask) -> Unit,
@@ -177,7 +178,7 @@ class OverlayHost(
         onNote = { startNote(state.entryIndex) },
         onScroll = { dy -> panelView?.entries?.scrollBy(dy); popupView?.entry?.scrollBy(0, dy) },
         // An ordinary app has no dialogue box: its regions are read when asked, from the read button.
-        onBox = { if (gameInFront && !asking) onPickBox(true, false, 1) },
+        onBox = { if (gameInFront && !asking) onPickBox(true, false, 1, false) },
         chordActive = chordActive,
     )
 
@@ -1353,7 +1354,7 @@ class OverlayHost(
             }
 
             override fun crop() {
-                if (picking) closePicker() else if (gameInFront) onPickBox(false, false, 1)
+                if (picking) closePicker() else if (gameInFront) onPickBox(false, false, 1, false)
             }
 
             override fun recapButton() = openSheet(if (sheetTab == SheetTab.RECAP) null else SheetTab.RECAP)
@@ -1527,8 +1528,8 @@ class OverlayHost(
             ?: state.lines.lastOrNull { it.geometry != null }
         wheelOpen = true
         wheelHeld = true
-        padHeld.clear()
-        focusView()?.wheel?.hover = null
+        showLevel(WheelLevels.TOP)
+        aimAfresh = false
         // Lookup under the wheel stops where it is: nothing may keep stepping while the wheel has the controller.
         input.release()
         render()
@@ -1540,8 +1541,27 @@ class OverlayHost(
     fun letGoWheel() {
         if (!wheelOpen) return
         wheelHeld = false
-        val hover = focusView()?.wheel?.hover
-        if (hover != null) pickWheel(WheelAction.entries[hover]) else render()
+        val slice = hovered()
+        if (slice != null) pickWheel(slice) else render()
+    }
+
+    /** The level of the wheel showing: the top one, AI's or the boxes'. */
+    private var wheelLevel: List<WheelSlice> = WheelLevels.TOP
+
+    /** A level was just opened: the stick must come back to the middle before it points, or it would point on at once. */
+    private var aimAfresh = false
+
+    private fun hovered(): WheelSlice? = focusView()?.wheel?.hover?.let { wheelLevel.getOrNull(it) }
+
+    /** The wheel shows [level], with nothing pointed at. */
+    private fun showLevel(level: List<WheelSlice>) {
+        wheelLevel = level
+        padHeld.clear()
+        aimAfresh = true
+        focusView()?.wheel?.let { wheel ->
+            wheel.slices = level
+            wheel.hint = wheelHint()
+        }
     }
 
     /** The wheel and its card go, with nothing more done. */
@@ -1570,32 +1590,39 @@ class OverlayHost(
         val swap = prefs().swapConfirm
         val close = if (swap) "A" else "B"
         // A box drawn can be drawn again; one not drawn yet is drawn when it is picked.
-        val slot = focusView()?.wheel?.hover?.let { WheelAction.entries[it].box }
-        val redraw = if (slot != null && gameBoxes().getOrNull(slot - 1) != null) "    X Redraw" else ""
-        return if (wheelHeld) "Point with a stick or the D-pad, then let go$redraw    $close Put away"
-        else "Point with a stick or the D-pad    ${if (swap) "B" else "A"} Choose$redraw    $close Put away"
+        val slice = hovered()
+        val redraw = if (slice?.action == WheelAction.BOX && gameBoxes().getOrNull(slice.box - 1) != null) "    X Redraw" else ""
+        val leave = if (wheelLevel === WheelLevels.TOP) "Put away" else "Back"
+        return if (wheelHeld) "Point with a stick or the D-pad, then let go$redraw    $close $leave"
+        else "Point with a stick or the D-pad    ${if (swap) "B" else "A"} Choose$redraw    $close $leave"
     }
 
-    private fun pickWheel(action: WheelAction) {
-        wheelOpen = false
+    private fun pickWheel(slice: WheelSlice) {
         wheelHeld = false
+        // A level opens in the wheel, which stays up.
+        when (slice.action) {
+            WheelAction.AI -> return showLevel(WheelLevels.AI)
+            WheelAction.BOXES -> return showLevel(WheelLevels.boxes(gameBoxes().size))
+            else -> Unit
+        }
+        wheelOpen = false
         val line = wheelLine
-        when (action) {
+        when (slice.action) {
+            // As in Rubi: two corners, and the box is read at once, with nothing kept.
+            WheelAction.READ_ONCE -> drawBox(1, once = true)
             // A box drawn is read; one not drawn yet is drawn first.
-            WheelAction.BOX_1, WheelAction.BOX_2 -> {
-                val slot = action.box ?: return
-                if (gameBoxes().getOrNull(slot - 1) != null) {
-                    render()
-                    onReadBox(slot)
-                } else {
-                    drawBox(slot)
-                }
+            WheelAction.BOX -> if (gameBoxes().getOrNull(slice.box - 1) != null) {
+                render()
+                onReadBox(slice.box)
+            } else {
+                drawBox(slice.box)
             }
+            WheelAction.NEW_BOX -> drawBox(gameBoxes().size + 1)
             WheelAction.NOTE -> {
                 val kept = line?.takeIf { it.lineId != null }
                 beginNote(Noting(kept, null), if (kept != null) "Note on this line" else "Note on " + (line?.gameName?.ifBlank { null } ?: "this game"))
             }
-            else -> openCard(action)
+            else -> openCard(slice.action)
         }
     }
 
@@ -1638,13 +1665,16 @@ class OverlayHost(
         if (cardFor == WheelAction.ASK) render()
     }
 
-    /** The game's box [slot] is drawn over the game from the wheel, with the controller too, which stays LFG's until it is drawn. */
-    private fun drawBox(slot: Int) {
+    /**
+     * The game's box [slot], or with [once] a box to read once, is drawn anew over the game from the wheel,
+     * with the controller too, which stays LFG's until it is drawn.
+     */
+    private fun drawBox(slot: Int, once: Boolean = false) {
         wheelOpen = false
         wheelHeld = false
         pickerPad = true
         render()
-        onPickBox(true, false, slot)
+        onPickBox(true, once, slot, true)
     }
 
     /**
@@ -1838,6 +1868,7 @@ class OverlayHost(
     }
 
     private fun aim(slice: Int?) {
+        if (aimAfresh) return
         val wheel = focusView()?.wheel ?: return
         if (slice == null || slice == wheel.hover) return
         wheel.hover = slice
@@ -1852,25 +1883,30 @@ class OverlayHost(
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 if (down) padHeld += event.keyCode else padHeld -= event.keyCode
-                // Pointed when pressed; letting one of two go leaves the slant they pointed at.
+                // Pointed when pressed; letting one of two go leaves the slant they pointed at. A press is meant, so it points at once.
                 if (down) {
+                    aimAfresh = false
                     aim(
                         WheelAim.pad(
                             KeyEvent.KEYCODE_DPAD_UP in padHeld, KeyEvent.KEYCODE_DPAD_DOWN in padHeld,
                             KeyEvent.KEYCODE_DPAD_LEFT in padHeld, KeyEvent.KEYCODE_DPAD_RIGHT in padHeld,
+                            wheelLevel.size,
                         ),
                     )
                 }
             }
             confirm, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (down && event.repeatCount == 0) {
-                focusView()?.wheel?.hover?.let { pickWheel(WheelAction.entries[it]) }
+                hovered()?.let(::pickWheel)
             }
             // On release, as lookup's own close is: the button's up must not be left for what shows next.
-            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) putAwayWheel()
+            // In AI's or the boxes' level, back to the top one.
+            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) {
+                if (wheelLevel === WheelLevels.TOP) putAwayWheel() else showLevel(WheelLevels.TOP)
+            }
             // Pointed at a box that is drawn: it is drawn again.
             KeyEvent.KEYCODE_BUTTON_X -> if (down && event.repeatCount == 0) {
-                val slot = focusView()?.wheel?.hover?.let { WheelAction.entries[it].box }
-                if (slot != null && gameBoxes().getOrNull(slot - 1) != null) drawBox(slot)
+                val slice = hovered()
+                if (slice?.action == WheelAction.BOX && gameBoxes().getOrNull(slice.box - 1) != null) drawBox(slice.box)
             }
             else -> return KeyEvent.isGamepadButton(event.keyCode)
         }
@@ -1880,12 +1916,21 @@ class OverlayHost(
     /** The sticks and the D-pad on the HAT axes point at a slice; let go, the slice stays pointed at. */
     private fun pointWheel(event: MotionEvent): Boolean {
         if (event.source and InputDevice.SOURCE_CLASS_JOYSTICK == 0 || event.action != MotionEvent.ACTION_MOVE) return false
-        aim(WheelAim.slice(event.getAxisValue(MotionEvent.AXIS_HAT_X), event.getAxisValue(MotionEvent.AXIS_HAT_Y)))
+        val count = wheelLevel.size
+        val hx = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+        val hy = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
         val lx = event.getAxisValue(MotionEvent.AXIS_X)
         val ly = event.getAxisValue(MotionEvent.AXIS_Y)
         val (rx, ry) = rightStick(event)
+        // A level just opened: nothing points until the sticks are back in the middle.
+        if (aimAfresh) {
+            val still = 0.3f * 0.3f
+            if (hx == 0f && hy == 0f && lx * lx + ly * ly < still && rx * rx + ry * ry < still) aimAfresh = false
+            return true
+        }
+        aim(WheelAim.slice(hx, hy, count))
         // Whichever stick is pushed farther.
-        aim(if (lx * lx + ly * ly >= rx * rx + ry * ry) WheelAim.slice(lx, ly) else WheelAim.slice(rx, ry))
+        aim(if (lx * lx + ly * ly >= rx * rx + ry * ry) WheelAim.slice(lx, ly, count) else WheelAim.slice(rx, ry, count))
         return true
     }
 

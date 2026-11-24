@@ -578,8 +578,8 @@ fun RecognitionScreen(
 @Composable
 fun GamesScreen(
     games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit, onBack: () -> Unit,
-    /** A game's box 1 (its dialogue box) and box 2, by its id; its last picture, to show them on; and what draws and takes one away. */
-    boxes: Map<String, DialogueBox> = emptyMap(), secondBoxes: Map<String, DialogueBox> = emptyMap(),
+    /** A game's box 1 (its dialogue box) and its others, by its id; its last picture, to show them on; and what draws and takes one away. */
+    boxes: Map<String, DialogueBox> = emptyMap(), extraBoxes: Map<String, List<DialogueBox>> = emptyMap(),
     picture: suspend (gameId: String) -> String? = { null },
     onDrawBox: (Game, Int) -> Unit = { _, _ -> }, onRemoveBox: (Game, Int) -> Unit = { _, _ -> },
     names: List<InstalledDictionary> = emptyList(),
@@ -632,7 +632,7 @@ fun GamesScreen(
             // An ordinary app is read when asked, a region at a time: only what is read by itself has boxes.
             if (!game.app) {
                 HorizontalDivider(color = Lfg.Border)
-                GameBoxes(game, boxes[game.id], secondBoxes[game.id], picture, onDrawBox, onRemoveBox)
+                GameBoxes(game, boxes[game.id], extraBoxes[game.id].orEmpty(), picture, onDrawBox, onRemoveBox)
             }
             // Ordinary apps have no cast to name.
             if (namesActions != null && !game.app) {

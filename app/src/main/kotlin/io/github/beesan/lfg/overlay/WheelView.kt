@@ -22,7 +22,8 @@ import androidx.core.graphics.PathParser
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.WheelAction
 import io.github.beesan.lfg.core.WheelAim
-import io.github.beesan.lfg.core.box
+import io.github.beesan.lfg.core.WheelLevels
+import io.github.beesan.lfg.core.WheelSlice
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -37,10 +38,10 @@ import kotlin.math.sin
 @SuppressLint("ViewConstructor")
 internal class WheelView(
     context: Context,
-    private val onPick: (WheelAction) -> Unit,
+    private val onPick: (WheelSlice) -> Unit,
     private val onDismiss: () -> Unit,
 ) : View(context) {
-    /** The slice pointed at, by its place in [WheelAction.entries]; null for none yet. */
+    /** The slice pointed at, by its place in [slices]; null for none yet. */
     var hover: Int? = null
         set(value) {
             if (field == value) return
@@ -77,8 +78,17 @@ internal class WheelView(
             invalidate()
         }
 
-    private val actions = WheelAction.entries
-    private val icons = actions.map { PathParser.createPathFromPathData(ICONS.getValue(it)) }
+    /** The level of the wheel showing, clockwise from the top. A new one points at nothing. */
+    var slices: List<WheelSlice> = WheelLevels.TOP
+        set(value) {
+            field = value
+            hover = null
+            icons = value.map { PathParser.createPathFromPathData(ICONS.getValue(it.action)) }
+            layOut()
+            invalidate()
+        }
+    private val actions: List<WheelSlice> get() = slices
+    private var icons = slices.map { PathParser.createPathFromPathData(ICONS.getValue(it.action)) }
 
     private val dim = Paint().apply { color = Color.argb(158, 0, 0, 0) }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -116,8 +126,8 @@ internal class WheelView(
     private var cy = 0f
     private var outer = 0f
     private var inner = 0f
-    private val slices = List(actions.size) { Path() }
-    private val rims = List(actions.size) { Path() }
+    private val shapes = ArrayList<Path>()
+    private val rims = ArrayList<Path>()
     private val iconMatrix = Matrix()
     private val iconPath = Path()
     private val oval = RectF()
@@ -168,9 +178,11 @@ internal class WheelView(
         val rimRadius = outer + context.dp(7f)
         val rimGap = Math.toDegrees((context.dp(6f) / rimRadius).toDouble()).toFloat()
         val step = 360f / actions.size
+        while (shapes.size < actions.size) shapes += Path()
+        while (rims.size < actions.size) rims += Path()
         actions.indices.forEach { i ->
             val mid = -90f + i * step
-            slices[i].apply {
+            shapes[i].apply {
                 rewind()
                 oval.set(cx - outer, cy - outer, cx + outer, cy + outer)
                 arcTo(oval, mid - step / 2 + outerGap, step - 2 * outerGap, true)
@@ -192,7 +204,7 @@ internal class WheelView(
         // The game dimmed round the line, which is outlined; or, with a box pointed at, round that box.
         val pad = context.dp(5f).toFloat()
         val corner = context.dp(6f).toFloat()
-        val pointed = hover?.let { actions[it].box }
+        val pointed = hover?.let { actions[it] }?.takeIf { it.action == WheelAction.BOX }?.box
         val lit = pointed?.let { boxes.getOrNull(it - 1) }?.let { listOf(it) } ?: holes
         canvas.save()
         for (b in lit) canvas.clipOutRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad)
@@ -211,8 +223,8 @@ internal class WheelView(
             val on = i == hover
             fill.color = if (on) Ink.FILL else Ink.SURFACE
             edge.color = if (on) Ink.FILL else Ink.BORDER_STRONG
-            canvas.drawPath(slices[i], fill)
-            canvas.drawPath(slices[i], edge)
+            canvas.drawPath(shapes[i], fill)
+            canvas.drawPath(shapes[i], edge)
             if (on) {
                 rim.color = Ink.ACCENT
                 canvas.drawPath(rims[i], rim)
@@ -230,7 +242,7 @@ internal class WheelView(
             icon.strokeWidth = 1.9f * scale
             canvas.drawPath(iconPath, icon)
             // A box's icon is a frame with its number in it.
-            actions[i].box?.let { slot ->
+            actions[i].takeIf { it.action == WheelAction.BOX }?.box?.let { slot ->
                 number.color = ink
                 canvas.drawText(slot.toString(), x, y - context.dp(9f) - (number.ascent() + number.descent()) / 2, number)
             }
@@ -288,7 +300,7 @@ internal class WheelView(
         canvas.drawCircle(cx, cy, radius, edge)
 
         val chosen = hover?.let { actions[it] }
-        val undrawn = chosen?.box?.let { boxes.getOrNull(it - 1) == null } == true
+        val undrawn = chosen?.action == WheelAction.BOX && boxes.getOrNull(chosen.box - 1) == null
         val textWidth = (radius * 1.55f).toInt().coerceAtLeast(1)
         title.color = if (chosen == null) Ink.DIM else Ink.TEXT
         about.color = Ink.DIM
@@ -325,7 +337,7 @@ internal class WheelView(
     private fun sliceAt(x: Float, y: Float): Int? {
         val d = hypot(x - cx, y - cy)
         if (d < inner * 0.85f || d > outer + context.dp(36f)) return null
-        return WheelAim.slice(x - cx, y - cy, dead = 0f)
+        return WheelAim.slice(x - cx, y - cy, actions.size, dead = 0f)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -356,8 +368,15 @@ internal class WheelView(
             WheelAction.EXPLAIN to "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.1V16h5v-.1c0-.8.4-1.6 1.1-2.1A6 6 0 0 0 12 3z",
             WheelAction.RECAP to "M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 4v5h5M12 7.5V12l3 2",
             WheelAction.NOTE to "M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4",
-            WheelAction.BOX_1 to BOX_ICON,
-            WheelAction.BOX_2 to BOX_ICON,
+            WheelAction.BOX to BOX_ICON,
+            // Two boxes, one over the other.
+            WheelAction.BOXES to "M3.5 4.5h11v8h-11zM9.5 11.5h11v8h-11z",
+            // A box with a line across it: read once.
+            WheelAction.READ_ONCE to "$BOX_ICON M8 12h8",
+            // A box with a plus in it.
+            WheelAction.NEW_BOX to "$BOX_ICON M12 8.5v7M8.5 12h7",
+            // A sparkle.
+            WheelAction.AI to "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z",
             WheelAction.LINES to "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01",
         )
     }

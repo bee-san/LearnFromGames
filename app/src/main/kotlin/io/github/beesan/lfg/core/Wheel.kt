@@ -3,28 +3,41 @@ package io.github.beesan.lfg.core
 
 import kotlin.math.atan2
 
-/**
- * What the wheel offers, clockwise from the top: one slice for each way a
- * stick or the D-pad can point, the ones used most on the four straight ways.
- */
+/** What a slice of the wheel does. */
 enum class WheelAction(val label: String, val about: String) {
+    AI("AI", "Translate, explain, recap or ask"),
+    NOTE("Note", "A note on this line"),
+    READ_ONCE("Read once", "Two corners, read at once"),
+    BOXES("Boxes", "The game’s own boxes"),
+    LINES("Lines", "What was read lately"),
     TRANSLATE("Translate", "This line in your language"),
-    ASK("Ask", "A question about the game"),
     EXPLAIN("Explain", "The line, part by part"),
     RECAP("Recap", "The scene, or the story so far"),
-    NOTE("Note", "A note on this line"),
-    BOX_1("Box 1", "Read the main box"),
-    BOX_2("Box 2", "Read the second box"),
-    LINES("Lines", "What was read lately"),
+    ASK("Ask", "A question about the game"),
+    BOX("Box", "Read this box"),
+    NEW_BOX("New box", "Draw another box"),
 }
 
-/** The box a slice reads: 1 or 2, or null for a slice that is not a box. */
-val WheelAction.box: Int?
-    get() = when (this) {
-        WheelAction.BOX_1 -> 1
-        WheelAction.BOX_2 -> 2
-        else -> null
-    }
+/**
+ * One slice of the wheel: what it does and, for [WheelAction.BOX], which of
+ * the game's boxes it reads, counted from 1, the dialogue box.
+ */
+data class WheelSlice(val action: WheelAction, val box: Int = 0) {
+    val label: String get() = if (action == WheelAction.BOX) "Box $box" else action.label
+    val about: String get() = if (action == WheelAction.BOX && box == 1) "Read the dialogue box" else action.about
+}
+
+/**
+ * The wheel's levels, clockwise from the top. The top level opens AI's and
+ * the boxes' own; B goes back to it.
+ */
+object WheelLevels {
+    val TOP = listOf(WheelAction.AI, WheelAction.NOTE, WheelAction.READ_ONCE, WheelAction.BOXES, WheelAction.LINES).map { WheelSlice(it) }
+    val AI = listOf(WheelAction.TRANSLATE, WheelAction.EXPLAIN, WheelAction.RECAP, WheelAction.ASK).map { WheelSlice(it) }
+
+    /** A game's [count] boxes, box 1 always among them, drawn or not, and one more to draw. */
+    fun boxes(count: Int): List<WheelSlice> = (1..maxOf(count, 1)).map { WheelSlice(WheelAction.BOX, it) } + WheelSlice(WheelAction.NEW_BOX)
+}
 
 /** Which slice of the wheel a stick, the D-pad or a finger points at. */
 object WheelAim {
@@ -40,7 +53,7 @@ object WheelAim {
      * downwards, counted clockwise from straight up; null while it is nearer
      * the middle than [dead].
      */
-    fun slice(x: Float, y: Float, dead: Float = DEAD, count: Int = WheelAction.entries.size): Int? {
+    fun slice(x: Float, y: Float, count: Int, dead: Float = DEAD): Int? {
         if (x * x + y * y < dead * dead) return null
         val degrees = Math.toDegrees(atan2(x.toDouble(), -y.toDouble()))
         // Each slice is centred on its way, so a push half a slice either side of it is still that slice.
@@ -49,10 +62,10 @@ object WheelAim {
     }
 
     /** The slice the D-pad's held directions point at: one alone, or two together for a slant. */
-    fun pad(up: Boolean, down: Boolean, left: Boolean, right: Boolean): Int? {
+    fun pad(up: Boolean, down: Boolean, left: Boolean, right: Boolean, count: Int): Int? {
         val x = (if (right) 1f else 0f) - (if (left) 1f else 0f)
         val y = (if (down) 1f else 0f) - (if (up) 1f else 0f)
-        return slice(x, y)
+        return slice(x, y, count)
     }
 }
 

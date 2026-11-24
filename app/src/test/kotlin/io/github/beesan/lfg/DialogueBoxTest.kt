@@ -156,14 +156,27 @@ class DialogueBoxTest {
     }
 
     @Test
-    fun aTapDrawsNoBox() {
+    fun aTapOnEachCornerDrawsTheBox() {
+        val drawing = BoxDrawing(1920, 1080)
+        drawing.touchDown(180, 780)
+        drawing.touchMove(183, 782)
+        assertFalse(drawing.touchUp())
+        assertEquals(BoxDrawing.Stage.STRETCHING, drawing.stage)
+        drawing.touchDown(1710, 980)
+        assertTrue(drawing.touchUp())
+        assertEquals(Box(180, 780, 1710, 980), drawing.box)
+    }
+
+    @Test
+    fun aSecondTapTooCloseWaitsForAThird() {
         val drawing = BoxDrawing(1920, 1080)
         drawing.touchDown(500, 500)
-        drawing.touchMove(505, 503)
+        drawing.touchUp()
+        drawing.touchDown(510, 505)
         assertFalse(drawing.touchUp())
-        assertEquals(BoxDrawing.Stage.AIMING, drawing.stage)
-        assertNull(drawing.box)
-        assertEquals(505 to 503, drawing.x to drawing.y)
+        drawing.touchDown(900, 700)
+        assertTrue(drawing.touchUp())
+        assertEquals(Box(500, 500, 900, 700), drawing.box)
     }
 
     @Test

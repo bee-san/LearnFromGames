@@ -137,9 +137,9 @@ class LfgAccessibilityService : AccessibilityService() {
             onReadButton = { if (asked != null) endAsked() else ask() },
             onReadButtonHeld = { if (asked?.continuous == true) endAsked() else pickRegion() },
             onPicked = ::onPicked,
-            onPickBox = { pad, once, slot -> pickRegion(pad = pad || controller.state.value.controllerMode, once = once, slot = slot) },
+            onPickBox = { pad, once, slot, fresh -> pickRegion(pad = pad || controller.state.value.controllerMode, once = once, slot = slot, fresh = fresh) },
             onReadBox = ::readBox,
-            gameBoxes = { front?.let { f -> listOf(gameBox(f.game, f.displayId, 1), gameBox(f.game, f.displayId, 2)) }.orEmpty() },
+            gameBoxes = { front?.let { f -> (1..1 + app.extraBoxes[f.game.id].size).map { gameBox(f.game, f.displayId, it) } }.orEmpty() },
             onAskGame = ::askAboutGame,
             onAsk = { id, what ->
                 scope.launch {
@@ -752,10 +752,17 @@ class LfgAccessibilityService : AccessibilityService() {
     /**
      * Shows where a box can be drawn on the app in front. Over a game it is
      * the game's box [slot]: 1, its dialogue box, which the game is then read
-     * in, or 2, read when picked on the wheel. Over any other app, a region to
-     * read once or to keep reading.
+     * in, or 2 onwards, read when picked on the wheel. Over any other app, a
+     * region to read once or to keep reading. With [fresh], the box is drawn
+     * anew, not shown as it is.
      */
-    fun pickRegion(collapse: Boolean = false, pad: Boolean = controller.state.value.controllerMode, once: Boolean = false, slot: Int = 1) {
+    fun pickRegion(
+        collapse: Boolean = false,
+        pad: Boolean = controller.state.value.controllerMode,
+        once: Boolean = false,
+        slot: Int = 1,
+        fresh: Boolean = false,
+    ) {
         scope.launch {
             endAsked()
             if (collapse) {
@@ -772,7 +779,7 @@ class LfgAccessibilityService : AccessibilityService() {
             pickingPad = pad
             overlays.pickRegion(
                 // A box read once is none of the game's boxes.
-                display, playing?.game?.takeIf { !once }?.let { PickFor(it.id, it.title, gameBox(it, display, slot), slot) },
+                display, playing?.game?.takeIf { !once }?.let { PickFor(it.id, it.title, if (fresh) null else gameBox(it, display, slot), slot) },
                 lookup = pad, once = once,
             )
         }
@@ -795,9 +802,9 @@ class LfgAccessibilityService : AccessibilityService() {
     /** The game's dialogue box on this screen, or null for a game read on its whole screen. */
     private fun dialogueBox(game: Game, displayId: Int): Box? = gameBox(game, displayId, 1)
 
-    /** The game's box [slot] (1, its dialogue box, or 2) on this screen, or null when it is not drawn. */
+    /** The game's box [slot] (1, its dialogue box, or 2 onwards) on this screen, or null when it is not drawn. */
     private fun gameBox(game: Game, displayId: Int, slot: Int): Box? {
-        val kept = (if (slot == 2) app.secondBoxes else app.dialogueBoxes)[game.id] ?: return null
+        val kept = (if (slot == 1) app.dialogueBoxes[game.id] else app.extraBoxes[game.id].getOrNull(slot - 2)) ?: return null
         val screen = overlays.screen(displayId) ?: return null
         return kept.on(screen.width, screen.height)
     }
@@ -819,10 +826,10 @@ class LfgAccessibilityService : AccessibilityService() {
                 if (lookup) controller.exitControllerMode()
                 if (picked is Picked.Once) ask(picked.box, thenController = lookup) else ask((picked as Picked.Keep).box, continuous = true)
             }
-            is Picked.ForGame -> if (picked.game.slot == 2) {
-                // Box 2 is read only when asked: it was drawn to be read, so it is read now.
+            is Picked.ForGame -> if (picked.game.slot > 1) {
+                // Box 2 onwards is read only when asked: it was drawn to be read, so it is read now.
                 val screen = overlays.screen(pickingOn) ?: return
-                app.secondBoxes[picked.game.gameId] = DialogueBox(picked.box, screen.width, screen.height)
+                app.extraBoxes.set(picked.game.gameId, picked.game.slot, DialogueBox(picked.box, screen.width, screen.height))
                 if (lookup) controller.exitControllerMode()
                 ask(picked.box, thenController = lookup || pickingPad)
             } else {
@@ -830,9 +837,9 @@ class LfgAccessibilityService : AccessibilityService() {
                 app.dialogueBoxes[picked.game.gameId] = DialogueBox(picked.box, screen.width, screen.height)
                 readAfresh(lookup, "${picked.game.title} is read only in this box now.", picked.box)
             }
-            is Picked.WholeScreen -> if (picked.game.slot == 2) {
-                app.secondBoxes[picked.game.gameId] = null
-                toast("Box 2 of ${picked.game.title} is removed.")
+            is Picked.WholeScreen -> if (picked.game.slot > 1) {
+                app.extraBoxes.set(picked.game.gameId, picked.game.slot, null)
+                toast("Box ${picked.game.slot} of ${picked.game.title} is removed.")
             } else {
                 app.dialogueBoxes[picked.game.gameId] = null
                 readAfresh(lookup, "${picked.game.title} is read on its whole screen again.")

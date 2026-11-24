@@ -792,19 +792,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** The dialogue box drawn for each game, by its id: box 1. */
     val dialogueBoxes = app.dialogueBoxes.boxes
 
-    /** Box 2 drawn for each game, by its id. */
-    val secondBoxes = app.secondBoxes.boxes
-
-    private fun boxes(slot: Int) = if (slot == 2) app.secondBoxes else app.dialogueBoxes
+    /** Each game's boxes after the dialogue box, by its id: box 2 onwards. */
+    val extraBoxes = app.extraBoxes.boxes
 
     /** The game's box [slot] is taken away; for box 1 the reading notices at its next look, and reads the whole screen. */
     fun removeBox(game: Game, slot: Int) {
-        boxes(slot)[game.id] = null
+        if (slot == 1) app.dialogueBoxes[game.id] = null else app.extraBoxes.set(game.id, slot, null)
     }
 
-    /** The game's box [slot] is drawn in Settings: the reading notices at its next look. */
+    /** The game's box [slot] is drawn in Settings, or added past the last: the reading notices at its next look. */
     fun saveBox(game: Game, slot: Int, box: DialogueBox) {
-        boxes(slot)[game.id] = box
+        if (slot == 1) app.dialogueBoxes[game.id] = box else app.extraBoxes.set(game.id, slot, box)
     }
 
     /** The newest picture kept of a game's screen, if its file is still there. */
