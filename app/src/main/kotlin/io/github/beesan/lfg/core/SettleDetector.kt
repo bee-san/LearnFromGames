@@ -190,6 +190,8 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
             val allowed = minOf(16, maxOf(a.length, b.length) / 20)
             if (allowed == 0 || kotlin.math.abs(a.length - b.length) > allowed) return false
             if (a.filter(::digit) != b.filter(::digit)) return false
+            // The same letters moved about is a new name, not noise.
+            if (a.length == b.length && a.toList().sorted() == b.toList().sorted()) return false
             return a.length + b.length - 2 * common(a, b) <= allowed
         }
 
