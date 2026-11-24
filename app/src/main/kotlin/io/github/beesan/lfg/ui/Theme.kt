@@ -221,14 +221,22 @@ fun Modifier.firstFocus(): Modifier = composed {
 }
 
 @Composable
-fun LfgButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, primary: Boolean = false, enabled: Boolean = true) {
+fun LfgButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    enabled: Boolean = true,
+    /** Smaller, for a crowded bar such as the lines' screen over a game. */
+    compact: Boolean = false,
+) {
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.focusRing(RoundedCornerShape(5.dp)).defaultMinSize(minHeight = 44.dp),
+        modifier = modifier.focusRing(RoundedCornerShape(5.dp)).defaultMinSize(minHeight = if (compact) 36.dp else 44.dp),
         shape = RoundedCornerShape(5.dp),
         border = BorderStroke(1.dp, if (!enabled) Lfg.Soft else if (primary) Lfg.Fill else Lfg.BorderStrong),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+        contentPadding = if (compact) PaddingValues(horizontal = 12.dp, vertical = 4.dp) else PaddingValues(horizontal = 18.dp, vertical = 8.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (primary) Lfg.Fill else Lfg.Surface,
             contentColor = if (primary) Lfg.OnFill else Lfg.Text,
@@ -236,6 +244,6 @@ fun LfgButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, 
             disabledContentColor = Lfg.Dim,
         ),
     ) {
-        Text(text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(text, fontSize = if (compact) 13.sp else 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }

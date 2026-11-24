@@ -230,6 +230,11 @@ class EntryWebView(
 class EntryScroller {
     internal var view: EntryWebView? = null
 
+    /** By [dy] pixels, as the controller's stick scrolls it. */
+    fun scrollBy(dy: Int) {
+        view?.scrollBy(0, dy)
+    }
+
     /** A good part of a page down, or up. */
     fun page(down: Boolean) {
         val view = view ?: return

@@ -7,7 +7,6 @@ import android.content.Context
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.os.SystemClock
-import android.text.TextUtils
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -20,7 +19,9 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.view.WindowManager.LayoutParams
 import android.widget.LinearLayout
-import android.widget.ScrollView
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import android.widget.TextView
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Box
@@ -32,6 +33,9 @@ import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.ui.EntryLink
+import io.github.beesan.lfg.ui.EntryScroller
+import io.github.beesan.lfg.ui.Lfg
+import io.github.beesan.lfg.ui.LineRowUi
 import io.github.beesan.lfg.ui.EntryWebView
 import io.github.beesan.lfg.ui.htmlState
 import io.github.beesan.lfg.ui.palette
@@ -93,6 +97,9 @@ class OverlayHost(
 ) {
     /** What the lines' screen can ask the model about a line. */
     enum class Ask { TRANSLATE, EXPLAIN }
+
+    /** The tabs of the answer sheet under the lines: two about the line picked, and the recap of the game. */
+    enum class SheetTab(val label: String) { TRANSLATE("Translate"), EXPLAIN("Explain"), RECAP("Recap") }
 
     /** What Recap on the lines' screen can tell: the scene being read, the last session, or the whole story so far. */
     enum class RecapOf(val label: String) { SCENE("Scene"), LAST("Last time"), STORY("Story so far") }
@@ -162,7 +169,7 @@ class OverlayHost(
         stickWords = { prefs().stickWords },
         onClose = { controller.exitControllerMode() },
         onNote = { startNote(state.entryIndex) },
-        onScroll = { dy -> panelView?.entry?.scrollBy(0, dy); popupView?.entry?.scrollBy(0, dy) },
+        onScroll = { dy -> panelView?.entries?.scrollBy(dy); popupView?.entry?.scrollBy(0, dy) },
         // An ordinary app has no dialogue box: its regions are read when asked, from the read button.
         onBox = { if (gameInFront && !asking) onPickBox(true, false) },
         chordActive = chordActive,
@@ -348,8 +355,8 @@ class OverlayHost(
         // The cursor is on the game's own text, so its entry is over the game.
         if (next.controllerMode && !wasController) pickedOnPanel = false
         val entered = next.controllerMode && !wasController
-        // A word picked while the recap is up: its entry takes the recap's place.
-        if (next.selected && (!state.selected || next.line != state.line || next.spanStart != state.spanStart || next.selectedLine?.lineId != state.selectedLine?.lineId)) recapOpen = false
+        // A word picked while the answer sheet is up: its entry takes the sheet's place.
+        if (next.selected && (!state.selected || next.line != state.line || next.spanStart != state.spanStart || next.selectedLine?.lineId != state.selectedLine?.lineId)) sheetTab = null
         state = next
         if (entered) bringController()
         if (wasController && !next.controllerMode) input.release()
@@ -381,7 +388,7 @@ class OverlayHost(
     /** The session still going: its game and its stats; null when there is none. */
     fun onSession(game: String?, stats: String?) {
         session = if (game != null && stats != null) game to stats else null
-        panelView?.showSession(game, stats)
+        panelView?.refresh()
     }
 
     private fun moveTo(displayId: Int) {
@@ -435,6 +442,8 @@ class OverlayHost(
         // A new scheme, or light and dark swapped: the views take their colours when made, so they are made again.
         val palette = service.palette(prefs())
         val glass = prefs().popupSeeThrough
+        // The lines' screen is drawn in Compose, with the app's colours.
+        if (Lfg.palette != palette) Lfg.palette = palette
         if (palette != Ink.palette) {
             Ink.palette = palette
             noting = null
@@ -576,7 +585,7 @@ class OverlayHost(
         val host = manager(displayId) ?: return
         val size = bounds(displayId) ?: return
         val view = panelView?.takeIf { panel != null } ?: PanelView(host.first).also { panelView = it }
-        val win = panel ?: Win(view, host.second, PANEL_FLAGS).also { panel = it }
+        val win = panel ?: Win(view.view, host.second, PANEL_FLAGS).also { panel = it }
         view.show()
         win.place(0, 0, size.width, size.height)
     }
@@ -744,7 +753,7 @@ class OverlayHost(
         picker = win
         pickerView = view
         win.place(0, 0, screen.width, screen.height)
-        panelView?.crop?.text = "Cancel"
+        panelView?.refresh()
         render()
     }
 
@@ -756,7 +765,7 @@ class OverlayHost(
         picker?.remove()
         picker = null
         pickerView = null
-        panelView?.crop?.text = "Crop"
+        panelView?.refresh()
         // Drawn from the wheel, the controller goes back to the game.
         if (pickerPad) {
             pickerPad = false
@@ -1078,7 +1087,6 @@ class OverlayHost(
         if (noting == null) return
         noting = null
         popupView?.hideNote()
-        panelView?.hideNote()
         popup?.setFocusable(false)
         panel?.setFocusable(false)
         if (cardFor == WheelAction.NOTE) {
@@ -1103,245 +1111,145 @@ class OverlayHost(
     )
 
     /**
-     * The lines' screen of a two-screen handheld, laid out as a texthooker
-     * page: the game and its session at the top, then this game's lines as
-     * they are read, oldest first, the one on screen last and largest. Every
-     * character can be tapped. The line last touched (the newest, until
-     * another is) carries its buttons: Translate and Explain once there is an
-     * OpenRouter key, and Note. Notes written while playing sit among the
-     * lines, at their time. A word picked here has its entry here, under the
-     * lines; a word picked on the game has it over the game.
+     * The lines' screen of a two-screen handheld: [LinesPanel] in a window of
+     * its own. What it shows is worked out here, from the lookup, the lines
+     * kept and what was asked of them, and handed to it whole as a [PanelUi].
      */
-    @SuppressLint("ViewConstructor")
-    private inner class PanelView(context: Context) : LinearLayout(context) {
-        val crop = context.pill("Crop", primary = false, sizeSp = 13f) {
-            if (picking) closePicker() else if (gameInFront) onPickBox(false, false)
+    private inner class PanelView(context: Context) {
+        /** The entry under the lines, which the controller's stick scrolls. */
+        val entries = EntryScroller()
+        private var ui by mutableStateOf(PanelUi())
+        private val actions = Actions()
+        val view = OverlayComposeView(context, ::ownTouch) {
+            LinesPanel(ui, actions, styles(), media, entries)
         }
 
-        private val pad = context.dp(16f)
-
-        /** The entry in full: pictures, tables and each dictionary's own styling. */
-        val entry = EntryWebView(context, media) { link, i -> onEntryLink(link, i) }
-        private val note = NoteEditor(context, { text, keep -> saveNote(text, keep) }, { endNote(); render() })
-        private val title = context.label(19f, Ink.TEXT, bold = true)
-        private val stats = context.label(13f, Ink.DIM)
-        private val list = LinearLayout(context)
-        private val scroll = ScrollView(context)
-        private val empty = context.label(15f, Ink.DIM)
-        private val sheet = LinearLayout(context)
-        private val sheetBar = LinearLayout(context)
-        private val sheetTitle = context.label(12f, Ink.DIM, bold = true)
-        private val message = context.label(12.5f, Ink.DIM)
-        private val hints = hints(context)
-        private val tip = context.label(12.5f, Ink.DIM)
-
-        /** The recap under the lines: which one is asked, then its text. */
-        private val recap = LinearLayout(context)
-        private val recapKinds = RecapOf.values().associateWith { what -> context.pill(what.label, primary = false, sizeSp = 13f) { askRecap(what) } }
-        private val recapText = context.label(15.5f, Ink.TEXT)
-        private val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-
         private var rows: List<Row> = emptyList()
-        private var views: List<View> = emptyList()
 
-        /** The row carrying the buttons: the one last touched, until a new line is on screen. */
+        /** The line touched last, which the sheet's Translate and Explain are about; until it is, the newest. */
         private var touched: String? = null
         private var newest: String? = null
 
-        init {
-            orientation = VERTICAL
-            setBackgroundColor(Ink.BG)
+        /** The key of the line the sheet is about, as the last refresh found it. */
+        private var active: String? = null
+        private var sheetWas = false
+        private var endSignal = 0
+        private var keepSignal = 0
 
-            // The game and its session, as the app's page header, with what the page can do beside it.
-            val header = LinearLayout(context).apply {
-                orientation = VERTICAL
-                setBackgroundColor(Ink.SURFACE)
-                setPadding(pad, context.dp(10f), context.dp(12f), context.dp(10f))
-            }
-            val top = LinearLayout(context).apply {
-                orientation = HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            title.maxLines = 1
-            title.ellipsize = TextUtils.TruncateAt.END
-            stats.maxLines = 1
-            stats.ellipsize = TextUtils.TruncateAt.END
-            top.addView(title, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            // Crop: draw the box the game is read in, so only its dialogue goes to the reader. While
-            // the box is being drawn it is Cancel: a box drawn by finger has no other way out until it is drawn.
-            top.addView(crop, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(10f) })
-            // Recap: asks which (the scene, last time, the story so far) and tells it under the lines.
-            top.addView(context.pill("Recap", primary = false, sizeSp = 13f) { toggleRecap() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
-            top.addView(context.pill("Note", primary = false, sizeSp = 13f) { beginNote(Noting(newestOnScreen(), null), "Note on " + title.text) }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
-            top.addView(context.pill("LFG", primary = false, sizeSp = 13f) { openApp() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
-            header.addView(top)
-            header.addView(stats, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(5f) })
-            addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-            addView(divider(context))
+        fun show() = refresh()
 
-            empty.setLineSpacing(context.dp(3f).toFloat(), 1f)
-            empty.setPadding(pad, context.dp(18f), pad, context.dp(10f))
-            addView(empty)
-
-            list.orientation = VERTICAL
-            list.setPadding(0, context.dp(4f), 0, context.dp(10f))
-            scroll.isFocusable = false
-            scroll.isVerticalScrollBarEnabled = false
-            scroll.addView(list)
-            addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
-
-            // The entry of a word picked here, or a note being written, under the lines.
-            sheet.orientation = VERTICAL
-            sheet.setBackgroundColor(Ink.BG)
-            sheet.addView(divider(context))
-            sheetBar.orientation = HORIZONTAL
-            sheetBar.gravity = Gravity.CENTER_VERTICAL
-            sheetBar.setBackgroundColor(Ink.SURFACE)
-            sheetBar.setPadding(pad, context.dp(6f), context.dp(12f), context.dp(6f))
-            sheetTitle.letterSpacing = 0.08f
-            sheetBar.addView(sheetTitle, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            sheetBar.addView(context.pill("Close", primary = false, sizeSp = 12.5f) { if (recapOpen) toggleRecap() else controller.clear() })
-            sheet.addView(sheetBar)
-            sheet.addView(divider(context))
-            sheet.addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
-            note.visibility = View.GONE
-            sheet.addView(note, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
-            recap.orientation = VERTICAL
-            val kinds = LinearLayout(context).apply {
-                orientation = HORIZONTAL
-                setPadding(pad, context.dp(10f), pad, context.dp(4f))
-            }
-            for (button in recapKinds.values) kinds.addView(button, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { rightMargin = context.dp(8f) })
-            recap.addView(kinds)
-            recapText.setLineSpacing(context.dp(5f).toFloat(), 1f)
-            recapText.setPadding(pad, context.dp(8f), pad, context.dp(16f))
-            recap.addView(ScrollView(context).apply {
-                isFocusable = false
-                addView(recapText)
-            }, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
-            recap.visibility = View.GONE
-            sheet.addView(recap, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
-            message.setPadding(pad, context.dp(4f), pad, context.dp(6f))
-            sheet.addView(message)
-            sheet.visibility = View.GONE
-            addView(sheet, LayoutParams(LayoutParams.MATCH_PARENT, 0, SHEET_WEIGHT))
-
-            addView(divider(context))
-            val foot = LinearLayout(context).apply {
-                orientation = HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(pad, context.dp(6f), context.dp(12f), context.dp(6f))
-            }
-            val words = android.widget.FrameLayout(context)
-            hints.setPadding(0, 0, 0, 0)
-            words.addView(hints)
-            words.addView(tip)
-            foot.addView(words, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            addView(foot)
-        }
-
-        private fun divider(context: Context) = View(context).apply {
-            setBackgroundColor(Ink.BORDER)
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, 1)
-        }
-
-        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) ownTouch()
-            return super.dispatchTouchEvent(event)
-        }
-
-        fun show() {
-            showSession(session?.first, session?.second)
-            if (state.controllerMode) hints.text = hintsText(context)
-            hints.visibility = if (state.controllerMode) View.VISIBLE else View.INVISIBLE
-            tip.visibility = if (state.controllerMode) View.GONE else View.VISIBLE
-            tip.text = "Tap a word, here or on the game."
-            refresh()
-        }
-
-        fun showSession(game: String?, text: String?) {
-            title.text = game ?: state.lines.firstOrNull()?.gameName ?: "LearnFromGames"
-            stats.text = text ?: "No reading yet this session"
-        }
-
-        fun showNote(heading: String) {
-            note.visibility = View.VISIBLE
-            note.open(heading)
-        }
-
-        fun hideNote() {
-            note.visibility = View.GONE
-        }
+        /** The game being read, as the top of the screen names it. */
+        private fun title(): String = session?.first ?: state.lines.firstOrNull()?.gameName ?: "LearnFromGames"
 
         /** The line on screen now that a note on the game is hung on: the newest kept one, for its picture. */
         private fun newestOnScreen(): LookupLine? = state.lines.lastOrNull { it.geometry != null && it.lineId != null }
 
-        /** The lines, the notes among them, and the entry or note under them, as they are now. */
+        /** The lines, the notes among them, and the sheet under them, as they are now. */
         fun refresh() {
             val next = rowsNow()
             val current = next.lastOrNull { it.onScreen >= 0 }?.key
             val arrived = current != newest
+            val tab = sheetTab
+            val aboutLine = tab == SheetTab.TRANSLATE || tab == SheetTab.EXPLAIN
             if (arrived) {
                 newest = current
-                touched = null
+                // A line being read in the sheet stays its subject when the game moves on.
+                if (!aboutLine) touched = null
             }
-            val wasAtEnd = scroll.scrollY + scroll.height >= list.height - context.dp(48f)
             val same = next.size == rows.size && next.indices.all { next[it].key == rows[it].key }
             rows = next
-            val active = touched?.takeIf { key -> rows.any { it.key == key } }
+            active = touched?.takeIf { key -> rows.any { it.key == key } }
                 ?: rows.lastOrNull { it.saved != null && it.onScreen >= 0 }?.key ?: rows.lastOrNull { it.saved != null }?.key
-            if (same) {
-                rows.forEachIndexed { i, row -> (views[i] as? LineRow)?.bind(row, row.key == active) }
-            } else {
-                list.removeAllViews()
-                views = rows.map { row -> if (row.note != null) noteRow(row.note) else LineRow(context).also { it.bind(row, row.key == active) } }
-                views.forEach(list::addView)
-            }
-            empty.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
-            scroll.visibility = if (rows.isEmpty()) View.GONE else View.VISIBLE
-            if (rows.isEmpty()) {
-                empty.text = "Waiting for text in the game. Each line it shows is listed here as it is read." +
-                    if (prefs().aiReady) "" else "\n\nAdd an OpenRouter key in Settings › Translation and each line gets Translate and Explain."
-            }
+            val lit = active.takeIf { aboutLine }
 
-            val writing = note.visibility == View.VISIBLE
-            val telling = recapOpen && !writing
-            val showEntry = entryOnPanel() && !writing && !telling
-            val sheetWas = sheet.visibility == View.VISIBLE
-            sheet.visibility = if (showEntry || writing || telling) View.VISIBLE else View.GONE
-            recap.visibility = if (telling) View.VISIBLE else View.GONE
-            if (telling) showRecap()
-            sheetBar.visibility = if (writing) View.GONE else View.VISIBLE
-            entry.visibility = if (showEntry) View.VISIBLE else View.GONE
-            if (showEntry) {
-                showEntries(entry, state)
-                sheetTitle.text = if (state.selectedLine?.geometry == null) "FROM AN EARLIER LINE" else "ON SCREEN NOW"
+            val showEntry = entryOnPanel() && tab == null
+            val sheet = when {
+                tab == SheetTab.RECAP -> recapSheet()
+                tab != null -> answerSheet(tab)
+                showEntry -> PanelSheet.Entry(
+                    if (state.selectedLine?.geometry == null) "FROM AN EARLIER LINE" else "ON SCREEN NOW",
+                    state.message.takeIf { state.entry != null },
+                )
+                else -> null
             }
-            message.text = state.message.takeIf { showEntry && state.entry != null } ?: ""
-            message.visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
+            // New text: the list goes to its end, unless a line is being read in the sheet.
+            // The sheet just opened: the line picked, or the one it is about, stays in sight just above it.
+            val opened = sheet != null && !sheetWas
+            sheetWas = sheet != null
+            if (!same && arrived && lit == null) endSignal++
+            val keep = lit ?: rows.firstOrNull(::picked)?.key
+            if (opened || (lit != null && !same)) keepSignal++
 
-            // New text, or the list was at its end: stay at the end. The sheet just opened: keep the line picked in sight.
-            val opened = sheet.visibility == View.VISIBLE && !sheetWas
-            if (!same && (arrived || wasAtEnd)) scroll.post { scroll.scrollTo(0, list.height) }
-            else if (opened) scroll.post { marked()?.let { v -> if (v.bottom > scroll.scrollY + scroll.height) scroll.scrollTo(0, v.bottom - scroll.height) } }
+            ui = PanelUi(
+                title = title(),
+                stats = session?.second ?: "No reading yet this session",
+                rows = rows.map { row -> rowUi(row, row.key == lit) },
+                empty = "Waiting for text in the game. Each line it shows is listed here as it is read." +
+                    if (prefs().aiReady) "" else "\n\nAdd an OpenRouter key in Settings › Translation and each line gets Translate and Explain.",
+                sheet = sheet,
+                lookup = state,
+                picking = picking,
+                foot = if (state.controllerMode) hintsText(view.context) else "Tap a word to look it up, or beside a line to translate or explain it.",
+                lit = lit,
+                endSignal = endSignal,
+                keep = keep,
+                keepSignal = keepSignal,
+            )
+        }
+
+        private fun rowUi(row: Row, lit: Boolean): LineRowUi {
+            val id = row.saved?.id
+            val mark = picked(row)
+            return LineRowUi(
+                key = row.key,
+                time = row.time,
+                text = row.text,
+                // The translation is short: it stays under its line. What went wrong, or that it is being asked, is in the sheet.
+                translation = id?.let { translations[it]?.text } ?: row.saved?.translation,
+                card = row.saved?.noteIds?.isNotEmpty() == true,
+                explained = id != null && explanations[id]?.text != null,
+                current = row.onScreen >= 0,
+                lit = lit,
+                markStart = if (mark) state.spanStart else 0,
+                markEnd = if (mark) state.markEnd else 0,
+                note = row.note,
+            )
+        }
+
+        /** The kept line the sheet's Translate and Explain are about; null when it is text on screen that is not kept. */
+        private fun sheetLine(): GameLine? = rows.firstOrNull { it.key == active }?.saved
+
+        /** The line's translation or explanation: the answer, that it is being written, or what went wrong. */
+        private fun answerSheet(tab: SheetTab): PanelSheet.Answer {
+            val ai = prefs().aiReady
+            val line = sheetLine()
+            val translating = tab == SheetTab.TRANSLATE
+            val asked = line?.let { (if (translating) translations else explanations)[it.id] }
+            val known = asked?.text ?: if (translating) line?.translation?.ifBlank { null } else null
+            val name = tab.label
+            val text = when {
+                line == null -> "This text is not kept as a line, so it cannot be asked about."
+                asked?.error != null -> asked.error
+                asked?.busy == true && known == null -> if (translating) "Translating…" else "Explaining…"
+                known != null -> known
+                !ai -> "$name is written by the model in Settings › Translation, with your OpenRouter key. Press LFG to add one."
+                else -> ""
+            }
+            return PanelSheet.Answer(
+                tab, text,
+                tone = if (asked?.error != null) Tone.ACCENT else if (known == null) Tone.DIM else Tone.TEXT,
+                again = if (!ai || line == null) null else if (asked?.busy == true) "$name…" else if (known != null) "$name again" else name,
+                againEnabled = asked?.busy != true,
+                key = "$tab:${line?.id}",
+            )
         }
 
         /** The recap's three choices, and the one chosen: its text, that it is being written, or what went wrong. */
-        private fun showRecap() {
-            sheetTitle.text = "RECAP"
+        private fun recapSheet(): PanelSheet.Recap {
             val ai = prefs().aiReady
             val busy = recaps.values.any { it.busy }
-            for ((what, button) in recapKinds) {
-                val chosen = what == recapOf
-                button.visibility = if (ai) View.VISIBLE else View.GONE
-                button.text = if (recaps[what]?.busy == true) what.label + "…" else what.label
-                button.isEnabled = !busy
-                button.alpha = if (busy && !chosen) 0.5f else 1f
-                button.setTextColor(if (chosen) Ink.ON_FILL else Ink.TEXT)
-                button.background = rounded(if (chosen) Ink.FILL else Ink.SURFACE, if (chosen) Ink.FILL else Ink.BORDER_STRONG, context.dp(19f).toFloat())
-            }
             val answer = recapOf?.let { recaps[it] }
-            recapText.text = when {
+            val text = when {
                 !ai -> "A recap is written by the model in Settings › Translation, with your OpenRouter key. Press LFG to add one."
                 recapOf == null -> "Which recap? The scene you are in now, the last session, or the whole story so far. " +
                     "Each is told from only what you have read, so nothing ahead is spoiled."
@@ -1349,24 +1257,26 @@ class OverlayHost(
                 answer?.text != null -> answer.text
                 else -> "Writing…"
             }
-            recapText.setTextColor(if (answer?.error != null && ai) Ink.ACCENT else if (answer?.text == null || !ai) Ink.DIM else Ink.TEXT)
+            return PanelSheet.Recap(
+                choices = if (!ai) emptyList() else RecapOf.entries.map { what ->
+                    RecapChoice(what, if (recaps[what]?.busy == true) what.label + "…" else what.label, chosen = what == recapOf, enabled = !busy)
+                },
+                text = text,
+                tone = if (answer?.error != null && ai) Tone.ACCENT else if (answer?.text == null || !ai) Tone.DIM else Tone.TEXT,
+            )
         }
 
-        /** Asks for a recap of the game being read, which its newest kept line names. */
-        private fun askRecap(what: RecapOf) {
-            val name = title.text.toString()
-            askRecapOf(history.firstOrNull { it.gameName == name }, what)
+        /** A tab chosen: the sheet opens on it, and a line not yet translated or explained is asked about at once. */
+        private fun pickTab(tab: SheetTab) {
+            openSheet(tab)
+            val line = sheetLine() ?: return
+            if (!prefs().aiReady) return
+            when (tab) {
+                SheetTab.TRANSLATE -> if (translations[line.id]?.let { it.text ?: it.error } == null && line.translation.isNullOrBlank()) ask(line.id, Ask.TRANSLATE)
+                SheetTab.EXPLAIN -> if (explanations[line.id]?.let { it.text ?: it.error } == null) ask(line.id, Ask.EXPLAIN)
+                SheetTab.RECAP -> Unit
+            }
         }
-
-        /** Brings a line's answer into sight: the whole row if it fits, else from its top. */
-        fun reveal(lineId: String) = scroll.post {
-            val row = rows.indexOfFirst { it.key == lineId }.takeIf { it >= 0 }?.let(views::getOrNull) ?: return@post
-            if (row.bottom <= scroll.scrollY + scroll.height && row.top >= scroll.scrollY) return@post
-            scroll.smoothScrollTo(0, if (row.height <= scroll.height) row.bottom - scroll.height else row.top)
-        }
-
-        /** The row the picked word is in, if it is listed. */
-        private fun marked(): View? = rows.indexOfFirst(::picked).takeIf { it >= 0 }?.let(views::getOrNull)
 
         private fun picked(row: Row): Boolean {
             val line = state.selectedLine?.takeIf { state.selected } ?: return false
@@ -1395,124 +1305,57 @@ class OverlayHost(
             return out
         }
 
-        private fun tapped(row: Row, index: Int) {
-            touched = row.key
-            pickedOnPanel = true
-            if (row.onScreen >= 0) controller.select(row.onScreen, index)
-            else row.saved?.let { controller.lookIn(LookupLine(it.lineText, it.id, picture(it), it.gameName, gameId = it.gameId), index) }
-            refresh()
-        }
-
-        /** A line of the list: its time, its text to tap, what was asked about it, and its buttons while it is the one touched. */
-        private inner class LineRow(context: Context) : LinearLayout(context) {
-            private var row: Row? = null
-            private val bar = View(context)
-            private val time = context.label(12f, Ink.DIM)
-            private val line = LineText(context, 17f) { index -> row?.let { tapped(it, index) } }
-            private val translation = context.label(14.5f, Ink.DIM)
-            private val explanation = context.label(14.5f, Ink.TEXT)
-            private val tags = context.label(11f, Ink.ACCENT, bold = true)
-            private val actions = LinearLayout(context)
-            private val translate = context.pill("Translate", primary = false, sizeSp = 12.5f) { row?.saved?.let { ask(it.id, Ask.TRANSLATE) } }
-            private val explain = context.pill("Explain", primary = false, sizeSp = 12.5f) { row?.saved?.let { ask(it.id, Ask.EXPLAIN) } }
-            private val write = context.pill("Note", primary = false, sizeSp = 12.5f) {
-                row?.saved?.let { beginNote(Noting(lookupLine(it), null), "Note on this line") }
+        private inner class Actions : PanelActions {
+            override fun tapCharacter(key: String, index: Int) {
+                val row = rows.firstOrNull { it.key == key } ?: return
+                touched = row.key
+                pickedOnPanel = true
+                if (row.onScreen >= 0) controller.select(row.onScreen, index)
+                else row.saved?.let { controller.lookIn(lookupLine(it), index) }
+                refresh()
             }
 
-            init {
-                orientation = HORIZONTAL
-                addView(bar, LayoutParams(context.dp(3f), LayoutParams.MATCH_PARENT))
-                time.setPadding(context.dp(11f), context.dp(4f), 0, 0)
-                addView(time, LayoutParams(context.dp(58f), LayoutParams.WRAP_CONTENT))
-                val column = LinearLayout(context).apply { orientation = VERTICAL }
-                column.addView(line)
-                translation.setLineSpacing(context.dp(3f).toFloat(), 1f)
-                column.addView(translation, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(5f) })
-                explanation.setLineSpacing(context.dp(4f).toFloat(), 1f)
-                explanation.background = rounded(Ink.SURFACE, Ink.BORDER, context.dp(10f).toFloat())
-                explanation.setPadding(context.dp(12f), context.dp(10f), context.dp(12f), context.dp(10f))
-                column.addView(explanation, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8f) })
-                tags.letterSpacing = 0.08f
-                column.addView(tags, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6f) })
-                actions.orientation = HORIZONTAL
-                for (button in listOf(translate, explain, write)) {
-                    actions.addView(button, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { rightMargin = context.dp(8f) })
-                }
-                column.addView(actions, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
-                addView(column, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-                setPadding(0, context.dp(9f), pad, context.dp(9f))
-                // A touch beside the text makes this the line with the buttons.
-                setOnClickListener {
-                    val key = row?.key ?: return@setOnClickListener
-                    touched = key
-                    refresh()
-                }
-                // Nothing here takes focus: a window that is never touched would show the first row as focused.
-                isFocusable = false
+            /** A touch beside a line: the sheet about it, on the tab it is on, else on what it lacks. */
+            override fun touchRow(key: String) {
+                val row = rows.firstOrNull { it.key == key } ?: return
+                touched = row.key
+                val translated = row.saved?.let { translations[it.id]?.text ?: it.translation?.ifBlank { null } } != null
+                pickTab(sheetTab.takeIf { it == SheetTab.TRANSLATE || it == SheetTab.EXPLAIN } ?: if (translated) SheetTab.EXPLAIN else SheetTab.TRANSLATE)
             }
 
-            fun bind(next: Row, active: Boolean) {
-                row = next
-                val current = next.onScreen >= 0
-                bar.setBackgroundColor(if (current) Ink.ACCENT else TRANSPARENT)
-                setBackgroundColor(if (current) Ink.SURFACE else TRANSPARENT)
-                time.text = clock.format(java.util.Date(next.time))
-                line.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, if (current) 21f else 17f)
-                val mark = picked(next)
-                line.show(next.text, if (mark) state.spanStart else 0, if (mark) state.markEnd else 0)
+            override fun tab(tab: SheetTab) = pickTab(tab)
 
-                val id = next.saved?.id
-                val translated = id?.let { translations[it] }
-                val explained = id?.let { explanations[it] }
-                val meaning = translated?.text ?: next.saved?.translation
-                translation.text = translated?.error ?: if (translated?.busy == true && meaning == null) "Translating…" else meaning.orEmpty()
-                translation.setTextColor(if (translated?.error != null) Ink.ACCENT else Ink.DIM)
-                translation.visibility = if (translation.text.isEmpty()) View.GONE else View.VISIBLE
-                // An explanation is long: it shows on the line with the buttons, and is a tag on the others.
-                explanation.text = if (!active) "" else explained?.error ?: explained?.text ?: if (explained?.busy == true) "Explaining…" else ""
-                explanation.setTextColor(if (explained?.error != null) Ink.ACCENT else if (explained?.text == null) Ink.DIM else Ink.TEXT)
-                explanation.visibility = if (explanation.text.isEmpty()) View.GONE else View.VISIBLE
-                tags.text = listOfNotNull(
-                    "CARD".takeIf { next.saved?.noteIds?.isNotEmpty() == true },
-                    "EXPLAINED".takeIf { !active && explained?.text != null },
-                ).joinToString("   ")
-                tags.visibility = if (tags.text.isEmpty()) View.GONE else View.VISIBLE
-
-                actions.visibility = if (active && id != null) View.VISIBLE else View.GONE
-                val ai = prefs().aiReady
-                for ((button, answer, name) in listOf(Triple(translate, translated, "Translate"), Triple(explain, explained, "Explain"))) {
-                    button.visibility = if (ai) View.VISIBLE else View.GONE
-                    val had = if (button === translate) meaning != null else answer?.text != null
-                    button.text = if (answer?.busy == true) "$name…" else if (had) "$name again" else name
-                    button.isEnabled = answer?.busy != true
-                    button.alpha = if (answer?.busy == true) 0.5f else 1f
-                }
+            /** Note in the sheet: on the line it is about, or on the game from the recap. */
+            override fun noteTab() {
+                val line = sheetLine()
+                if (sheetTab == SheetTab.RECAP || line == null) beginNote(Noting(newestOnScreen(), null), "Note on " + title())
+                else beginNote(Noting(lookupLine(line), null), "Note on this line")
             }
-        }
 
-        /** A note written while playing, among the lines at its time. */
-        private fun noteRow(note: Note): View = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            setPadding(context.dp(3f), context.dp(6f), pad, context.dp(6f))
-            addView(context.label(12f, Ink.DIM).apply {
-                text = clock.format(java.util.Date(note.createdAt))
-                setPadding(context.dp(11f), context.dp(11f), 0, 0)
-            }, LayoutParams(context.dp(58f), LayoutParams.WRAP_CONTENT))
-            val card = LinearLayout(context).apply {
-                orientation = VERTICAL
-                background = rounded(Ink.SURFACE, Ink.BORDER, context.dp(10f).toFloat())
-                setPadding(context.dp(12f), context.dp(8f), context.dp(12f), context.dp(10f))
+            override fun closeSheet() = if (sheetTab != null) openSheet(null) else controller.clear()
+
+            override fun again() {
+                val line = sheetLine() ?: return
+                ask(line.id, if (sheetTab == SheetTab.EXPLAIN) Ask.EXPLAIN else Ask.TRANSLATE)
             }
-            card.addView(context.label(11f, Ink.ACCENT, bold = true).apply {
-                text = if (note.term.isEmpty()) "NOTE" else "NOTE  ·  ${note.term}"
-                letterSpacing = 0.08f
-            })
-            card.addView(context.label(15f, Ink.TEXT).apply {
-                text = note.text
-                setLineSpacing(context.dp(3f).toFloat(), 1f)
-                setPadding(0, context.dp(4f), 0, 0)
-            })
-            addView(card, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+
+            /** Asks for a recap of the game being read, which its newest kept line names. */
+            override fun recap(what: RecapOf) {
+                val name = title()
+                askRecapOf(history.firstOrNull { it.gameName == name }, what)
+            }
+
+            override fun crop() {
+                if (picking) closePicker() else if (gameInFront) onPickBox(false, false)
+            }
+
+            override fun recapButton() = openSheet(if (sheetTab == SheetTab.RECAP) null else SheetTab.RECAP)
+
+            override fun note() = beginNote(Noting(newestOnScreen(), null), "Note on " + title())
+
+            override fun openApp() = this@OverlayHost.openApp()
+
+            override fun entryLink(link: EntryLink, index: Int) = onEntryLink(link, index)
         }
     }
 
@@ -1547,19 +1390,18 @@ class OverlayHost(
 
     private fun answers(what: Ask) = if (what == Ask.TRANSLATE) translations else explanations
 
-    /** The recap is up under the lines; which one was chosen last, of which game, and what each came back as. */
-    private var recapOpen = false
+    /** The tab the answer sheet under the lines is open on, or null while it is down. */
+    private var sheetTab: SheetTab? = null
+
+    /** Which recap was chosen last, of which game, and what each came back as. */
     private var recapOf: RecapOf? = null
     private var recapGame: String? = null
     private val recaps = HashMap<RecapOf, Answer>()
 
-    /** Recap pressed: the recap is under the lines, in place of a word's entry or a note; pressed again, it is gone. */
-    private fun toggleRecap() {
-        recapOpen = !recapOpen
-        if (recapOpen) {
-            endNote()
-            if (state.selected) controller.clear()
-        }
+    /** The answer sheet opens on [tab], in place of a word's entry, or goes down for null. */
+    private fun openSheet(tab: SheetTab?) {
+        sheetTab = tab
+        if (tab != null && state.selected) controller.clear()
         render()
     }
 
@@ -1603,7 +1445,6 @@ class OverlayHost(
         val asked = answers(what)
         asked[lineId] = Answer(text ?: asked[lineId]?.text, error = error)
         panelView?.refresh()
-        panelView?.reveal(lineId)
         if (cardFor == WheelAction.TRANSLATE || cardFor == WheelAction.EXPLAIN) render()
     }
 
@@ -2086,9 +1927,6 @@ class OverlayHost(
 
         /** How many of the game's lines the wheel's Lines card lists. */
         const val LINES_SHOWN = 15
-
-        /** The entry or note under the lines takes this much to the lines' 1. */
-        const val SHEET_WEIGHT = 1.35f
 
         /** How long after LFG is pressed the lines' screen stays away, for the app's page to come to the front. */
         const val APP_OPENING_MS = 2000L

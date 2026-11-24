@@ -60,60 +60,6 @@ internal fun Context.label(sizeSp: Float, color: Int, bold: Boolean = false) = T
 }
 
 /**
- * One line of text with every character tappable and the looked-up word
- * marked: a row of the bottom screen's list of lines. It is the bottom-screen
- * twin of a tap strip over the game.
- */
-@SuppressLint("ViewConstructor")
-internal class LineText(context: Context, sizeSp: Float, private val onTap: (index: Int) -> Unit) : TextView(context) {
-    private var line = ""
-    private var from = 0
-    private var to = 0
-
-    init {
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
-        setTextColor(Ink.TEXT)
-        setLineSpacing(context.dp(if (sizeSp >= 20f) 7f else 4f).toFloat(), 1f)
-        isFocusable = false
-    }
-
-    /** [line] with the characters `[markStart, markEnd)` marked; an empty range marks nothing. */
-    fun show(line: String, markStart: Int = 0, markEnd: Int = 0) {
-        val start = markStart.coerceIn(0, line.length)
-        val end = markEnd.coerceIn(start, line.length)
-        if (line == this.line && start == from && end == to && text.isNotEmpty() == line.isNotEmpty()) return
-        this.line = line
-        from = start
-        to = end
-        if (end <= start) {
-            text = line
-            return
-        }
-        text = SpannableString(line).apply {
-            setSpan(BackgroundColorSpan(Ink.WASH), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            setSpan(ForegroundColorSpan(Ink.ACCENT), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) return true
-        if (event.actionMasked != MotionEvent.ACTION_UP) return super.onTouchEvent(event)
-        val layout = layout ?: return true
-        val x = event.x - totalPaddingLeft + scrollX
-        val y = event.y - totalPaddingTop + scrollY
-        if (y < 0 || y > layout.height) return true
-        val row = layout.getLineForVertical(y.toInt())
-        if (x < layout.getLineLeft(row) || x > layout.getLineRight(row)) return true
-        // The caret nearest the touch sits on one side of the character under it.
-        var index = layout.getOffsetForHorizontal(row, x)
-        if (index > layout.getLineStart(row) && layout.getPrimaryHorizontal(index) > x) index--
-        if (index in line.indices) onTap(if (Character.isLowSurrogate(line[index]) && index > 0) index - 1 else index)
-        return true
-    }
-}
-
-/**
  * The soft shadow round the popup over a game, in a window of its own under
  * the popup's: the popup is see-through, so the shadow is drawn only outside
  * its card ([inset] in from every edge), never beneath it.

@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -13,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,13 +28,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -41,11 +49,13 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.data.GameLine
+import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.lookup.CardButton
 import io.github.beesan.lfg.lookup.LookupState
@@ -135,14 +145,12 @@ fun LinesScreen(
                     }
                 }
                 item(key = line.id) {
-                    Row(Modifier.fillMaxWidth().focusRing(RoundedCornerShape(6.dp), inside = true).clickable { onOpenLine(line) }.padding(horizontal = 8.dp, vertical = 10.dp)) {
-                        Text(time.format(Date(line.createdAt)), color = Lfg.Dim, fontSize = 13.sp, modifier = Modifier.width(52.dp).padding(top = 4.dp))
-                        Column {
-                            Text(line.lineText, color = Lfg.Text, fontSize = 17.sp, lineHeight = 26.sp)
-                            line.translation?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp, lineHeight = 20.sp) }
-                            if (line.noteIds.isNotEmpty()) Text("Card", color = Lfg.Dim, fontSize = 12.sp)
-                        }
-                    }
+                    LineItem(
+                        LineRowUi(line.id, line.createdAt, line.lineText, line.translation, card = line.noteIds.isNotEmpty()),
+                        time,
+                        onClick = { onOpenLine(line) },
+                        modifier = Modifier.fillMaxWidth().focusRing(RoundedCornerShape(6.dp), inside = true),
+                    )
                     HorizontalDivider(color = Lfg.Border)
                 }
             }
@@ -166,7 +174,6 @@ fun TappableSentence(
     onStep: ((Boolean) -> Unit)? = null,
     onFocused: () -> Unit = {},
 ) {
-    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val step = { forward: Boolean ->
         if (onStep != null) {
             onStep(forward)
@@ -181,16 +188,10 @@ fun TappableSentence(
             if (next in sentence.indices) onTapCharacter(next)
         }
     }
-    val text = buildAnnotatedString {
-        append(sentence)
-        if (spanEnd > spanStart && spanEnd <= sentence.length) addStyle(SpanStyle(background = Lfg.Wash, color = Lfg.Accent), spanStart, spanEnd)
-    }
-    Text(
-        text = text,
-        color = Lfg.Text,
+    TapText(
+        sentence, spanStart, spanEnd, onTapCharacter,
         fontSize = 24.sp,
         lineHeight = 44.sp,
-        onTextLayout = { layout = it },
         modifier = modifier.focusRing(RoundedCornerShape(6.dp), inside = true)
             .onFocusChanged { if (it.isFocused) onFocused() }
             .onKeyEvent { event ->
@@ -203,8 +204,34 @@ fun TappableSentence(
                 true
             }
             .focusable()
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .pointerInput(sentence) {
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+/** A sentence whose every character can be tapped, with the characters `[spanStart, spanEnd)` marked. */
+@Composable
+fun TapText(
+    sentence: String,
+    spanStart: Int,
+    spanEnd: Int,
+    onTapCharacter: (Int) -> Unit,
+    fontSize: TextUnit,
+    lineHeight: TextUnit,
+    modifier: Modifier = Modifier,
+) {
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val onTap by rememberUpdatedState(onTapCharacter)
+    val text = buildAnnotatedString {
+        append(sentence)
+        if (spanEnd > spanStart && spanEnd <= sentence.length) addStyle(SpanStyle(background = Lfg.Wash, color = Lfg.Accent), spanStart, spanEnd)
+    }
+    Text(
+        text = text,
+        color = Lfg.Text,
+        fontSize = fontSize,
+        lineHeight = lineHeight,
+        onTextLayout = { layout = it },
+        modifier = modifier.pointerInput(sentence) {
             detectTapGestures { position ->
                 val result = layout ?: return@detectTapGestures
                 // getOffsetForPosition rounds to the nearest caret; the character under the finger is the one whose box holds it.
@@ -212,10 +239,92 @@ fun TappableSentence(
                 val index = listOf(caret, caret - 1).firstOrNull {
                     it in sentence.indices && result.getBoundingBox(it).contains(position)
                 } ?: return@detectTapGestures
-                onTapCharacter(if (Character.isLowSurrogate(sentence[index]) && index > 0) index - 1 else index)
+                onTap(if (Character.isLowSurrogate(sentence[index]) && index > 0) index - 1 else index)
             }
         },
     )
+}
+
+/**
+ * A row of a list of lines, as the app's Lines page and the lines' screen over
+ * a game both show it: a line of the game, or a note written among them.
+ */
+@Immutable
+data class LineRowUi(
+    val key: String,
+    val time: Long,
+    val text: String,
+    val translation: String? = null,
+    /** A card was made from it. */
+    val card: Boolean = false,
+    val explained: Boolean = false,
+    /** On the game's screen now: larger, and marked at its edge. */
+    val current: Boolean = false,
+    /** What the sheet under the lines speaks of: outlined. */
+    val lit: Boolean = false,
+    /** The looked-up word, `[markStart, markEnd)`; an empty range marks nothing. */
+    val markStart: Int = 0,
+    val markEnd: Int = 0,
+    val note: Note? = null,
+)
+
+/**
+ * A line of a list: its time, its text, its translation under it and what was
+ * made of it. With [onTapCharacter] every character can be tapped, and a touch
+ * beside the text is [onClick]; without, the whole row is [onClick].
+ */
+@Composable
+fun LineItem(
+    row: LineRowUi,
+    clock: SimpleDateFormat,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onTapCharacter: ((Int) -> Unit)? = null,
+) {
+    val shape = RoundedCornerShape(4.dp)
+    val ground = when {
+        row.lit -> Modifier.background(Lfg.Surface, shape).border(1.5.dp, Lfg.Accent, shape)
+        row.current -> Modifier.background(Lfg.Surface)
+        else -> Modifier
+    }
+    Row(modifier.then(ground).clickable(onClick = onClick).height(IntrinsicSize.Min).padding(end = 16.dp)) {
+        Box(Modifier.width(3.dp).fillMaxHeight().background(if (row.current || row.lit) Lfg.Accent else Color.Transparent))
+        Text(
+            clock.format(Date(row.time)), color = if (row.lit) Lfg.Accent else Lfg.Dim, fontSize = 12.sp,
+            modifier = Modifier.width(58.dp).padding(start = 11.dp, top = 13.dp),
+        )
+        Column(Modifier.weight(1f).padding(vertical = 9.dp)) {
+            val size = if (row.current) 21.sp else 17.sp
+            val height = if (row.current) 32.sp else 26.sp
+            if (onTapCharacter != null) TapText(row.text, row.markStart, row.markEnd, onTapCharacter, size, height)
+            else Text(row.text, color = Lfg.Text, fontSize = size, lineHeight = height)
+            row.translation?.takeIf { it.isNotBlank() }?.let {
+                Text(it, color = Lfg.Dim, fontSize = 14.5.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 5.dp))
+            }
+            val tags = listOfNotNull("CARD".takeIf { row.card }, "EXPLAINED".takeIf { row.explained }).joinToString("   ")
+            if (tags.isNotEmpty()) {
+                Text(tags, color = Lfg.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+        }
+    }
+}
+
+/** A note written while playing, among the lines at its time. */
+@Composable
+fun NoteItem(note: Note, clock: SimpleDateFormat, modifier: Modifier = Modifier) {
+    Row(modifier.padding(start = 3.dp, top = 6.dp, end = 16.dp, bottom = 6.dp)) {
+        Text(clock.format(Date(note.createdAt)), color = Lfg.Dim, fontSize = 12.sp, modifier = Modifier.width(58.dp).padding(start = 11.dp, top = 11.dp))
+        Column(
+            Modifier.weight(1f).background(Lfg.Surface, RoundedCornerShape(10.dp)).border(1.dp, Lfg.Border, RoundedCornerShape(10.dp))
+                .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 10.dp),
+        ) {
+            Text(
+                if (note.term.isEmpty()) "NOTE" else "NOTE  ·  ${note.term}",
+                color = Lfg.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp,
+            )
+            Text(note.text, color = Lfg.Text, fontSize = 15.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
 }
 
 /** What the pad does on a stored line's page. */
