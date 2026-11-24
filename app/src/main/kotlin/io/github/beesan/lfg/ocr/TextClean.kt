@@ -44,6 +44,18 @@ import java.text.Normalizer
  *    the ▶ by a choice) goes, so a blinking cursor is not part of the line;
  *  - a piece made only of the kanji a tiled picture is read as (田, 回, 口,
  *    目, 川: grass, bricks, windows, water) goes.
+ *
+ * And two for a handheld's pixel font, where kana and kanji are drawn alike:
+ *
+ *  - script twins: a kanji drawn like a katakana (口 工 二 力 夕 八 卜 才)
+ *    becomes it when katakana is on one side and no kanji on the other
+ *    (口ケット -> ロケット, 力一ド -> カード, but 人口 and 口を stay); a
+ *    hiragana へ べ ぺ り before katakana becomes katakana, and a katakana
+ *    ヘ ベ ペ リ before hiragana becomes hiragana (ヘや -> へや);
+ *  - spaces from boxes: on a line whose characters sit on one grid, as a
+ *    pixel font's do, ScreenAI's spaces between two characters give way to
+ *    what the boxes show: one full-width space where at least one cell is
+ *    empty, none where there is not.
  */
 object TextClean {
     /** One piece of the line: usually one character and its box; a space between words has none. */
@@ -53,7 +65,9 @@ object TextClean {
     fun line(line: TextLine): TextLine? {
         val pieces = pieces(line)
         cursors(pieces)
+        spaces(pieces, line.vertical)
         forms(pieces)
+        twins(pieces)
         longVowels(pieces)
         brackets(pieces)
         val text = pieces.joinToString("") { it.text }
@@ -105,6 +119,50 @@ object TextClean {
             if (pieces[last].text !in CURSORS) break
             val before = (0 until last).last(::word)
             pieces.subList(before + 1, pieces.size).clear()
+        }
+    }
+
+    /**
+     * How far a character's centre may sit from its cell's, as a share of a cell: a small kana or a 、 does not
+     * fill its cell, so its centre moves. A gap is then 1.65 cells or more, and between 1.35 and 1.65 the line
+     * is not taken to be on a grid.
+     */
+    private const val OFF_GRID = 0.35
+
+    /** ScreenAI's spaces between two characters replaced by what the boxes show, on a line set on one grid. */
+    private fun spaces(pieces: MutableList<Piece>, vertical: Boolean) {
+        if (pieces.any { p -> p.box != null && (p.text.length != 1 || isLatin(cp(p))) }) return
+        fun along(b: Box) = if (vertical) (b.top + b.bottom) / 2.0 else (b.left + b.right) / 2.0
+        fun across(b: Box) = if (vertical) (b.left + b.right) / 2.0 else (b.top + b.bottom) / 2.0
+        fun thickness(b: Box) = if (vertical) b.width else b.height
+        // Two characters one after the other on the same row, with nothing but blanks between them.
+        class Step(val from: Int, val to: Int, val distance: Double)
+        val steps = ArrayList<Step>()
+        var last = -1
+        for (i in pieces.indices) {
+            val p = pieces[i]
+            val box = p.box
+            if (box == null) {
+                if (p.text.isNotBlank()) last = -1
+                continue
+            }
+            val before = pieces.getOrNull(last)?.box
+            if (before != null && kotlin.math.abs(across(box) - across(before)) < thickness(before) / 2.0) {
+                steps += Step(last, i, along(box) - along(before))
+            }
+            last = i
+        }
+        if (steps.size < 2) return
+        val least = steps.minOf { it.distance }
+        if (least <= 0) return
+        val near = steps.map { it.distance }.filter { it <= least * 1.5 }.sorted()
+        val pitch = near[near.size / 2]
+        val cells = steps.map { it.distance / pitch }
+        if (cells.any { it < 1 - OFF_GRID || kotlin.math.abs(it - kotlin.math.round(it)) > OFF_GRID }) return
+        for (k in steps.indices.reversed()) {
+            val step = steps[k]
+            pieces.subList(step.from + 1, step.to).clear()
+            if (kotlin.math.round(cells[k]) >= 2) pieces.add(step.from + 1, Piece("　", null))
         }
     }
 
@@ -199,6 +257,45 @@ object TextClean {
     private fun endsElongation(c: Int) =
         isSmall(c) || c == 'ー'.code || c == '~'.code || c == '!'.code || c == '?'.code || c == '…'.code || c == '‥'.code ||
             c == '」'.code || c == '』'.code
+
+    private val KANJI_TWINS = mapOf('口' to "ロ", '工' to "エ", '二' to "ニ", '力' to "カ", '夕' to "タ", '八' to "ハ", '卜' to "ト", '才' to "オ")
+        .mapKeys { it.key.code }
+    private val KANA_TWINS = mapOf('へ' to 'ヘ', 'べ' to 'ベ', 'ぺ' to 'ペ', 'り' to 'リ').entries
+        .flatMap { (h, k) -> listOf(h.code to k.toString(), k.code to h.toString()) }.toMap()
+
+    /** Katakana a word is spelt with: not the counters ヵ ヶ. */
+    private fun isKataWord(c: Int) = isKata(c) && c != 'ヵ'.code && c != 'ヶ'.code
+
+    /** A kanji drawn like a katakana, or a hiragana like a katakana, made the script its neighbours are in. */
+    private fun twins(pieces: MutableList<Piece>) {
+        for (i in pieces.indices) {
+            val p = pieces[i]
+            if (p.text.length != 1) continue
+            val c = cp(p)
+            KANJI_TWINS[c]?.let { kana ->
+                // The nearest neighbour that is not a twin itself; to the right 一 is passed over too, as it
+                // may be a long vowel read as a kanji (力一ド).
+                fun near(step: Int): Int {
+                    var k = i + step
+                    while (k in pieces.indices) {
+                        val n = cp(pieces[k])
+                        if (n !in KANJI_TWINS && !(step > 0 && n == '一'.code)) return n
+                        k += step
+                    }
+                    return 0
+                }
+                val prev = near(-1)
+                val next = near(1)
+                if ((isKataWord(prev) && !isKanji(next)) || (isKataWord(next) && !isKanji(prev))) p.text = kana
+            }
+            KANA_TWINS[c]?.let { other ->
+                val prev = cp(pieces.getOrNull(i - 1))
+                val next = cp(pieces.getOrNull(i + 1))
+                if (isHira(c) && isKataWord(next) && !isHira(prev)) p.text = other
+                if (isKata(c) && isHira(next) && !isKataWord(prev)) p.text = other
+            }
+        }
+    }
 
     private fun longVowels(pieces: MutableList<Piece>) {
         var prev = 0

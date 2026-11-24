@@ -18,6 +18,7 @@ import io.github.beesan.lfg.core.TreeText
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LineStore
+import io.github.beesan.lfg.ocr.KanaRepair
 import io.github.beesan.lfg.ocr.TextClean
 import io.github.beesan.lfg.ocr.Frame
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +66,8 @@ class ReadingPipeline(
     private val apart: () -> Boolean = { false },
     /** Where each new line's whole screen is also kept, for good, to train a better reader; null when not asked to. */
     private val dialogueDir: () -> File? = { null },
+    /** How many characters of a text its longest dictionary word covers, 0 for none; for [KanaRepair]. */
+    private val matchLength: suspend (String) -> Int = { 0 },
 ) {
     private val _latest = MutableStateFlow<Reading?>(null)
     val latest: StateFlow<Reading?> = _latest
@@ -393,7 +396,10 @@ class ReadingPipeline(
     ) {
         val rows = Perf.measure("read") { engine.read(frame) }
             // The reader's forms made the game's own (TextClean), and what is not the game's text dropped.
-            .mapNotNull(TextClean::line).filter { it.text.isNotBlank() }.map { it.moved(offsetX + (cut?.left ?: 0), offsetY + (cut?.top ?: 0)) }
+            .mapNotNull(TextClean::line).filter { it.text.isNotBlank() }
+            // A kana read as its lookalike put right by the dictionary (KanaRepair).
+            .let { rows -> Perf.measure("repair") { rows.map { KanaRepair.line(it, matchLength) } } }
+            .map { it.moved(offsetX + (cut?.left ?: 0), offsetY + (cut?.top ?: 0)) }
             // Text under another window (a system dialog on a whole-screen picture) is not the game's.
             .filter { line -> covered.none { it.intersects(line.box) } && ours.none { across(line, it) } }
             // The room read around a dialogue box is for reading its edges well, not for what lies in it.
