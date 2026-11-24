@@ -578,8 +578,10 @@ fun RecognitionScreen(
 @Composable
 fun GamesScreen(
     games: List<Game>, ownPackage: String, onUpdate: (Game) -> Unit, onBack: () -> Unit,
-    /** The dialogue box drawn for a game, by its id, and what takes one away. */
-    boxes: Map<String, DialogueBox> = emptyMap(), onWholeScreen: (Game) -> Unit = {},
+    /** A game's box 1 (its dialogue box) and box 2, by its id; its last picture, to show them on; and what draws and takes one away. */
+    boxes: Map<String, DialogueBox> = emptyMap(), secondBoxes: Map<String, DialogueBox> = emptyMap(),
+    picture: suspend (gameId: String) -> String? = { null },
+    onDrawBox: (Game, Int) -> Unit = { _, _ -> }, onRemoveBox: (Game, Int) -> Unit = { _, _ -> },
     names: List<InstalledDictionary> = emptyList(),
     builds: Map<String, io.github.beesan.lfg.names.CharacterNames.Build> = emptyMap(),
     namesActions: NamesRowActions? = null,
@@ -627,18 +629,10 @@ fun GamesScreen(
             } else {
                 Text("In ${apps[game.packageName] ?: game.packageName}, named by ${game.namedBy}", color = Lfg.Dim, fontSize = 13.sp)
             }
-            // An ordinary app is read when asked, a region at a time: only what is read by itself has a dialogue box.
-            if (!game.app) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val box = boxes[game.id]
-                Column(Modifier.weight(1f)) {
-                    Text("Dialogue box", color = Lfg.Text, fontSize = 15.sp)
-                    Text(
-                        if (box == null) "The whole screen is read. To read only the dialogue, press Crop on the lines' screen (or Select in lookup) and draw a box around it."
-                        else "Only the box you drew is read (${box.box.width} × ${box.box.height}). Menus and words in the picture outside it are left alone.",
-                        color = Lfg.Dim, fontSize = 13.sp,
-                    )
-                }
-                if (box != null) LfgButton("Read the whole screen", { onWholeScreen(game) })
+            // An ordinary app is read when asked, a region at a time: only what is read by itself has boxes.
+            if (!game.app) {
+                HorizontalDivider(color = Lfg.Border)
+                GameBoxes(game, boxes[game.id], secondBoxes[game.id], picture, onDrawBox, onRemoveBox)
             }
             // Ordinary apps have no cast to name.
             if (namesActions != null && !game.app) {
@@ -1076,7 +1070,7 @@ internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINES, LINE, NOTES, NOTE_NEW, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE }
+enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINES, LINE, NOTES, NOTE_NEW, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE, BOX_DRAW }
 
 @Composable
 fun StorageScreen(

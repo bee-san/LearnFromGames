@@ -28,6 +28,7 @@ import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.TapGate
 import io.github.beesan.lfg.core.WheelAction
 import io.github.beesan.lfg.core.WheelAim
+import io.github.beesan.lfg.core.box
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.Entry
@@ -74,10 +75,15 @@ class OverlayHost(
     /** A box was drawn on the screen and something chosen for it ([RegionPicker]). */
     private val onPicked: (Picked) -> Unit,
     /**
-     * A box is to be drawn over the game: its dialogue box, from lookup mode, Crop or the wheel, or with [once] a
-     * box read a single time. With [pad] the controller draws it as well as a finger.
+     * A box is to be drawn over the game: its box [slot] (1, the dialogue box, from lookup mode, Crop or the
+     * wheel; 2 from the wheel), or with [once] a box read a single time. With [pad] the controller draws it as
+     * well as a finger.
      */
-    private val onPickBox: (pad: Boolean, once: Boolean) -> Unit,
+    private val onPickBox: (pad: Boolean, once: Boolean, slot: Int) -> Unit,
+    /** The game's box [slot] picked on the wheel: it is read once, now. */
+    private val onReadBox: (slot: Int) -> Unit,
+    /** The game in front's box 1 and box 2 on its screen, each null while it is not drawn. */
+    private val gameBoxes: () -> List<Box?>,
     /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
     private val onAsk: (lineId: String, what: Ask) -> Unit,
     /** A question about the game in front, asked from the wheel; the answer comes back through [onGameAnswer]. */
@@ -171,7 +177,7 @@ class OverlayHost(
         onNote = { startNote(state.entryIndex) },
         onScroll = { dy -> panelView?.entries?.scrollBy(dy); popupView?.entry?.scrollBy(0, dy) },
         // An ordinary app has no dialogue box: its regions are read when asked, from the read button.
-        onBox = { if (gameInFront && !asking) onPickBox(true, false) },
+        onBox = { if (gameInFront && !asking) onPickBox(true, false, 1) },
         chordActive = chordActive,
     )
 
@@ -541,10 +547,11 @@ class OverlayHost(
             wheel.visibility = if (wheelOpen) View.VISIBLE else View.GONE
             if (wheelOpen) {
                 wheel.holes = wheelLine?.geometry?.rows.orEmpty()
+                wheel.boxes = gameBoxes()
                 wheel.hint = wheelHint()
             }
         }
-        renderCard(host)
+        renderCard(other)
     }
 
     /** True for the moment [bringController] has the focus window up to be tapped. */
@@ -1346,7 +1353,7 @@ class OverlayHost(
             }
 
             override fun crop() {
-                if (picking) closePicker() else if (gameInFront) onPickBox(false, false)
+                if (picking) closePicker() else if (gameInFront) onPickBox(false, false, 1)
             }
 
             override fun recapButton() = openSheet(if (sheetTab == SheetTab.RECAP) null else SheetTab.RECAP)
@@ -1467,6 +1474,9 @@ class OverlayHost(
     private var card: Win? = null
     private var cardView: AnswerCard? = null
 
+    /** The screen the card's window is on. */
+    private var cardDisplay = Display.INVALID_DISPLAY
+
     /** In the recap's card, the choice the controller is on. */
     private var recapCursor = 0
 
@@ -1559,8 +1569,11 @@ class OverlayHost(
     private fun wheelHint(): String {
         val swap = prefs().swapConfirm
         val close = if (swap) "A" else "B"
-        return if (wheelHeld) "Point with a stick or the D-pad, then let go    $close Put away"
-        else "Point with a stick or the D-pad    ${if (swap) "B" else "A"} Choose    $close Put away"
+        // A box drawn can be drawn again; one not drawn yet is drawn when it is picked.
+        val slot = focusView()?.wheel?.hover?.let { WheelAction.entries[it].box }
+        val redraw = if (slot != null && gameBoxes().getOrNull(slot - 1) != null) "    X Redraw" else ""
+        return if (wheelHeld) "Point with a stick or the D-pad, then let go$redraw    $close Put away"
+        else "Point with a stick or the D-pad    ${if (swap) "B" else "A"} Choose$redraw    $close Put away"
     }
 
     private fun pickWheel(action: WheelAction) {
@@ -1568,11 +1581,15 @@ class OverlayHost(
         wheelHeld = false
         val line = wheelLine
         when (action) {
-            // The box is drawn with the controller too, which stays LFG's from the wheel to the box.
-            WheelAction.CROP, WheelAction.READ_ONCE -> {
-                pickerPad = true
-                render()
-                onPickBox(true, action == WheelAction.READ_ONCE)
+            // A box drawn is read; one not drawn yet is drawn first.
+            WheelAction.BOX_1, WheelAction.BOX_2 -> {
+                val slot = action.box ?: return
+                if (gameBoxes().getOrNull(slot - 1) != null) {
+                    render()
+                    onReadBox(slot)
+                } else {
+                    drawBox(slot)
+                }
             }
             WheelAction.NOTE -> {
                 val kept = line?.takeIf { it.lineId != null }
@@ -1621,15 +1638,40 @@ class OverlayHost(
         if (cardFor == WheelAction.ASK) render()
     }
 
-    /** The card over the game, sized to what it says and kept off the line it is about. */
-    private fun renderCard(host: Pair<Context, WindowManager>) {
+    /** The game's box [slot] is drawn over the game from the wheel, with the controller too, which stays LFG's until it is drawn. */
+    private fun drawBox(slot: Int) {
+        wheelOpen = false
+        wheelHeld = false
+        pickerPad = true
+        render()
+        onPickBox(true, false, slot)
+    }
+
+    /**
+     * The card opened from the wheel. On a two-screen handheld it fills the
+     * screen the game is not on ([other]), where the lines are, unless the
+     * app's own pages are there or something is typed in it: the keyboard
+     * would be under it. Otherwise it is over the game, sized to what it says
+     * and kept off the line it is about.
+     */
+    private fun renderCard(other: Int) {
         val what = cardFor
         if (what == null || !gameInFront) {
             card?.hide()
             return
         }
+        val apart = other != Display.INVALID_DISPLAY && other !in ownApp && !cardTyping()
+        val displayId = if (apart) other else gameDisplay
+        // A window is on one screen: on another, the card is made again there.
+        if (displayId != cardDisplay) {
+            card?.remove()
+            card = null
+            cardView = null
+            cardDisplay = displayId
+        }
+        val host = manager(displayId) ?: return
         val context = host.first
-        val screen = bounds(gameDisplay) ?: return
+        val screen = bounds(displayId) ?: return
         val view = cardView ?: AnswerCard(
             context,
             onClose = { putAwayWheel() },
@@ -1646,6 +1688,11 @@ class OverlayHost(
         }
         val win = card ?: Win(view, host.second, POPUP_FLAGS).also { card = it }
         if (what != WheelAction.NOTE) view.show(cardContent(what))
+        win.setFocusable(cardTyping())
+        if (apart) {
+            win.place(0, 0, screen.width, screen.height)
+            return
+        }
         val edge = context.dp(10f)
         val landscape = screen.width > screen.height
         // Landscape: a box at the right of the screen, as tall as what it says, from the top, where a
@@ -1675,7 +1722,6 @@ class OverlayHost(
                 else -> edge
             }.coerceAtLeast(edge)
         }
-        win.setFocusable(cardTyping())
         win.place(x, y, width, height)
     }
 
@@ -1792,7 +1838,10 @@ class OverlayHost(
     }
 
     private fun aim(slice: Int?) {
-        if (slice != null) focusView()?.wheel?.hover = slice
+        val wheel = focusView()?.wheel ?: return
+        if (slice == null || slice == wheel.hover) return
+        wheel.hover = slice
+        wheel.hint = wheelHint()
     }
 
     private fun wheelOpenKey(event: KeyEvent): Boolean {
@@ -1818,6 +1867,11 @@ class OverlayHost(
             }
             // On release, as lookup's own close is: the button's up must not be left for what shows next.
             close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) putAwayWheel()
+            // Pointed at a box that is drawn: it is drawn again.
+            KeyEvent.KEYCODE_BUTTON_X -> if (down && event.repeatCount == 0) {
+                val slot = focusView()?.wheel?.hover?.let { WheelAction.entries[it].box }
+                if (slot != null && gameBoxes().getOrNull(slot - 1) != null) drawBox(slot)
+            }
             else -> return KeyEvent.isGamepadButton(event.keyCode)
         }
         return true

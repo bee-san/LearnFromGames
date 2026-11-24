@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
@@ -21,6 +22,7 @@ import androidx.core.graphics.PathParser
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.WheelAction
 import io.github.beesan.lfg.core.WheelAim
+import io.github.beesan.lfg.core.box
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -52,6 +54,18 @@ internal class WheelView(
         set(value) {
             field = value
             layOut()
+            invalidate()
+        }
+
+    /**
+     * The game's box 1 and box 2, in this view's pixels, each null while it is
+     * not drawn. Each is outlined; pointed at, it is left undimmed in place of
+     * the line.
+     */
+    var boxes: List<Box?> = emptyList()
+        set(value) {
+            if (field == value) return
+            field = value
             invalidate()
         }
 
@@ -90,6 +104,13 @@ internal class WheelView(
     private val title = text(18f, bold = true)
     private val about = text(12f)
     private val hintText = text(13.5f)
+    private val number = text(11f, bold = true).apply { textAlign = Paint.Align.CENTER }
+    private val tagText = text(12f, bold = true).apply { textAlign = Paint.Align.CENTER }
+    private val dashed = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = context.dp(1.5f).toFloat()
+        pathEffect = DashPathEffect(floatArrayOf(context.dp(6f).toFloat(), context.dp(5f).toFloat()), 0f)
+    }
 
     private var cx = 0f
     private var cy = 0f
@@ -168,15 +189,18 @@ internal class WheelView(
     private fun hintBottom(): Float = context.dp(18f) + hintText.textSize + 2 * context.dp(11f)
 
     override fun onDraw(canvas: Canvas) {
-        // The game dimmed round the line, which is outlined.
+        // The game dimmed round the line, which is outlined; or, with a box pointed at, round that box.
         val pad = context.dp(5f).toFloat()
         val corner = context.dp(6f).toFloat()
+        val pointed = hover?.let { actions[it].box }
+        val lit = pointed?.let { boxes.getOrNull(it - 1) }?.let { listOf(it) } ?: holes
         canvas.save()
-        for (b in holes) canvas.clipOutRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad)
+        for (b in lit) canvas.clipOutRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dim)
         canvas.restore()
         hole.color = Ink.ACCENT
-        for (b in holes) canvas.drawRoundRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad, corner, corner, hole)
+        for (b in lit) canvas.drawRoundRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad, corner, corner, hole)
+        boxes.forEachIndexed { i, b -> if (b != null) drawBoxTag(canvas, b, i + 1, on = pointed == i + 1, pad, corner) }
 
         drawHint(canvas)
 
@@ -205,10 +229,34 @@ internal class WheelView(
             icon.color = ink
             icon.strokeWidth = 1.9f * scale
             canvas.drawPath(iconPath, icon)
+            // A box's icon is a frame with its number in it.
+            actions[i].box?.let { slot ->
+                number.color = ink
+                canvas.drawText(slot.toString(), x, y - context.dp(9f) - (number.ascent() + number.descent()) / 2, number)
+            }
             label.color = ink
             canvas.drawText(actions[i].label, x, y + context.dp(9f) + label.textSize * 0.8f, label)
         }
         drawMiddle(canvas)
+    }
+
+    /** A box's number at its top left corner, and a dashed outline round a box not pointed at. */
+    private fun drawBoxTag(canvas: Canvas, b: Box, slot: Int, on: Boolean, pad: Float, corner: Float) {
+        if (!on) {
+            dashed.color = Ink.DIM
+            canvas.drawRoundRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad, corner, corner, dashed)
+        }
+        val size = context.dp(22f).toFloat()
+        val left = b.left - pad
+        // Above the box, or inside it when it is at the top of the screen.
+        val top = if (b.top - pad - size - context.dp(3f) >= 0) b.top - pad - size - context.dp(3f) else b.top - pad + context.dp(3f)
+        fill.color = if (on) Ink.FILL else Ink.SURFACE
+        edge.color = if (on) Ink.FILL else Ink.BORDER_STRONG
+        val r = context.dp(4f).toFloat()
+        canvas.drawRoundRect(left, top, left + size, top + size, r, r, fill)
+        canvas.drawRoundRect(left, top, left + size, top + size, r, r, edge)
+        tagText.color = if (on) Ink.ON_FILL else Ink.DIM
+        canvas.drawText(slot.toString(), left + size / 2, top + size / 2 - (tagText.ascent() + tagText.descent()) / 2, tagText)
     }
 
     /** What the buttons do, in a pill at the top. */
@@ -240,12 +288,13 @@ internal class WheelView(
         canvas.drawCircle(cx, cy, radius, edge)
 
         val chosen = hover?.let { actions[it] }
+        val undrawn = chosen?.box?.let { boxes.getOrNull(it - 1) == null } == true
         val textWidth = (radius * 1.55f).toInt().coerceAtLeast(1)
         title.color = if (chosen == null) Ink.DIM else Ink.TEXT
         about.color = Ink.DIM
         val name = StaticLayout.Builder.obtain(chosen?.label ?: "Point", 0, (chosen?.label ?: "Point").length, title, textWidth)
             .setAlignment(Layout.Alignment.ALIGN_CENTER).setMaxLines(1).setEllipsize(TextUtils.TruncateAt.END).build()
-        val line = chosen?.about ?: "with a stick"
+        val line = if (undrawn) "Not drawn yet" else chosen?.about ?: "with a stick"
         val more = StaticLayout.Builder.obtain(line, 0, line.length, about, textWidth)
             .setAlignment(Layout.Alignment.ALIGN_CENTER).setMaxLines(3).setEllipsize(TextUtils.TruncateAt.END).build()
 
@@ -297,6 +346,9 @@ internal class WheelView(
         /** Where [OverlayHost]'s own tap lands, which the wheel leaves alone. */
         private const val CORNER_PX = 16
 
+        /** A box's corners, with room for its number in the middle. */
+        private const val BOX_ICON = "M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"
+
         /** The slices' icons, as the design draws them: strokes on a 24-unit square. */
         private val ICONS = mapOf(
             WheelAction.TRANSLATE to "M4 5h8M8 3v2M5.5 5c.7 2.9 2.7 5 5.5 6M10.5 5c-.7 2.9-2.7 5-5.5 6M13 21l4-10 4 10M14.4 18h5.2",
@@ -304,8 +356,8 @@ internal class WheelView(
             WheelAction.EXPLAIN to "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.1V16h5v-.1c0-.8.4-1.6 1.1-2.1A6 6 0 0 0 12 3z",
             WheelAction.RECAP to "M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 4v5h5M12 7.5V12l3 2",
             WheelAction.NOTE to "M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4",
-            WheelAction.READ_ONCE to "M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M8 12h8",
-            WheelAction.CROP to "M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14",
+            WheelAction.BOX_1 to BOX_ICON,
+            WheelAction.BOX_2 to BOX_ICON,
             WheelAction.LINES to "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01",
         )
     }

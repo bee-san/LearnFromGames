@@ -13,10 +13,18 @@ enum class WheelAction(val label: String, val about: String) {
     EXPLAIN("Explain", "The line, part by part"),
     RECAP("Recap", "The scene, or the story so far"),
     NOTE("Note", "A note on this line"),
-    READ_ONCE("Read once", "One box, read one time"),
-    CROP("Crop", "Read this game in a box"),
+    BOX_1("Box 1", "Read the main box"),
+    BOX_2("Box 2", "Read the second box"),
     LINES("Lines", "What was read lately"),
 }
+
+/** The box a slice reads: 1 or 2, or null for a slice that is not a box. */
+val WheelAction.box: Int?
+    get() = when (this) {
+        WheelAction.BOX_1 -> 1
+        WheelAction.BOX_2 -> 2
+        else -> null
+    }
 
 /** Which slice of the wheel a stick, the D-pad or a finger points at. */
 object WheelAim {

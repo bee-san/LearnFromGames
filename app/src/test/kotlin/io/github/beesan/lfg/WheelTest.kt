@@ -4,6 +4,7 @@ package io.github.beesan.lfg
 import io.github.beesan.lfg.core.ShortcutHold
 import io.github.beesan.lfg.core.WheelAction
 import io.github.beesan.lfg.core.WheelAim
+import io.github.beesan.lfg.core.box
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -18,14 +19,21 @@ class WheelTest {
         assertEquals(WheelAction.TRANSLATE, at(0f, -1f))
         assertEquals(WheelAction.EXPLAIN, at(1f, 0f))
         assertEquals(WheelAction.NOTE, at(0f, 1f))
-        assertEquals(WheelAction.CROP, at(-1f, 0f))
+        assertEquals(WheelAction.BOX_2, at(-1f, 0f))
+    }
+
+    @Test
+    fun `only the two box slices read a box, each its own`() {
+        assertEquals(1, WheelAction.BOX_1.box)
+        assertEquals(2, WheelAction.BOX_2.box)
+        assertEquals(listOf(WheelAction.BOX_1, WheelAction.BOX_2), WheelAction.entries.filter { it.box != null })
     }
 
     @Test
     fun `the slants are the rest, clockwise`() {
         assertEquals(WheelAction.ASK, at(0.7f, -0.7f))
         assertEquals(WheelAction.RECAP, at(0.7f, 0.7f))
-        assertEquals(WheelAction.READ_ONCE, at(-0.7f, 0.7f))
+        assertEquals(WheelAction.BOX_1, at(-0.7f, 0.7f))
         assertEquals(WheelAction.LINES, at(-0.7f, -0.7f))
     }
 

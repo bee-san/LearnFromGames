@@ -98,6 +98,8 @@ class MainActivity : ComponentActivity() {
             val nameBuilds by model.nameBuilds.collectAsStateWithLifecycle()
             val vnSearch by model.vnSearch.collectAsStateWithLifecycle()
             val dialogueBoxes by model.dialogueBoxes.collectAsStateWithLifecycle()
+            val secondBoxes by model.secondBoxes.collectAsStateWithLifecycle()
+            val boxDraw by model.boxDraw.collectAsStateWithLifecycle()
             val recording by SoundCapture.running.collectAsStateWithLifecycle()
             val update by Updates.available.collectAsStateWithLifecycle()
             LaunchedEffect(Unit) { Updates.check(applicationContext) }
@@ -157,7 +159,7 @@ class MainActivity : ComponentActivity() {
                     Page.LINES, Page.NOTES, Page.RECAP, Page.ASK, Page.STATS, Page.SETTINGS -> Page.HOME
                     Page.NOTE_NEW -> Page.NOTES
                     Page.SOURCES -> Page.DICTIONARIES
-                    Page.VN_SEARCH -> Page.GAMES
+                    Page.VN_SEARCH, Page.BOX_DRAW -> Page.GAMES
                     Page.GOALS, Page.GAME_STATS -> Page.STATS
                     Page.HOME -> Page.HOME
                     else -> Page.SETTINGS
@@ -431,7 +433,12 @@ class MainActivity : ComponentActivity() {
                         }
                         page == Page.GAMES -> GamesScreen(
                             games, packageName, { model.updateGame(it) }, ::back,
-                            boxes = dialogueBoxes, onWholeScreen = model::readWholeScreen,
+                            boxes = dialogueBoxes, secondBoxes = secondBoxes, picture = model::lastPicture,
+                            onDrawBox = { game, slot ->
+                                model.startBoxDraw(game, slot)
+                                page = Page.BOX_DRAW
+                            },
+                            onRemoveBox = model::removeBox,
                             names = (dictionary as? DictState.Ready)?.dictionaries.orEmpty().filter { it.vndb != null },
                             builds = nameBuilds,
                             namesActions = NamesRowActions(
@@ -447,6 +454,18 @@ class MainActivity : ComponentActivity() {
                                 onRemove = { model.removeNames(it) },
                             ),
                         )
+                        page == Page.BOX_DRAW -> boxDraw?.let { draw ->
+                            BoxDrawScreen(
+                                draw.game, draw.slot, draw.path,
+                                current = (if (draw.slot == 2) secondBoxes else dialogueBoxes)[draw.game.id],
+                                other = (if (draw.slot == 2) dialogueBoxes else secondBoxes)[draw.game.id],
+                                onSave = { box ->
+                                    model.saveBox(draw.game, draw.slot, box)
+                                    back()
+                                },
+                                onBack = ::back,
+                            )
+                        }
                         page == Page.VN_SEARCH -> {
                             val game = games.firstOrNull { it.id == vnSearch.gameId }
                             VnSearchScreen(

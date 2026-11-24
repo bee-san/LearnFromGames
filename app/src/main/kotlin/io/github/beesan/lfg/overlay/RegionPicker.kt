@@ -23,8 +23,12 @@ import io.github.beesan.lfg.core.BoxDrawing
 import io.github.beesan.lfg.core.KeyRepeat
 import kotlin.math.abs
 
-/** The game a box is drawn for: its row, its name, and the dialogue box it is read in now, if it has one. */
-class PickFor(val gameId: String, val title: String, val saved: Box?)
+/**
+ * The game a box is drawn for: its row, its name, which of its boxes ([slot]:
+ * 1, the dialogue box it is read in, or 2, read when picked on the wheel), and
+ * that box as it is now, if it has one.
+ */
+class PickFor(val gameId: String, val title: String, val saved: Box?, val slot: Int = 1)
 
 /** What was chosen for a box drawn on the screen. Boxes are in the display's pixels. */
 sealed interface Picked {
@@ -34,10 +38,10 @@ sealed interface Picked {
     /** Read it on every change until told to stop: an ordinary app's subtitles, a stream. */
     data class Keep(val box: Box) : Picked
 
-    /** It is this game's dialogue box: the game is read there only from now on. */
+    /** It is this game's box [PickFor.slot]: for box 1, the game is read there only from now on. */
     data class ForGame(val game: PickFor, val box: Box) : Picked
 
-    /** This game is read on its whole screen again. */
+    /** This game's box [PickFor.slot] is taken away: for box 1, the game is read on its whole screen again. */
     data class WholeScreen(val game: PickFor) : Picked
 
     data object Cancelled : Picked
@@ -143,6 +147,8 @@ internal class RegionPicker(
         val size = drawing.box?.let { "${it.width} × ${it.height}" }.orEmpty()
         return when (drawing.stage) {
             BoxDrawing.Stage.AIMING -> when {
+                game?.slot == 2 && pad -> "Drag a box around the text for box 2, or move to one of its corners and press $confirmName. $backName leaves."
+                game?.slot == 2 -> "Drag a box around the text for box 2"
                 once && pad -> "Drag a box around the text to read once, or move to one of its corners and press $confirmName. $backName leaves."
                 once -> "Drag a box around the text to read once"
                 game == null -> "Drag a box around the text to read"
@@ -151,7 +157,8 @@ internal class RegionPicker(
             }
             BoxDrawing.Stage.STRETCHING -> if (pad) "$size · Move to the opposite corner and press $confirmName. $backName takes the corner back." else size
             BoxDrawing.Stage.DONE -> when {
-                game != null && !drawing.changed -> "${game.title} is read only in this box." + if (pad) " $backName moves its corner." else " Drag a new one to change it."
+                game != null && !drawing.changed -> (if (game.slot == 2) "Box 2 of ${game.title}." else "${game.title} is read only in this box.") +
+                    if (pad) " $backName moves its corner." else " Drag a new one to change it."
                 pad -> "$size · $confirmName chooses. $backName moves the corner."
                 else -> size
             }
@@ -161,6 +168,8 @@ internal class RegionPicker(
     private fun optionsNow(): List<Option> = when {
         once -> listOf(Option("Read once") { Picked.Once(it) }, Option("Cancel") { Picked.Cancelled })
         game == null -> listOf(Option("Read once") { Picked.Once(it) }, Option("Keep reading") { Picked.Keep(it) }, Option("Cancel") { Picked.Cancelled })
+        game.slot == 2 && drawing.changed -> listOf(Option("Save as box 2") { Picked.ForGame(game, it) }, Option("Read once") { Picked.Once(it) }, Option("Cancel") { Picked.Cancelled })
+        game.slot == 2 -> listOf(Option("Keep this box") { Picked.Cancelled }, Option("Remove box 2") { Picked.WholeScreen(game) })
         drawing.changed -> listOf(Option("Read only this box") { Picked.ForGame(game, it) }, Option("Read once") { Picked.Once(it) }, Option("Cancel") { Picked.Cancelled })
         else -> listOf(Option("Keep this box") { Picked.Cancelled }, Option("Read the whole screen") { Picked.WholeScreen(game) })
     }
