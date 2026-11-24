@@ -109,6 +109,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
             var page by rememberSaveable { mutableStateOf(Page.HOME) }
+            // Where a line was opened from, Home or Lines, so back returns there.
+            var lineFrom by rememberSaveable { mutableStateOf(Page.HOME) }
             // The game whose own stats page is open, and the period it opened on.
             var statsGame by rememberSaveable { mutableStateOf("") }
             var statsGamePeriod by rememberSaveable { mutableStateOf(StatsPeriod.DAYS_30) }
@@ -147,7 +149,8 @@ class MainActivity : ComponentActivity() {
                 // Stats keeps its period and chart across the goals page, and opens on its defaults again after Home.
                 if (page == Page.STATS) saved.removeState(Page.STATS)
                 page = when (page) {
-                    Page.LINE, Page.NOTES, Page.RECAP, Page.ASK, Page.STATS, Page.SETTINGS -> Page.HOME
+                    Page.LINE -> lineFrom
+                    Page.LINES, Page.NOTES, Page.RECAP, Page.ASK, Page.STATS, Page.SETTINGS -> Page.HOME
                     Page.NOTE_NEW -> Page.NOTES
                     Page.SOURCES -> Page.DICTIONARIES
                     Page.VN_SEARCH -> Page.GAMES
@@ -198,7 +201,36 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
-                        page == Page.HOME -> LinesScreen(
+                        page == Page.HOME -> HomeScreen(
+                            lines = lines,
+                            stats = stats,
+                            prefs = prefs,
+                            reading = setup.serviceOn,
+                            shortcut = shortcutLabel(prefs),
+                            loaded = linesLoaded,
+                            problem = ("Sentence audio is not listening to game sound yet" to "Start").takeIf { prefs.sentenceAudio && !recording },
+                            onProblem = { microphone.launch(android.Manifest.permission.RECORD_AUDIO) },
+                            onTurnOn = ::openAccessibilitySettings,
+                            onOpenLine = {
+                                model.openLine(it)
+                                lineFrom = Page.HOME
+                                page = Page.LINE
+                            },
+                            onLines = { page = Page.LINES },
+                            onStats = { page = Page.STATS },
+                            onGoals = { page = Page.GOALS },
+                            onNotes = { page = Page.NOTES },
+                            onRecap = {
+                                model.openRecap()
+                                page = Page.RECAP
+                            },
+                            onAsk = {
+                                model.openAsk()
+                                page = Page.ASK
+                            },
+                            onSettings = { page = Page.SETTINGS },
+                        )
+                        page == Page.LINES -> LinesScreen(
                             lines = lines,
                             shortcut = shortcutLabel(prefs),
                             loaded = linesLoaded,
@@ -207,6 +239,7 @@ class MainActivity : ComponentActivity() {
                             onProblem = { microphone.launch(android.Manifest.permission.RECORD_AUDIO) },
                             onOpenLine = {
                                 model.openLine(it)
+                                lineFrom = Page.LINES
                                 page = Page.LINE
                             },
                             onStats = { page = Page.STATS },
