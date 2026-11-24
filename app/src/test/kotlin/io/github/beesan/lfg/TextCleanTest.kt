@@ -122,6 +122,58 @@ class TextCleanTest {
     }
 
     @Test
+    fun aKanjiDrawnLikeAKatakanaAmongKatakana() {
+        assertEquals("ロケット", clean("口ケット"))
+        assertEquals("カード", clean("力一ド"))
+        assertEquals("エニグマ", clean("工二グマ"))
+        assertEquals("ハンバーガー", clean("八ンバーガー"))
+        assertEquals("アジトへ", clean("アジトへ"))
+        // A kanji beside a kanji, or with no katakana beside it, is one.
+        for (line in listOf("人口", "口を", "工場", "二人", "八月", "力を", "一二三", "夕方")) assertEquals(line, clean(line))
+    }
+
+    @Test
+    fun aKanaTakesTheScriptOfTheWordItStarts() {
+        assertEquals("へや", clean("ヘや"))
+        assertEquals("りんご", clean("リんご"))
+        assertEquals("ヘルメット", clean("へルメット"))
+        assertEquals("ドリル", clean("ドりル"))
+        assertEquals("メモリ", clean("メモリ"))
+    }
+
+    /** A line of 40 px cells as a pixel font sets it: [layout] marks each cell, `.` an empty one; [read] is ScreenAI's text, its spaces unboxed. */
+    private fun grid(read: String, layout: String): TextLine {
+        val cells = layout.indices.filter { layout[it] != '.' }
+        var n = 0
+        val chars = read.indices.filter { !read[it].isWhitespace() }.map { i ->
+            val x = cells[n++] * 40
+            CharBox(i, i + 1, Box(x + 4, 0, x + 36, 40))
+        }
+        return TextLine(read, Box(0, 0, layout.length * 40, 40), chars)
+    }
+
+    @Test
+    fun spacesOnAPixelFontComeFromTheCells() {
+        val layout = "xxxxxxx.xxxx"
+        val want = "ロケットだんの　アジトに"
+        assertEquals(want, TextClean.line(grid("ロケットだんの　アジトに", layout))!!.text)
+        assertEquals(want, TextClean.line(grid("ロケットだんの アジトに", layout))!!.text)
+        assertEquals(want, TextClean.line(grid("ロケットだんのアジトに", layout))!!.text)
+        // A space where no cell is empty goes.
+        assertEquals("でんしゃにのって", TextClean.line(grid("でんしゃに のって", "xxxxxxxx"))!!.text)
+        // Two empty cells are still one space.
+        assertEquals("はい　いいえ", TextClean.line(grid("はい いいえ", "xx..xxx"))!!.text)
+    }
+
+    @Test
+    fun spacesStayOffAGrid() {
+        // Letters and a space a cell and a half wide: not a pixel font's grid.
+        val chars = listOf(CharBox(0, 1, Box(0, 0, 40, 40)), CharBox(1, 2, Box(40, 0, 80, 40)), CharBox(3, 4, Box(140, 0, 180, 40)), CharBox(4, 5, Box(180, 0, 220, 40)))
+        assertEquals("ああ いい", TextClean.line(TextLine("ああ いい", Box(0, 0, 220, 40), chars))!!.text)
+        assertEquals("OK だよ", TextClean.line(grid("OK だよ", "xx.xx"))!!.text)
+    }
+
+    @Test
     fun aLineWithoutCharacterBoxesIsCleanedToo() {
         assertEquals("コーヒー…", TextClean.line(TextLine("コ一ヒ一...", Box(0, 0, 100, 40), emptyList()))!!.text)
     }
