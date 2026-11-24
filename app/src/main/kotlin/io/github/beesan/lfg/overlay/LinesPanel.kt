@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -126,7 +127,8 @@ interface PanelActions {
  * read, oldest first, the one on screen last and largest, drawn with the same
  * rows as the app's Lines page. Every character can be tapped. A touch beside
  * a line opens the sheet under the lines on it, whose tabs are its translation
- * and explanation, the game's recap, and a note; the lines never move for it.
+ * and explanation, the game's recap, and a note; the lines never move for it,
+ * and the recap, about the whole game, takes their place until it is closed.
  * Notes written while playing sit among the lines, at their time. A word
  * picked here has its entry in the sheet.
  */
@@ -154,7 +156,9 @@ fun LinesPanel(
         }
         HorizontalDivider(color = Lfg.Border)
 
-        Box(Modifier.fillMaxWidth().weight(1f)) {
+        // The recap has the whole screen below the game's; the lines stay composed, at no height, so they keep their place.
+        val fullSheet = ui.sheet is PanelSheet.Recap
+        Box(Modifier.fillMaxWidth().then(if (fullSheet) Modifier.height(0.dp) else Modifier.weight(1f))) {
             if (ui.rows.isEmpty()) {
                 Text(ui.empty, color = Lfg.Dim, fontSize = 15.sp, lineHeight = 22.sp, modifier = Modifier.padding(start = 16.dp, top = 18.dp, end = 16.dp))
             } else {
@@ -163,7 +167,7 @@ fun LinesPanel(
         }
 
         ui.sheet?.let { sheet ->
-            Column(Modifier.fillMaxWidth().weight(SHEET_WEIGHT)) {
+            Column(Modifier.fillMaxWidth().weight(if (fullSheet) 1f else SHEET_WEIGHT)) {
                 HorizontalDivider(color = Lfg.Border)
                 Row(
                     Modifier.fillMaxWidth().background(Lfg.Surface).padding(start = 16.dp, top = 6.dp, end = 12.dp, bottom = 6.dp),
