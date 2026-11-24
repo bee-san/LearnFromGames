@@ -379,6 +379,17 @@ class LineSorterTest {
     }
 
     @Test
+    fun aQuoteCaughtAfterItsFirstSentenceGrowsIntoTheWholeOfIt() {
+        val game = Game()
+        val first = game.read("「そうだったのか。")
+        assertEquals(first, game.read("「そうだったのか。それなら仕方ないな」"))
+        assertEquals(listOf("「そうだったのか。それなら仕方ないな」"), game.lines)
+        // Once the quote is closed, what follows is a line of its own.
+        game.read("「そうだったのか。それなら仕方ないな」俺はそう答えた。")
+        assertEquals(listOf("「そうだったのか。それなら仕方ないな」", "俺はそう答えた。"), game.lines)
+    }
+
+    @Test
     fun aClosingBracketReadLateIsNoLineOfItsOwn() {
         val game = Game()
         val first = game.read("「そうだったのか。")

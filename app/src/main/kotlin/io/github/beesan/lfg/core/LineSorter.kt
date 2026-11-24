@@ -61,10 +61,10 @@ class Sorted(val parts: List<List<Part>>, val menu: Boolean)
  *   longer one must keep two thirds of its characters. The story's line is
  *   the piece that changed;
  * - grown: it starts with a piece of [BASE] characters or more that was on
- *   screen. If that piece ended a sentence the page has grown by a sentence,
- *   as a box that fills click by click does: the old part keeps its row and
- *   only what was added is new. If it did not, the line was caught half
- *   typed, and its row grows to the whole of it;
+ *   screen. If that piece ended a sentence outside any open 「 『 or （, the
+ *   page has grown by a sentence, as a box that fills click by click does:
+ *   the old part keeps its row and only what was added is new. If it did
+ *   not, the line was caught half typed, and its row grows to the whole of it;
  * - a menu's: [InterfaceText.CROWD] or more pieces arriving together that
  *   are none of the above. None of them is a line, short or long. Text
  *   already known as interface text does not count towards the crowd, so a
@@ -274,7 +274,7 @@ class LineSorter {
         val kept = cuts.dropLast(1).map { (from, to, id) -> Part.Same(text.start(from), text.end(to), id) }
         val (from, _, id) = cuts.last()
         return when {
-            !endsSentence(base) -> kept + Part.Grown(text.start(from), text.raw.length, id)
+            !endsLine(base) -> kept + Part.Grown(text.start(from), text.raw.length, id)
             // A closing bracket alone is no sentence of its own.
             !hasWord(text, end) -> kept + Part.Same(text.start(from), text.raw.length, id)
             else -> kept + Part.Same(text.start(from), text.end(end), id) + rest(text, end, rows, shown.parts.mapTo(HashSet()) { it.id })
@@ -322,7 +322,7 @@ class LineSorter {
                 }
             }
             if (first != null) {
-                if (!endsSentence(first.text)) return parts + Part.Grown(text.start(pos), text.raw.length, first.id)
+                if (!endsLine(first.text)) return parts + Part.Grown(text.start(pos), text.raw.length, first.id)
                 if (!hasWord(text, pos + length)) return parts + Part.Same(text.start(pos), text.raw.length, first.id)
                 parts += Part.Same(text.start(pos), text.end(pos + length), first.id)
                 used += first.id
@@ -395,9 +395,11 @@ class LineSorter {
         return found == text.size
     }
 
-    private fun endsSentence(text: Squeezed): Boolean {
+    /** Whether [text] ends a sentence and is not inside a quote still open, as 「そうか。 is while the rest is typed out. */
+    private fun endsLine(text: Squeezed): Boolean {
         val last = text.points.lastOrNull() ?: return false
-        return last <= 0xFFFF && SENTENCE_ENDS.indexOf(last.toChar()) >= 0
+        if (last > 0xFFFF || SENTENCE_ENDS.indexOf(last.toChar()) < 0) return false
+        return QUOTES.chunked(2).all { pair -> text.points.count { it == pair[0].code } <= text.points.count { it == pair[1].code } }
     }
 
     private fun hasWord(text: Squeezed, from: Int) = (from until text.size).any { Character.isLetterOrDigit(text.points[it]) }
@@ -431,6 +433,9 @@ class LineSorter {
         }
 
         private const val SENTENCE_ENDS = "。！？!?…‥」』）)】］〕〉》”’♪"
+
+        /** Brackets a line is said in, each opening one followed by its closing one. */
+        private const val QUOTES = "「」『』（）"
 
         /** How many characters two texts of this length may differ by and be the same. */
         private fun allowed(length: Int) = if (length < LONG) 0 else if (length < 2 * LONG) 1 else 2
