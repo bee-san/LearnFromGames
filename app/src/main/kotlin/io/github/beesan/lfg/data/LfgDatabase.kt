@@ -29,6 +29,10 @@ interface LineDao {
     @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND interface_text = 0 AND source != 'practice' ORDER BY created_at DESC, rowid DESC LIMIT :limit")
     suspend fun lastLines(gameId: String, limit: Int): List<GameLine>
 
+    /** The newest picture of a game's screen kept with one of its lines: what its boxes are drawn on in Settings. */
+    @Query("SELECT screenshot_path FROM game_lines WHERE game_id = :gameId AND screenshot_path IS NOT NULL ORDER BY created_at DESC LIMIT 1")
+    suspend fun lastPicture(gameId: String): String?
+
     /** The newest line of exactly this text in a game, however long ago it was kept. */
     @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND line_text = :text AND interface_text = 0 ORDER BY created_at DESC LIMIT 1")
     suspend fun lineOf(gameId: String, text: String): GameLine?

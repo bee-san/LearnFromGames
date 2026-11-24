@@ -23,8 +23,12 @@ import io.github.beesan.lfg.core.BoxDrawing
 import io.github.beesan.lfg.core.KeyRepeat
 import kotlin.math.abs
 
-/** The game a box is drawn for: its row, its name, and the dialogue box it is read in now, if it has one. */
-class PickFor(val gameId: String, val title: String, val saved: Box?)
+/**
+ * The game a box is drawn for: its row, its name, which of its boxes ([slot]:
+ * 1, the dialogue box it is read in, or 2 onwards, read when picked on the
+ * wheel), and that box as it is now, if it has one.
+ */
+class PickFor(val gameId: String, val title: String, val saved: Box?, val slot: Int = 1)
 
 /** What was chosen for a box drawn on the screen. Boxes are in the display's pixels. */
 sealed interface Picked {
@@ -34,10 +38,10 @@ sealed interface Picked {
     /** Read it on every change until told to stop: an ordinary app's subtitles, a stream. */
     data class Keep(val box: Box) : Picked
 
-    /** It is this game's dialogue box: the game is read there only from now on. */
+    /** It is this game's box [PickFor.slot]: for box 1, the game is read there only from now on. */
     data class ForGame(val game: PickFor, val box: Box) : Picked
 
-    /** This game is read on its whole screen again. */
+    /** This game's box [PickFor.slot] is taken away: for box 1, the game is read on its whole screen again. */
     data class WholeScreen(val game: PickFor) : Picked
 
     data object Cancelled : Picked
@@ -134,34 +138,42 @@ internal class RegionPicker(
 
     private fun refresh() {
         val done = drawing.stage == BoxDrawing.Stage.DONE
+        // As in Rubi: the second corner is the end. A box to read once is read, and a game's box is kept, at once.
+        if (done && drawing.changed && (once || game != null)) {
+            take(if (once) Option("") { Picked.Once(it) } else Option("") { Picked.ForGame(game!!, it) })
+            return
+        }
         hint.text = hintNow()
         if (done) showChoices() else choices.visibility = GONE
         invalidate()
     }
 
+    /** What the box is for, at the start of the hint. */
+    private fun what(): String = when {
+        once -> "Read once"
+        game == null -> "Read"
+        game.slot == 1 -> "Dialogue box of ${game.title}"
+        else -> "Box ${game.slot} of ${game.title}"
+    }
+
     private fun hintNow(): String {
         val size = drawing.box?.let { "${it.width} × ${it.height}" }.orEmpty()
         return when (drawing.stage) {
-            BoxDrawing.Stage.AIMING -> when {
-                once && pad -> "Drag a box around the text to read once, or move to one of its corners and press $confirmName. $backName leaves."
-                once -> "Drag a box around the text to read once"
-                game == null -> "Drag a box around the text to read"
-                !pad -> "Drag a box around the dialogue. ${game.title} is then read only there. Cancel on the lines' screen leaves."
-                else -> "Drag a box around the dialogue, or move to one of its corners and press $confirmName. $backName leaves."
-            }
-            BoxDrawing.Stage.STRETCHING -> if (pad) "$size · Move to the opposite corner and press $confirmName. $backName takes the corner back." else size
+            BoxDrawing.Stage.AIMING ->
+                if (pad) "${what()}: move to a corner and press $confirmName, or tap it. $backName leaves." else "${what()}: tap a corner, or drag across"
+            BoxDrawing.Stage.STRETCHING ->
+                if (pad) "$size · The opposite corner: move and press $confirmName, or tap it. $backName takes the corner back." else "$size · Tap the opposite corner"
             BoxDrawing.Stage.DONE -> when {
-                game != null && !drawing.changed -> "${game.title} is read only in this box." + if (pad) " $backName moves its corner." else " Drag a new one to change it."
+                game != null && !drawing.changed -> "${game.title} is read only in this box." + if (pad) " $backName moves its corner." else " Draw a new one to change it."
                 pad -> "$size · $confirmName chooses. $backName moves the corner."
                 else -> size
             }
         }
     }
 
+    /** What can be done with a finished box: over an ordinary app, how to read it; for a game's own box, keep it or not. */
     private fun optionsNow(): List<Option> = when {
-        once -> listOf(Option("Read once") { Picked.Once(it) }, Option("Cancel") { Picked.Cancelled })
         game == null -> listOf(Option("Read once") { Picked.Once(it) }, Option("Keep reading") { Picked.Keep(it) }, Option("Cancel") { Picked.Cancelled })
-        drawing.changed -> listOf(Option("Read only this box") { Picked.ForGame(game, it) }, Option("Read once") { Picked.Once(it) }, Option("Cancel") { Picked.Cancelled })
         else -> listOf(Option("Keep this box") { Picked.Cancelled }, Option("Read the whole screen") { Picked.WholeScreen(game) })
     }
 

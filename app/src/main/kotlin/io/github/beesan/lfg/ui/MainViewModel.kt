@@ -24,6 +24,7 @@ import io.github.beesan.lfg.anki.AnkiTarget
 import io.github.beesan.lfg.anki.CardContent
 import io.github.beesan.lfg.anki.CardResult
 import io.github.beesan.lfg.capture.LfgAccessibilityService
+import io.github.beesan.lfg.core.DialogueBox
 import io.github.beesan.lfg.core.GameStats
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.data.Game
@@ -788,12 +789,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _diagnostics.value = Diagnostics.report(app)
     }
 
-    /** The dialogue box drawn for each game, by its id. */
+    /** The dialogue box drawn for each game, by its id: box 1. */
     val dialogueBoxes = app.dialogueBoxes.boxes
 
-    /** The game's dialogue box is taken away: the reading notices at its next look. */
-    fun readWholeScreen(game: Game) {
-        app.dialogueBoxes[game.id] = null
+    /** Each game's boxes after the dialogue box, by its id: box 2 onwards. */
+    val extraBoxes = app.extraBoxes.boxes
+
+    /** The game's box [slot] is taken away; for box 1 the reading notices at its next look, and reads the whole screen. */
+    fun removeBox(game: Game, slot: Int) {
+        if (slot == 1) app.dialogueBoxes[game.id] = null else app.extraBoxes.set(game.id, slot, null)
+    }
+
+    /** The game's box [slot] is drawn in Settings, or added past the last: the reading notices at its next look. */
+    fun saveBox(game: Game, slot: Int, box: DialogueBox) {
+        if (slot == 1) app.dialogueBoxes[game.id] = box else app.extraBoxes.set(game.id, slot, box)
+    }
+
+    /** The newest picture kept of a game's screen, if its file is still there. */
+    suspend fun lastPicture(gameId: String): String? = withContext(Dispatchers.IO) {
+        app.database.lines().lastPicture(gameId)?.takeIf { java.io.File(it).isFile }
+    }
+
+    /** A box being drawn in Settings: the game, which of its boxes, and the picture it is drawn on. */
+    data class BoxDraw(val game: Game, val slot: Int, val path: String?)
+
+    private val _boxDraw = MutableStateFlow<BoxDraw?>(null)
+    val boxDraw: StateFlow<BoxDraw?> = _boxDraw
+
+    fun startBoxDraw(game: Game, slot: Int) {
+        // Nothing of the last box drawn shows while this game's picture is found.
+        _boxDraw.value = null
+        viewModelScope.launch { _boxDraw.value = BoxDraw(game, slot, lastPicture(game.id)) }
     }
 
     // ── character names ──────────────────────────────────────────────────

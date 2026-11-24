@@ -58,7 +58,8 @@ data class DialogueBox(val box: Box, val screenWidth: Int, val screenHeight: Int
  * A box being drawn on a screen with the controller or a finger, as Rubi for
  * Vita draws its dialogue region: a cursor is moved to one corner and fixed
  * there, then moved to the opposite corner with the box following it, and
- * fixing that one finishes the box. A finger does the same in one drag.
+ * fixing that one finishes the box. A finger does the same in one drag, or
+ * with a tap on each corner.
  */
 class BoxDrawing(private val width: Int, private val height: Int, private val min: Int = DialogueBox.MIN, start: Box? = null) {
     enum class Stage {
@@ -122,13 +123,22 @@ class BoxDrawing(private val width: Int, private val height: Int, private val mi
         }
         Stage.STRETCHING -> {
             stage = Stage.AIMING
+            tapped = false
             true
         }
         Stage.AIMING -> false
     }
 
-    /** A finger lands: that is the first corner, whatever was drawn before. */
+    /** The first corner was placed by a tap: the next touch places the second. */
+    private var tapped = false
+
+    /** A finger lands: that is the first corner, whatever was drawn before; after a tap, the second. */
     fun touchDown(atX: Int, atY: Int) {
+        if (stage == Stage.STRETCHING && tapped) {
+            touchMove(atX, atY)
+            return
+        }
+        tapped = false
         cornerX = atX.coerceIn(0, width)
         cornerY = atY.coerceIn(0, height)
         x = cornerX
@@ -143,11 +153,24 @@ class BoxDrawing(private val width: Int, private val height: Int, private val mi
         y = atY.coerceIn(0, height)
     }
 
-    /** The finger lifts: the box is finished, or, for a tap or a box too small, there is none. True when finished. */
+    /**
+     * The finger lifts: the box is finished when it is big enough. A first tap
+     * leaves its corner placed, for a second tap or a drag to the opposite one.
+     * True when finished.
+     */
     fun touchUp(): Boolean {
         if (stage != Stage.STRETCHING) return false
-        stage = if (bigEnough()) Stage.DONE else Stage.AIMING
-        return stage == Stage.DONE
+        if (bigEnough()) {
+            stage = Stage.DONE
+            tapped = false
+            return true
+        }
+        if (!tapped) {
+            tapped = true
+            x = cornerX
+            y = cornerY
+        }
+        return false
     }
 
     companion object {

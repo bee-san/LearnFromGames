@@ -35,3 +35,41 @@ class DialogueBoxes(context: Context) {
         const val KEY = "dialogueBox."
     }
 }
+
+/**
+ * A game's other boxes, by the game's id: box 2 onwards, each read only when
+ * it is picked on the wheel, as many as are drawn. Kept beside the dialogue
+ * boxes, in the settings' own file.
+ */
+class ExtraBoxes(context: Context) {
+    private val store = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val _boxes = MutableStateFlow(read())
+    val boxes: StateFlow<Map<String, List<DialogueBox>>> = _boxes
+
+    private fun read(): Map<String, List<DialogueBox>> = buildMap {
+        for ((key, value) in store.all) {
+            if (!key.startsWith(KEY)) continue
+            val list = (value as? String)?.split(';')?.mapNotNull(DialogueBox::decode).orEmpty()
+            if (list.isNotEmpty()) put(key.removePrefix(KEY), list)
+        }
+    }
+
+    operator fun get(gameId: String): List<DialogueBox> = _boxes.value[gameId].orEmpty()
+
+    /** The game's box [slot] (2 onwards) is [box]; past the last, it is added; null takes it away. */
+    fun set(gameId: String, slot: Int, box: DialogueBox?) {
+        val list = get(gameId).toMutableList()
+        val at = slot - 2
+        when {
+            box == null -> if (at in list.indices) list.removeAt(at)
+            at in list.indices -> list[at] = box
+            else -> list += box
+        }
+        store.edit().apply { if (list.isEmpty()) remove(KEY + gameId) else putString(KEY + gameId, list.joinToString(";") { it.encode() }) }.apply()
+        _boxes.value = if (list.isEmpty()) _boxes.value - gameId else _boxes.value + (gameId to list)
+    }
+
+    private companion object {
+        const val KEY = "boxes."
+    }
+}
