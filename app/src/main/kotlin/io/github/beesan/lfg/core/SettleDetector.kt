@@ -21,6 +21,13 @@ package io.github.beesan.lfg.core
  * growing is being typed out and waits to hold still, as before.
  * [atSentenceEnd] turns that off. After PlayTranslate's sentence boundary
  * release; measured by SettleBench.
+ *
+ * Text taken on its first picture may have been caught fading in or sliding
+ * into place. If the next pictures read it a little differently, it is read
+ * once more when it holds still ([confirming]), so the line keeps the clear
+ * reading. Text that ended a sentence but was still waiting, because it had
+ * been seen typing, and is gone before it held still, is [missed]: the picture
+ * before is read for it.
  */
 class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Long = 6_000, private val atSentenceEnd: Boolean = true) {
     private var candidate = ""
@@ -47,6 +54,17 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
     /** Whether text that is not the text last settled is on screen, waiting to hold still. */
     val pending: Boolean get() = candidate.isNotEmpty() && !same(candidate, lastSettled)
 
+    /** Whether the last settled text was taken on its first picture and has not been seen the same again. */
+    private var provisional = false
+
+    /** Whether the text last settled is the text taken on its first picture, read again now that it holds still. */
+    var confirming = false
+        private set
+
+    /** Set by [offer]: the text before this signature ended a sentence and went before it could be read. */
+    var missed = false
+        private set
+
     /** Set by [settleNext]: the next new text settles as soon as it is seen. */
     private var eager = false
 
@@ -57,6 +75,22 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
 
     /** Returns true once per new, settled signature. */
     fun offer(signature: String, nowMs: Long): Boolean {
+        missed = false
+        if (provisional) {
+            if (signature == lastSettled || signature.isEmpty() || !same(signature, lastSettled)) {
+                provisional = false
+            } else {
+                // Read a little differently from the first picture: read again once that holds still.
+                if (signature != candidate) {
+                    candidate = signature
+                    candidateSince = nowMs
+                    return false
+                }
+                if (nowMs - candidateSince < stillMs) return false
+                provisional = false
+                return settle(signature, confirming = true)
+            }
+        }
         if (eager && signature.isNotEmpty() && !same(signature, lastSettled)) {
             changeStartedMs = nowMs
             candidate = signature
@@ -66,6 +100,12 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
         if (!same(signature, candidate)) {
             // A line typing itself out grows from the one before it; anything else is a new line.
             val growing = candidate.isNotEmpty() && signature.startsWith(candidate)
+            // Seen typing, it waited to hold still even though it had ended a sentence; and now it is gone.
+            if (atSentenceEnd && !growing && candidate.isNotEmpty() && !same(candidate, lastSettled) && ended(candidate, lastSettled)) {
+                missed = true
+                lastSettled = candidate
+                showing = candidate
+            }
             if (!growing || candidate == showing) changeStartedMs = nowMs
             candidate = signature
             candidateSince = nowMs
@@ -75,7 +115,7 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
             }
             // Whole on the first picture of it. Text growing from the look before is being typed, and a
             // rest after a full stop in the middle of a page looks just like its end: that waits, as ever.
-            if (atSentenceEnd && !growing && ended(signature, lastSettled)) return settle(signature)
+            if (atSentenceEnd && !growing && ended(signature, lastSettled)) return settle(signature, provisional = true)
             if (restlessSince == 0L) restlessSince = nowMs
             // Still changing after all this time: it is not typing out, it is a screen that never holds still.
             return nowMs - restlessSince >= restlessMs && settle(signature, restless = true)
@@ -88,8 +128,10 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
         return settle(signature)
     }
 
-    private fun settle(signature: String, restless: Boolean = false): Boolean {
+    private fun settle(signature: String, restless: Boolean = false, provisional: Boolean = false, confirming: Boolean = false): Boolean {
         this.restless = restless
+        this.provisional = provisional
+        this.confirming = confirming
         eager = false
         lastSettled = signature
         showing = signature
@@ -105,6 +147,9 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
         restlessSince = 0L
         changeStartedMs = 0L
         eager = false
+        provisional = false
+        confirming = false
+        missed = false
     }
 
     companion object {
@@ -135,17 +180,32 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
 
         /**
          * Whether two signatures are the same text, give or take the first pass's noise: at most one
-         * character in twenty added, lost or changed. Short text allows none, so a one-word change counts.
+         * character in twenty added or lost, a character changed counting as two. Short text allows
+         * none, so a one-word change counts. The characters must be in the same order, so one name
+         * for another of the same letters is a change; and so is any digit, as 10 for 20.
          */
         fun same(a: String, b: String): Boolean {
             if (a == b) return true
             if (a.isEmpty() || b.isEmpty()) return false
             val allowed = minOf(16, maxOf(a.length, b.length) / 20)
             if (allowed == 0 || kotlin.math.abs(a.length - b.length) > allowed) return false
-            val counts = HashMap<Char, Int>()
-            for (c in a) counts[c] = (counts[c] ?: 0) + 1
-            for (c in b) counts[c] = (counts[c] ?: 0) - 1
-            return counts.values.sumOf { kotlin.math.abs(it) } <= allowed
+            if (a.filter(::digit) != b.filter(::digit)) return false
+            return a.length + b.length - 2 * common(a, b) <= allowed
+        }
+
+        private fun digit(c: Char) = c in '0'..'9' || c in '０'..'９'
+
+        /** The length of the longest run of characters both have, in the same order. */
+        private fun common(a: String, b: String): Int {
+            var above = IntArray(b.length + 1)
+            var row = IntArray(b.length + 1)
+            for (i in a.indices) {
+                for (j in b.indices) row[j + 1] = if (a[i] == b[j]) above[j] + 1 else maxOf(above[j + 1], row[j])
+                val swap = above
+                above = row
+                row = swap
+            }
+            return above[b.length]
         }
     }
 }

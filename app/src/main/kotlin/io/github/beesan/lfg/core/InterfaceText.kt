@@ -17,8 +17,10 @@ package io.github.beesan.lfg.core
  *   screen while the text around it changed [STAYS] times, as a HUD label or
  *   a speaker's name plate does;
  * - it is short and is scenery: set in type far smaller than the story's
- *   ([small]), as the words on a book or a sign in the picture are, or one
- *   character alone ([lone]), as an icon read as a character is;
+ *   ([small]), as the words on a book or a sign in the picture are; or out
+ *   of the part of the screen the story's last long lines were in, as a shop's
+ *   name or a choice beside the text box is; or one character alone
+ *   ([lone]), as an icon read as a character is;
  * - it is short and comes back: it has been read on [OCCASIONS] separate
  *   occasions, each starting [OCCASION_GAP_MS] or more after the last began,
  *   as a menu opened now and then is.

@@ -86,10 +86,19 @@ class Vocr private constructor(private var handle: Long) : AutoCloseable {
          * - A box read as one character is followed beside longer text (the
          *   next row's first character, a name plate), or when there is none.
          *
+         * - The box's cursor (▼, ▶) is left out, at the end of a row or as a
+         *   box of its own, so its blinking is no change.
+         * - A box read as only the kanji a tiled picture is read as (田, 回)
+         *   is never followed ([TextClean.tiles]): walking over grass is no change.
+         *
          * Vertical columns, which are never read, keep their places.
          */
         fun text(lines: List<VocrLine>): List<VocrLine> {
-            val sure = lines.filter { it.conf >= FAINT }
+            val sure = lines.filter { it.conf >= FAINT }.mapNotNull { line ->
+                if (line.text.isEmpty()) return@mapNotNull line
+                val text = TextClean.uncursored(line.text)
+                if (text.isEmpty() || TextClean.tiles(text)) null else if (text == line.text) line else line.copy(text = text)
+            }
             val read = sure.filter { it.text.isNotEmpty() }
             val longer = read.filter { it.text.codePointCount(0, it.text.length) > 1 }
             return sure.filter { line ->
