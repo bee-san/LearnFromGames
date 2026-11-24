@@ -125,4 +125,18 @@ class TextCleanTest {
     fun aLineWithoutCharacterBoxesIsCleanedToo() {
         assertEquals("コーヒー…", TextClean.line(TextLine("コ一ヒ一...", Box(0, 0, 100, 40), emptyList()))!!.text)
     }
+
+    @Test
+    fun theBoxsCursorIsNoPartOfTheLine() {
+        assertEquals("それじゃ いってきます", clean("それじゃ いってきます ▼"))
+        assertEquals("はい", clean("▶はい"))
+        assertNull(clean("▼"))
+    }
+
+    @Test
+    fun aTiledPictureReadAsKanjiIsNoLine() {
+        assertNull(clean("田田回"))
+        assertNull(clean("口 目"))
+        assertEquals("田口さん", clean("田口さん"))
+    }
 }

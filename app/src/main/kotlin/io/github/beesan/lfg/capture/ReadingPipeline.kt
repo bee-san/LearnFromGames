@@ -98,6 +98,12 @@ class ReadingPipeline(
 
         /** The story's type size, once a few of its lines have been seen; 0 before. */
         fun storyType(): Int = if (types.size < STORY_LINES) 0 else types.sorted()[types.size / 2]
+
+        /** Where the last few long lines kept were: the story's text box, which a sign in the picture is out of. */
+        val places = ArrayDeque<Box>()
+
+        /** The part of the screen the story is told in, once a few of its lines have been seen; null before. */
+        fun storyArea(): Box? = if (places.size < STORY_LINES) null else places.reduce { a, b -> a.union(b) }
     }
 
     /** By game: going to another app and back does not make the line on screen a new one. */
@@ -109,6 +115,11 @@ class ReadingPipeline(
 
     /** Reused between frames: eight megabytes three times a second is too much to hand the collector. */
     private var buffer: IntArray? = null
+    private var bufferAtMs = 0L
+
+    /** The picture before [buffer]'s, and when it was taken: read when the text on it went before it was read. */
+    private var previous: IntArray? = null
+    private var previousAtMs = 0L
 
     /** The last picture's fingerprint, to tell a screen that has not changed at all. */
     private var lastHash = 0L
@@ -300,6 +311,14 @@ class ReadingPipeline(
         if (still && known != null && !detector.offer(known, nowMs)) return true
         val bitmap = picture() ?: return still
         val size = bitmap.width * bitmap.height
+        val fresh = !(still && known != null)
+        if (fresh) {
+            val spare = previous
+            previous = buffer
+            previousAtMs = bufferAtMs
+            buffer = spare
+            bufferAtMs = nowMs
+        }
         val pixels = buffer?.takeIf { it.size == size } ?: IntArray(size).also { buffer = it }
         val whole = Frame(bitmap.width, bitmap.height, pixels)
         // What is probed and read: the whole picture, or the part the game's dialogue box is in.
@@ -313,25 +332,65 @@ class ReadingPipeline(
             pixelsOf(bitmap, pixels)
             for (box in ours) blank(whole, box.moved(-offsetX, -offsetY))
         }
-        if (!(still && known != null)) {
+        if (fresh) {
             Perf.measure("ring") { FrameRing.offer(whole, nowMs) }
             val signature = Perf.measure("probe") { probe().signature(frame) }
             lastSignature = signature
             if (signature.isEmpty()) {
                 // The text has gone (a scene change, a menu): nothing is on screen to tap.
                 detector.offer(signature, nowMs)
+                readMissed(engine, game, displayId, bitmap.width, bitmap.height, offsetX, offsetY, covered, cut, area, ours)
                 interfaceText.onReading(emptyList())
                 if (_latest.value?.lines?.isNotEmpty() == true) _latest.value = Reading(game, displayId, emptyList(), emptyList(), null, nowMs)
                 // A game going on with no text in it, as at the look before, is as good as a still screen
                 // and is looked at as seldom: an emulator needs the processor more. A line appearing ends that.
                 return known != null && known.isEmpty()
             }
-            if (!detector.offer(signature, nowMs)) return false
+            val settled = detector.offer(signature, nowMs)
+            readMissed(engine, game, displayId, bitmap.width, bitmap.height, offsetX, offsetY, covered, cut, area, ours)
+            if (!settled) return false
         }
         // How long the settled text waited to be read: since it last changed, or since it began for text that never held still.
         if (detector.restless) Perf.add("settle.restless", (nowMs - detector.changeStartedMs) * 1_000_000)
         else Perf.add("settle.still", (nowMs - detector.stillSinceMs) * 1_000_000)
+        val appearedNow = detector.changeStartedMs.takeIf { it in 1..nowMs } ?: nowMs
+        keep(engine, frame, bitmap, game, displayId, nowMs, appearedNow, offsetX, offsetY, covered, cut, area, ours, detector.confirming, publish = true)
+        return still
+    }
 
+    /**
+     * The picture before this one, read for its text: text that ended a sentence went from the
+     * screen before it held still long enough to be read ([SettleDetector.missed]). Its lines are
+     * kept, but are not what is on screen to tap.
+     */
+    private suspend fun readMissed(
+        engine: TextReader, game: Game, displayId: Int, width: Int, height: Int, offsetX: Int, offsetY: Int,
+        covered: List<Box>, cut: Box?, area: Box?, ours: List<Box>,
+    ) {
+        if (!detector.missed) return
+        val pixels = previous?.takeIf { it.size == width * height } ?: return
+        val whole = Frame(width, height, pixels)
+        val frame = if (cut == null) whole else whole.cut(cut.left, cut.top, cut.width, cut.height, null)
+        val picture = try {
+            Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+        } catch (_: Throwable) {
+            return
+        }
+        try {
+            keep(engine, frame, picture, game, displayId, previousAtMs, previousAtMs, offsetX, offsetY, covered, cut, area, ours, recheck = false, publish = false)
+        } finally {
+            picture.recycle()
+        }
+    }
+
+    /**
+     * Reads [frame], the part of [bitmap] looked at, and keeps what is new. [publish]: these are the
+     * lines on screen now, to tap.
+     */
+    private suspend fun keep(
+        engine: TextReader, frame: Frame, bitmap: Bitmap, game: Game, displayId: Int, nowMs: Long, appearedNow: Long,
+        offsetX: Int, offsetY: Int, covered: List<Box>, cut: Box?, area: Box?, ours: List<Box>, recheck: Boolean, publish: Boolean,
+    ) {
         val rows = Perf.measure("read") { engine.read(frame) }
             // The reader's forms made the game's own (TextClean), and what is not the game's text dropped.
             .mapNotNull(TextClean::line).filter { it.text.isNotBlank() }.map { it.moved(offsetX + (cut?.left ?: 0), offsetY + (cut?.top ?: 0)) }
@@ -343,7 +402,7 @@ class ReadingPipeline(
         val pieces = Perf.measure("group") { Blocks.group(rows) }
         if (pieces.isEmpty()) {
             interfaceText.onReading(emptyList())
-            return still
+            return
         }
         val telling = apart()
         if (!telling) {
@@ -364,6 +423,7 @@ class ReadingPipeline(
         val sorted = Perf.measure("sort") {
             memory.sorter.sort(
                 pieces.map { it.text }, recent.map { KeptLine(it.id, it.lineText, it.createdAt) }, interfaceKnown, telling, pieces.map { it.box },
+                recheck,
             ) { text ->
                 store.lineOf(game, text)?.let { byId[it.id] = it; KeptLine(it.id, it.lineText, it.createdAt) }
             }
@@ -378,7 +438,6 @@ class ReadingPipeline(
             ?.let { dir -> Dialogue(dir, DialogueSamples.labels(game.title, engine.name, pieces, offsetX, offsetY, nowMs)) }
         // The frame is taken before any mark is drawn on the game, so it is the card's picture as is.
         val framePath = Perf.measure("save.picture") { saveFrame(bitmap, dialogue) }
-        val appearedNow = detector.changeStartedMs.takeIf { it in 1..nowMs } ?: nowMs
         val fresh = ArrayList<Pair<GameLine, Box>>()
         // Interface text found on this reading: a label that stayed, or one come back again.
         val newly = if (telling) found.filterTo(LinkedHashSet()) { it !in interfaceKnown } else LinkedHashSet()
@@ -396,7 +455,7 @@ class ReadingPipeline(
                     is Part.Same -> (byId[part.id] ?: store.line(part.id))?.also { began = memory.appeared[it.id] ?: it.createdAt }
                     is Part.Grown -> (byId[part.id] ?: store.line(part.id))?.let { old ->
                         began = memory.appeared[old.id] ?: appearedNow
-                        store.grow(old, line.text, line.box, framePath, nowMs).also { grown ->
+                        store.grow(old, part.head + line.text, line.box, framePath, nowMs).also { grown ->
                             fresh += grown to line.box
                             recent.indexOfFirst { it.id == grown.id }.takeIf { it >= 0 }?.let { recent[it] = grown }
                         }
@@ -408,6 +467,9 @@ class ReadingPipeline(
                             // Words in the picture: short, and set far smaller than the story is.
                             (alone && !long(line) && InterfaceText.small(line.typeSize, memory.storyType()))
                                 .also { if (it) Log.i(TAG, "scenery: type of ${line.typeSize} px beside the story's ${memory.storyType()}") } ||
+                            // Words in the picture: short, and away from where the story is told, as a sign or a shop's name is.
+                            (alone && !long(line) && memory.storyArea()?.intersects(line.box) == false)
+                                .also { if (it) Log.i(TAG, "scenery: ${line.box} is out of the story's ${memory.storyArea()}") } ||
                             (alone && InterfaceText.short(line.text) && InterfaceText.comesBack(line.text, store.savedTimes(game, line.text), nowMs))
                                 .also { if (it) newly += line.text }
                         )
@@ -425,6 +487,10 @@ class ReadingPipeline(
                             if (long(line) && line.typeSize > 0) {
                                 memory.types.addLast(line.typeSize)
                                 while (memory.types.size > TYPE_LINES) memory.types.removeFirst()
+                            }
+                            if (long(line)) {
+                                memory.places.addLast(line.box)
+                                while (memory.places.size > TYPE_LINES) memory.places.removeFirst()
                             }
                         }
                     }
@@ -453,8 +519,7 @@ class ReadingPipeline(
         memory.rows.keys.retainAll(named)
         memory.appeared.keys.retainAll(named)
         Perf.measure("save.crops") { saveCrops(bitmap, fresh, offsetX, offsetY) }
-        _latest.value = Reading(game, displayId, lines, saved, framePath, nowMs, appeared)
-        return still
+        if (publish) _latest.value = Reading(game, displayId, lines, saved, framePath, nowMs, appeared)
     }
 
     /**

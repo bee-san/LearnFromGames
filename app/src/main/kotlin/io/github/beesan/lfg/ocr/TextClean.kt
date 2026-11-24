@@ -37,6 +37,13 @@ import java.text.Normalizer
  *  - a piece with no letter or digit in it that is not made of the marks a
  *    line of dialogue is made of alone (……, !?, ――, 「」, ♪) goes: a
  *    checkbox, an icon or the text box's cursor read as a character (□, ▼).
+ *
+ * And two for games drawn in pixels, as Pokémon is:
+ *
+ *  - the box's cursor at either end of a line (the ▼ that asks for a button,
+ *    the ▶ by a choice) goes, so a blinking cursor is not part of the line;
+ *  - a piece made only of the kanji a tiled picture is read as (田, 回, 口,
+ *    目, 川: grass, bricks, windows, water) goes.
  */
 object TextClean {
     /** One piece of the line: usually one character and its box; a space between words has none. */
@@ -45,11 +52,12 @@ object TextClean {
     /** [line] cleaned, or null when nothing of the game's text is left in it. */
     fun line(line: TextLine): TextLine? {
         val pieces = pieces(line)
+        cursors(pieces)
         forms(pieces)
         longVowels(pieces)
         brackets(pieces)
         val text = pieces.joinToString("") { it.text }
-        if (border(text) || foreign(text) || stray(text)) return null
+        if (border(text) || foreign(text) || stray(text) || tiles(text)) return null
         if (text == line.text) return line
         val chars = ArrayList<CharBox>(pieces.size)
         var at = 0
@@ -80,6 +88,24 @@ object TextClean {
         }
         loose(at, text.length)
         return out
+    }
+
+    /** The box's cursor at either end of [pieces], with the spaces beside it. */
+    private fun cursors(pieces: MutableList<Piece>) {
+        if (pieces.none { it.text.isNotBlank() && it.text !in CURSORS }) return
+        fun word(i: Int) = pieces[i].text.isNotBlank()
+        while (true) {
+            val first = pieces.indices.first(::word)
+            if (pieces[first].text !in CURSORS) break
+            val next = (first + 1 until pieces.size).first(::word)
+            pieces.subList(0, next).clear()
+        }
+        while (true) {
+            val last = pieces.indices.last(::word)
+            if (pieces[last].text !in CURSORS) break
+            val before = (0 until last).last(::word)
+            pieces.subList(before + 1, pieces.size).clear()
+        }
     }
 
     private fun union(a: Box?, b: Box?) = if (a == null) b else if (b == null) a else a.union(b)
@@ -266,6 +292,27 @@ object TextClean {
         val points = text.codePoints().toArray()
         if (points.any { Character.isLetterOrDigit(it) || Selectable.isJapaneseLetter(it) }) return false
         return !points.all { Character.isWhitespace(it) || Character.isSpaceChar(it) || (it <= 0xFFFF && it.toChar() in MARKS) || bracket(it) }
+    }
+
+    /** The marks a game puts by its text to ask for a button or show a choice. */
+    private val CURSORS = setOf("▼", "▽", "▾", "▿", "⏷", "▶", "▷", "▸", "►")
+
+    /** [text] without the cursor marks at either end of it. */
+    fun uncursored(text: String): String = text.trim().let { t ->
+        var from = 0
+        var to = t.length
+        while (from < to && (t[from].isWhitespace() || t[from].toString() in CURSORS)) from++
+        while (to > from && (t[to - 1].isWhitespace() || t[to - 1].toString() in CURSORS)) to--
+        t.substring(from, to)
+    }
+
+    /** Kanji whose shapes are a tiled picture's: a grid, a box, bars, as grass, bricks, windows and water are read. */
+    private const val TILES = "口囗田回日曰目皿冊凹凸工王川井亘旦"
+
+    /** Only kanji a tiled picture is read as, with nothing else beside them. */
+    fun tiles(text: String): Boolean {
+        val t = text.filterNot { it.isWhitespace() }
+        return t.isNotEmpty() && t.all { it in TILES }
     }
 
     /** Letters or digits and nothing Japanese: a menu's English, a number, scene art. */

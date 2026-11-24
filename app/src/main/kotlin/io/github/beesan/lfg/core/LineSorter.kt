@@ -19,8 +19,12 @@ sealed interface Part {
     /** The row [id] again: still on screen, or read before and shown again. */
     data class Same(override val from: Int, override val to: Int, val id: String) : Part
 
-    /** The row [id], which was caught half typed: this is its text now. */
-    data class Grown(override val from: Int, override val to: Int, val id: String) : Part
+    /**
+     * The row [id], which was caught half typed, or which this goes on from: its text is now [head]
+     * and then this part. [head] is what the row had that is no longer on screen: the row a text box
+     * scrolled up and out of sight, or the box before this one.
+     */
+    data class Grown(override val from: Int, override val to: Int, val id: String, val head: String = "") : Part
 
     /** Text not kept yet. [interfaceText]: it came as a menu's text does, and is no line. */
     data class New(override val from: Int, override val to: Int, val interfaceText: Boolean = false) : Part
@@ -61,10 +65,17 @@ class Sorted(val parts: List<List<Part>>, val menu: Boolean)
  *   longer one must keep two thirds of its characters. The story's line is
  *   the piece that changed;
  * - grown: it starts with a piece of [BASE] characters or more that was on
- *   screen. If that piece ended a sentence the page has grown by a sentence,
- *   as a box that fills click by click does: the old part keeps its row and
- *   only what was added is new. If it did not, the line was caught half
- *   typed, and its row grows to the whole of it;
+ *   screen. If that piece ended a sentence outside any open 「 『 or （, the
+ *   page has grown by a sentence, as a box that fills click by click does:
+ *   the old part keeps its row and only what was added is new. If it did
+ *   not, the line was caught half typed, and its row grows to the whole of it;
+ * - going on: one piece new on this reading, which goes on from a line of the
+ *   reading before. Either it starts with that line's end, [BASE] characters
+ *   or more, as a text box that scrolls up a row at a time does; or it is in
+ *   the line's place, the line ended no sentence, and nothing on either screen
+ *   is interface text, as a sentence that runs on into the next box does.
+ *   The line's row grows to hold it; after a sentence, only what was added is
+ *   new;
  * - a menu's: [InterfaceText.CROWD] or more pieces arriving together that
  *   are none of the above. None of them is a line, short or long. Text
  *   already known as interface text does not count towards the crowd, so a
@@ -135,6 +146,8 @@ class LineSorter {
      * text however long ago it was kept; it is asked only about pieces that
      * would otherwise be taken for a menu's, so a page of an old backlog is
      * not. [places] is where each piece is on screen, when that is known.
+     * [recheck]: this is the text of the reading before read again, more
+     * clearly; a piece still on screen and read otherwise is corrected.
      */
     suspend fun sort(
         pieces: List<String>,
@@ -142,6 +155,7 @@ class LineSorter {
         known: Set<String> = emptySet(),
         apart: Boolean = true,
         places: List<Box>? = null,
+        recheck: Boolean = false,
         older: suspend (String) -> KeptLine? = { null },
     ): Sorted {
         val far = recent.map { Row(it.id, Squeezed(it.text), it.savedAtMs) }
@@ -160,7 +174,8 @@ class LineSorter {
         var labels = 0
         for (i in pieces.indices) {
             val text = texts[i]
-            parts[i] = still[i]?.takeIf { !it.flagged || menuStays || InterfaceText.short(pieces[i]) }?.let { again(it, text) }
+            parts[i] = still[i]?.takeIf { !it.flagged || menuStays || InterfaceText.short(pieces[i]) }
+                ?.let { (if (recheck) corrected(it, text) else null) ?: again(it, text) }
                 ?: last.firstNotNullOfOrNull { more(it, text, rows) } ?: pieceIn(story, text)?.let { again(it, text) }
             if (parts[i] != null) continue
             if (apart && InterfaceText.short(pieces[i]) && pieces[i] in known) {
@@ -205,6 +220,14 @@ class LineSorter {
             val row = old(texts[i], far, newest, busy, movingOn) ?: return@removeAll false
             parts[i] = listOf(Part.Same(0, pieces[i].length, row.id))
             true
+        }
+        // A text box that scrolled up a row, or the next box of a sentence that ran on.
+        if (open.size == 1 && labels == 0 && !menuBefore) {
+            val i = open[0]
+            goesOn(texts[i], places?.getOrNull(i), last, rows)?.let {
+                parts[i] = it
+                open.clear()
+            }
         }
         // A crowd may be a page of lines read long ago: each is asked after before it is called a menu's.
         val menus = if (apart) open.filter { pieces[it] in known } else emptyList()
@@ -260,6 +283,58 @@ class LineSorter {
         return over(shown, text, text.size).map { (from, to, id) -> Part.Same(text.start(from), text.end(to), id) }
     }
 
+    /** [text] is [shown] read again, more clearly: its row takes the new reading. Null when there is nothing to correct. */
+    private fun corrected(shown: Shown, text: Squeezed): List<Part>? {
+        if (shown.text == text.raw || shown.flagged) return null
+        val held = shown.parts.singleOrNull() ?: return null
+        val head = head(shown, held) ?: return null
+        return listOf(Part.Grown(0, text.raw.length, held.id, head))
+    }
+
+    /**
+     * What [held]'s row has before the part of [shown] it is: its text that is no longer on screen.
+     * Null when the row is not what the screen showed of it (hidden in part, or misread and kept).
+     */
+    private fun head(shown: Shown, held: Held): String? {
+        val showing = shown.text.substring(held.from, held.to)
+        return if (held.text.endsWith(showing)) held.text.dropLast(showing.length) else null
+    }
+
+    /**
+     * [text], new, goes on from a piece of [last]: it starts with that piece's end ([BASE] characters
+     * or more), as a box that scrolls up a row does; or it took the piece's [place], the piece ended
+     * no sentence, and no interface text was on screen then or is now.
+     */
+    private fun goesOn(text: Squeezed, place: Box?, last: List<Shown>, rows: List<Row>): List<Part>? {
+        for (shown in last) {
+            if (shown.flagged) continue
+            val base = shown.squeezed
+            val held = shown.parts.last()
+            val overlap = overlap(base, text)
+            val running = overlap == 0 && place != null && shown.place != null && samePlace(place, shown.place) &&
+                !endsLine(base) && last.none { it.flagged }
+            if (overlap == 0 && !running) continue
+            // Where what is on screen still starts, in the piece before: none of it when the box was replaced.
+            val cut = if (overlap > 0) base.start(base.size - overlap) else shown.text.length
+            if (cut < held.from) continue
+            val head = (head(shown, held) ?: continue) + shown.text.substring(held.from, cut)
+            if (overlap > 0 && endsLine(Squeezed(held.text))) {
+                return listOf(Part.Same(0, text.end(overlap), held.id)) + rest(text, overlap, rows, setOf(held.id))
+            }
+            return listOf(Part.Grown(0, text.raw.length, held.id, head))
+        }
+        return null
+    }
+
+    /** How many characters, [BASE] or more, that [text] starts with are the end of [base]; 0 for none. Neither is all of the other. */
+    private fun overlap(base: Squeezed, text: Squeezed): Int {
+        for (length in minOf(base.size, text.size) - 1 downTo BASE) {
+            val allowed = allowed(length)
+            if (apart(text.points, 0, length, base.points, base.size - length, base.size, allowed) <= allowed) return length
+        }
+        return 0
+    }
+
     /**
      * [text] is [shown] with more after it. After a sentence the more is a
      * part of its own; after anything else it is the rest of a line that was
@@ -274,7 +349,7 @@ class LineSorter {
         val kept = cuts.dropLast(1).map { (from, to, id) -> Part.Same(text.start(from), text.end(to), id) }
         val (from, _, id) = cuts.last()
         return when {
-            !endsSentence(base) -> kept + Part.Grown(text.start(from), text.raw.length, id)
+            !endsLine(base) -> kept + Part.Grown(text.start(from), text.raw.length, id, shown.parts.first { it.id == id }.let { head(shown, it) } ?: "")
             // A closing bracket alone is no sentence of its own.
             !hasWord(text, end) -> kept + Part.Same(text.start(from), text.raw.length, id)
             else -> kept + Part.Same(text.start(from), text.end(end), id) + rest(text, end, rows, shown.parts.mapTo(HashSet()) { it.id })
@@ -322,7 +397,7 @@ class LineSorter {
                 }
             }
             if (first != null) {
-                if (!endsSentence(first.text)) return parts + Part.Grown(text.start(pos), text.raw.length, first.id)
+                if (!endsLine(first.text)) return parts + Part.Grown(text.start(pos), text.raw.length, first.id)
                 if (!hasWord(text, pos + length)) return parts + Part.Same(text.start(pos), text.raw.length, first.id)
                 parts += Part.Same(text.start(pos), text.end(pos + length), first.id)
                 used += first.id
@@ -395,9 +470,11 @@ class LineSorter {
         return found == text.size
     }
 
-    private fun endsSentence(text: Squeezed): Boolean {
+    /** Whether [text] ends a sentence and is not inside a quote still open, as 「そうか。 is while the rest is typed out. */
+    private fun endsLine(text: Squeezed): Boolean {
         val last = text.points.lastOrNull() ?: return false
-        return last <= 0xFFFF && SENTENCE_ENDS.indexOf(last.toChar()) >= 0
+        if (last > 0xFFFF || SENTENCE_ENDS.indexOf(last.toChar()) < 0) return false
+        return QUOTES.chunked(2).all { pair -> text.points.count { it == pair[0].code } <= text.points.count { it == pair[1].code } }
     }
 
     private fun hasWord(text: Squeezed, from: Int) = (from until text.size).any { Character.isLetterOrDigit(text.points[it]) }
@@ -431,6 +508,9 @@ class LineSorter {
         }
 
         private const val SENTENCE_ENDS = "。！？!?…‥」』）)】］〕〉》”’♪"
+
+        /** Brackets a line is said in, each opening one followed by its closing one. */
+        private const val QUOTES = "「」『』（）"
 
         /** How many characters two texts of this length may differ by and be the same. */
         private fun allowed(length: Int) = if (length < LONG) 0 else if (length < 2 * LONG) 1 else 2

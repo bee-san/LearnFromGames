@@ -510,4 +510,13 @@ class CursorTest {
         // Faint text is never followed, read or not.
         assertEquals("", Vocr.signature(Vocr.parse("474,218,28,48,0,4\t目日AG巨\n")))
     }
+
+    @Test
+    fun theBoxsCursorAndATiledPictureAreNoText() {
+        val still = Vocr.signature(Vocr.parse(field))
+        val cursor = field.replace("飛び出してきた！", "飛び出してきた！ ▼")
+        assertEquals(still, Vocr.signature(Vocr.parse(cursor)))
+        assertEquals(still, Vocr.signature(Vocr.parse("1600,906,40,40,0,90\t▼\n$field")))
+        assertEquals(still, Vocr.signature(Vocr.parse("400,300,160,48,0,60\t田回田\n$field")))
+    }
 }

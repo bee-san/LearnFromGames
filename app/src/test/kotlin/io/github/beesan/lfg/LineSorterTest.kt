@@ -23,11 +23,14 @@ class LineSorterTest {
         private var clock = 0L
 
         /** One reading of the screen. Returns, for each piece, the rows of its parts. */
-        fun read(vararg pieces: String): List<List<String>> = runBlocking {
+        fun read(vararg pieces: String): List<List<String>> = readAt(pieces.toList())
+
+        /** One reading, with where each piece is on screen when [places] is given; [recheck]: the reading before, read again. */
+        fun readAt(pieces: List<String>, places: List<Box>? = null, recheck: Boolean = false): List<List<String>> = runBlocking {
             clock += 1000
             val lines = rows.filter { !it.interfaceText }.asReversed().take(LineSorter.RECENT)
             val known = rows.filter { it.interfaceText }.mapTo(HashSet()) { it.text }
-            val sorted = sorter.sort(pieces.toList(), lines.map { KeptLine(it.id, it.text, it.at) }, known, apart) { text ->
+            val sorted = sorter.sort(pieces, lines.map { KeptLine(it.id, it.text, it.at) }, known, apart, places, recheck) { text ->
                 rows.lastOrNull { !it.interfaceText && it.text == text }?.let { KeptLine(it.id, it.text, it.at) }
             }
             val held = pieces.mapIndexed { i, piece ->
@@ -35,13 +38,13 @@ class LineSorterTest {
                     val text = piece.substring(part.from, part.to)
                     val row = when (part) {
                         is Part.Same -> rows.first { it.id == part.id }
-                        is Part.Grown -> rows.first { it.id == part.id }.also { it.text = text }
+                        is Part.Grown -> rows.first { it.id == part.id }.also { it.text = part.head + text }
                         is Part.New -> Row("r${rows.size + 1}", text, part.interfaceText, clock).also { rows += it }
                     }
                     Held(part.from, part.to, row.id, row.text, row.interfaceText)
                 }
             }
-            sorter.shown(pieces.toList(), held, sorted.menu)
+            sorter.shown(pieces, held, sorted.menu, places)
             held.map { parts -> parts.map { it.id } }
         }
 
@@ -379,6 +382,17 @@ class LineSorterTest {
     }
 
     @Test
+    fun aQuoteCaughtAfterItsFirstSentenceGrowsIntoTheWholeOfIt() {
+        val game = Game()
+        val first = game.read("「そうだったのか。")
+        assertEquals(first, game.read("「そうだったのか。それなら仕方ないな」"))
+        assertEquals(listOf("「そうだったのか。それなら仕方ないな」"), game.lines)
+        // Once the quote is closed, what follows is a line of its own.
+        game.read("「そうだったのか。それなら仕方ないな」俺はそう答えた。")
+        assertEquals(listOf("「そうだったのか。それなら仕方ないな」", "俺はそう答えた。"), game.lines)
+    }
+
+    @Test
     fun aClosingBracketReadLateIsNoLineOfItsOwn() {
         val game = Game()
         val first = game.read("「そうだったのか。")
@@ -509,5 +523,60 @@ class LineSorterTest {
         // The save is loaded, and the game opens on that very line.
         game.read(whole)
         assertEquals(listOf(line, whole), game.lines)
+    }
+
+    // ── text boxes that scroll or run on ──
+
+    @Test
+    fun aTextBoxThatScrollsUpARowGrowsTheLine() {
+        val game = Game()
+        val one = "このちいさなまちにすむ"
+        val two = "ポケモンがだいすきなしょうねん"
+        val three = "それがきみだ！"
+        val first = game.read(one + two)
+        // The box scrolled: the first row is gone, the second is at the top.
+        assertEquals(first, game.read(two + three))
+        assertEquals(listOf(one + two + three), game.lines)
+    }
+
+    @Test
+    fun aRowScrolledUpAfterASentenceKeepsItsLineAndWhatFollowsIsNew() {
+        val game = Game()
+        val one = "ここはマサラタウン。"
+        val two = "まっしろなはじまりのいろ。"
+        val three = "あたらしいたびが はじまる。"
+        game.read(one + two)
+        game.read(two + three)
+        assertEquals(listOf(one + two, three), game.lines)
+    }
+
+    @Test
+    fun aSentenceThatRunsOnIntoTheNextBoxIsOneLine() {
+        val game = Game()
+        val box = listOf(Box(100, 800, 1500, 950))
+        val one = "オーキドはかせが きみを まっている"
+        val two = "けんきゅうじょへ いきなさい！"
+        val first = game.readAt(listOf(one), box)
+        assertEquals(first, game.readAt(listOf(two), box))
+        assertEquals(listOf(one + two), game.lines)
+        // Ended, the next box is a line of its own.
+        val three = "まっているぞ！"
+        game.readAt(listOf(three), box)
+        assertEquals(listOf(one + two, three), game.lines)
+    }
+
+    @Test
+    fun aLineReadAgainOnceItHoldsStillTakesTheClearerReading() {
+        val faded = "やせいの ポッボが とびだしてきた！"
+        val clear = "やせいの ポッポが とびだしてきた！"
+        val game = Game()
+        game.read(faded)
+        game.read(clear)
+        // An ordinary look at a line on screen does not change it.
+        assertEquals(listOf(faded), game.lines)
+        val checked = Game()
+        val first = checked.read(faded)
+        assertEquals(first, checked.readAt(listOf(clear), recheck = true))
+        assertEquals(listOf(clear), checked.lines)
     }
 }

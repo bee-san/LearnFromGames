@@ -254,4 +254,52 @@ class CoreTest {
         assertEquals(PixelProbe.fingerprint(dark), PixelProbe.fingerprint(nearlyDark))
         assertNotEquals(PixelProbe.fingerprint(dark), PixelProbe.fingerprint(withText))
     }
+
+    @Test
+    fun textTakenOnItsFirstPictureIsReadAgainWhenItLooksDifferentOnceStill() {
+        val clear = "くさむらの なかから やせいの ポケモンが とびだしてきた！\nさあ どうする？ たたかうか にげるか きめよう！"
+        val faded = clear.replaceFirst('ポ', 'ボ')
+        val d = SettleDetector(stillMs = 300)
+        assertTrue(d.offer(faded, 0))
+        assertFalse(d.confirming)
+        assertFalse(d.offer(clear, 333))
+        assertTrue(d.offer(clear, 666))
+        assertTrue(d.confirming)
+        assertFalse(d.offer(clear, 1_000))
+        // Read the same on the next look: nothing to read again.
+        val e = SettleDetector(stillMs = 300)
+        assertTrue(e.offer(clear, 0))
+        assertFalse(e.offer(clear, 333))
+        assertFalse(e.offer(clear, 666))
+    }
+
+    @Test
+    fun typedTextThatEndedASentenceAndWentBeforeItWasReadIsMissed() {
+        val d = SettleDetector(stillMs = 300)
+        assertFalse(d.offer("こうかは", 0))
+        assertFalse(d.offer("こうかは ばつぐんだ！", 200))
+        assertFalse(d.missed)
+        assertFalse(d.offer("", 400))
+        assertTrue(d.missed)
+        // It is not read again when it comes back.
+        assertFalse(d.offer("こうかは ばつぐんだ！", 800))
+        assertFalse(d.offer("こうかは ばつぐんだ！", 1_200))
+        // Text that ended no sentence is still being typed out, and is not missed.
+        val e = SettleDetector(stillMs = 300)
+        e.offer("こう", 0)
+        e.offer("こうかは", 200)
+        e.offer("", 400)
+        assertFalse(e.missed)
+    }
+
+    @Test
+    fun theSameLettersInAnotherOrderOrAnotherNumberAreAChange() {
+        val line = "ポッポは たいあたりを つかった！\nあいての コラッタに ダメージを あたえた！"
+        val swapped = line.replaceFirst("ポッポ", "ポポッ")
+        assertFalse(SettleDetector.same(line, swapped))
+        val money = "おこづかいを 10えん もらった！\nさっそく フレンドリィショップで かいものを しよう！"
+        assertFalse(SettleDetector.same(money, money.replace("10", "20")))
+        // Noise is still noise.
+        assertTrue(SettleDetector.same(money, money.replace("さっそく", "さっそく・")))
+    }
 }
