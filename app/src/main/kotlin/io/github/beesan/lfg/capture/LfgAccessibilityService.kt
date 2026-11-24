@@ -119,6 +119,7 @@ class LfgAccessibilityService : AccessibilityService() {
             app.lines, File(filesDir, "frames"),
             apart = { app.settings.prefs.value.interfaceApart },
             dialogueDir = { if (app.settings.prefs.value.keepDialogue) DialogueSamples.dir(filesDir) else null },
+            matchLength = { app.dictionaries.matchLength(it) },
         )
         controller = LookupController(
             scope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) }, ::prepareLine,
@@ -672,7 +673,7 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** One region of the app read on every settled change, as a game is, until it is turned off. */
     private fun startContinuous(game: Game, target: Ordinary, region: Box) {
-        val regional = ReadingPipeline(app.lines, File(filesDir, "frames"))
+        val regional = ReadingPipeline(app.lines, File(filesDir, "frames"), matchLength = { app.dictionaries.matchLength(it) })
         setAsked(Asked(game, target.packageName, target.displayId, target.windowId, continuous = true, frame = null, framePath = null))
         toast("Reading this region until you turn it off.", avoid = region)
         // The box was picked over text already showing: it is read at once, not after a second picture.

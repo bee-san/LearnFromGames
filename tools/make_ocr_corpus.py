@@ -180,4 +180,56 @@ plate = ["君たちには期待しているから、決して途中で諦めな�
 lines(d, (140, 815), plate, font(54), WHITE, 86)
 save("nameplate", img, [["田中先生"], plate])
 
+# 13–17. A handheld's pixel font: kana only, words split by full-width spaces, drawn without smoothing on a
+# 160×144 screen and scaled up the ways an emulator does. Noto drawn at 10 px with no anti-aliasing stands in
+# for a real 8×8 font. The lines are heavy in what such fonts lose: small kana, ゛ and ゜, ロ/口, ソ/ン, シ/ツ.
+GB = [(15, 56, 15), (48, 98, 48), (139, 172, 15), (155, 188, 15)]  # the green palette, darkest first
+pixel = [
+    ["ロケットだんの　アジトに", "いくぞ！"],
+    ["でんしゃに　のって", "がっこうへ　いこう"],
+    ["ハンバーガーを　ふたつ", "ください"],
+    ["ソフトと　ツールを", "パソコンに　いれた"],
+    ["カードを　ひいた", "ポケットに　しまった"],
+]
+
+
+def handheld(rows, ink, paper):
+    screen = Image.new("RGB", (160, 144), paper)
+    d = ImageDraw.Draw(screen)
+    d.fontmode = "1"
+    d.rectangle((2, 98, 157, 141), outline=ink)
+    lines(d, (8, 104), rows, font(10), ink, 16)
+    return screen
+
+
+def scaled(screen, how):
+    size = (screen.width * 6, screen.height * 6)
+    if how == "nearest":
+        return screen.resize(size, Image.NEAREST)
+    if how == "bilinear":
+        return screen.resize(size, Image.BILINEAR)
+    out = screen.resize(size, Image.NEAREST)  # "scanlines": every third row darkened, as a CRT shader does
+    px = out.load()
+    for y in range(2, out.height, 3):
+        for x in range(out.width):
+            px[x, y] = tuple(c // 3 for c in px[x, y])
+    return out
+
+
+def framed(picture):
+    img = Image.new("RGB", (1920, 1080), (0, 0, 0))
+    img.paste(picture, ((1920 - picture.width) // 2, (1080 - picture.height) // 2))
+    return img
+
+
+for i, (how, ink, paper) in enumerate([
+    ("nearest", (0, 0, 0), (255, 255, 255)),
+    ("bilinear", (0, 0, 0), (255, 255, 255)),
+    ("scanlines", (0, 0, 0), (255, 255, 255)),
+    ("nearest", GB[0], GB[3]),
+    ("nearest", (40, 40, 70), (110, 110, 150)),  # a dim night tint
+]):
+    name = ["pixel", "pixelblur", "pixelscan", "pixelgreen", "pixelnight"][i]
+    save(name, framed(scaled(handheld(pixel[i], ink, paper), how)), [pixel[i]])
+
 print("wrote", len(list(OUT.glob("*.json"))), "cases to", OUT)
