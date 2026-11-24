@@ -30,9 +30,11 @@ object KanaRepair {
         voiced + small + katakana + listOf("シツ", "ソン", "ノソ", "クワ", "ぬめ", "われね", "るろ")
     }
 
-    private val ALIKE: Map<Char, List<Char>> = GROUPS
-        .flatMap { group -> group.map { c -> c to group.filter { it != c } } }
-        .groupBy({ it.first }, { it.second }).mapValues { (_, others) -> others.flatten().distinct() }
+    private val ALIKE: Map<Char, List<Char>> = run {
+        val alike = HashMap<Char, MutableSet<Char>>()
+        for (group in GROUPS) for (c in group) alike.getOrPut(c) { LinkedHashSet() } += group.filter { it != c }.toList()
+        alike.mapValues { it.value.toList() }
+    }
 
     private fun isKana(c: Char) = c in 'ぁ'..'ゖ' || c in 'ァ'..'ヺ' || c == 'ー'
 
