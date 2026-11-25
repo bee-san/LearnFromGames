@@ -2,6 +2,7 @@
 package io.github.beesan.lfg
 
 import android.content.Context
+import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingGoals
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -136,6 +137,11 @@ data class Prefs(
      */
     val keepDialogue: Boolean = false,
     val keepDialogueAsked: Boolean = false,
+    /**
+     * The tag of the language being learnt ([io.github.beesan.lfg.core.Language]), asked at set-up;
+     * empty until it is answered.
+     */
+    val language: String = "",
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
@@ -240,6 +246,8 @@ class Settings(context: Context) {
             namesSpoilers = store.getBoolean("namesSpoilers", d.namesSpoilers),
             keepDialogue = store.getBoolean("keepDialogue", d.keepDialogue),
             keepDialogueAsked = store.getBoolean("keepDialogueAsked", d.keepDialogueAsked),
+            // Set up before the question existed, when there was only Japanese: not asked again.
+            language = store.getString("language", null) ?: if (store.getBoolean("keepDialogueAsked", false)) Language.JAPANESE.tag else d.language,
         )
     }
 
@@ -297,6 +305,7 @@ class Settings(context: Context) {
             .putBoolean("namesSpoilers", next.namesSpoilers)
             .putBoolean("keepDialogue", next.keepDialogue)
             .putBoolean("keepDialogueAsked", next.keepDialogueAsked)
+            .putString("language", next.language)
             .apply()
         secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
         _prefs.value = next

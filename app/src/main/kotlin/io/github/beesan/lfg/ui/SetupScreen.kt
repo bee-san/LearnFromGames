@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.anki.AnkiStatus
+import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.ocr.ModelState
 import io.github.beesan.lfg.ocr.ScreenAi
@@ -42,6 +43,9 @@ fun SetupScreen(
     onRetryDownloads: () -> Unit,
     wifiOnly: Boolean = false,
     onWifiOnly: (Boolean) -> Unit = {},
+    /** The language being learnt; null until the question is answered. */
+    language: Language? = Language.JAPANESE,
+    onLanguage: (Language) -> Unit = {},
     /** Asked once: whether to keep every screen of dialogue for training a better reader. */
     askKeepDialogue: Boolean = false,
     onKeepDialogue: (Boolean) -> Unit = {},
@@ -49,6 +53,8 @@ fun SetupScreen(
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Set up", color = Lfg.Text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(2.dp))
+
+        if (language == null) LanguageQuestion(onLanguage) else SetupRow("Language", "Learning ${language.title}", done = true)
 
         SetupRow(
             name = "Screen reading",
@@ -132,6 +138,22 @@ fun SetupScreen(
             }
         }
         if (askKeepDialogue) KeepDialogueQuestion(onKeepDialogue)
+    }
+}
+
+/** Which language to learn: the first thing asked. One answer so far. */
+@Composable
+private fun LanguageQuestion(onAnswer: (Language) -> Unit) {
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Which language are you learning?", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Text("LFG reads your games in this language. Only Japanese for now; more will come.", color = Lfg.Dim, fontSize = 15.sp, lineHeight = 21.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Language.entries.forEach { LfgButton("${it.title} · ${it.ownName}", { onAnswer(it) }, primary = true) }
+        }
     }
 }
 

@@ -34,6 +34,8 @@
 #                                                         boxes for about half the work; gray pixels as they are
 #   0004-recogniser-threads-off-the-slow-cores            screenai_ocr: fast mode's recognizer threads ask for
 #                                                         the faster cores of a phone's processor
+#   0005-language-given-and-lines-remembered              screenai_ocr: SetOCRLanguage, one pass by the language's
+#                                                         recognizer; fast mode remembers the lines it read
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -266,7 +268,7 @@ check_library() {
     die "$so has a LOAD segment that is not 16 KB aligned"
   fi
   symbols="$("$LLVM_BIN/llvm-nm" -D --defined-only "$so")"
-  for sym in SetFileContentFunctions InitOCRUsingCallback SetOCRLightMode SetOCRFastMode GetMaxImageDimension PerformOCR \
+  for sym in SetFileContentFunctions InitOCRUsingCallback SetOCRLightMode SetOCRFastMode SetOCRLanguage GetMaxImageDimension PerformOCR \
     FreeLibraryAllocatedCharArray UninitializeOCR; do
     grep -q " T $sym\$" <<<"$symbols" || die "$so does not export $sym"
   done

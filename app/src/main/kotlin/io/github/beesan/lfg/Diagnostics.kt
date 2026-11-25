@@ -46,7 +46,12 @@ object Diagnostics {
             }
         })
         line("Reader open", Readers.reader?.name ?: "none")
-        line("Change probe", if (Readers.probe is VocrProbe) "VOCR" else "pixels (VOCR did not load)")
+        line("Language", prefs.language.ifEmpty { "not chosen" })
+        line("Change probe", when (Readers.probe) {
+            is VocrProbe -> "VOCR"
+            is io.github.beesan.lfg.capture.ReaderProbe -> "the reader"
+            else -> "pixels (VOCR did not load)"
+        })
         line("Dictionaries", when (val d = app.dictionaries.state.value) {
             is DictState.Ready -> d.dictionaries.joinToString { it.title }.ifEmpty { "none" }
             is DictState.Downloading -> "downloading ${d.name}"

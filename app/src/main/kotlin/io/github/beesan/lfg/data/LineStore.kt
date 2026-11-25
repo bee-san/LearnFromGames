@@ -2,10 +2,16 @@
 package io.github.beesan.lfg.data
 
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.core.Language
 import java.util.UUID
 
 /** Saving lines and lookups: step 7 of the plan, "every line is saved for stats later". [onSaved] follows each line saved. */
-class LineStore(private val db: LfgDatabase, private val onSaved: (GameLine) -> Unit = {}) {
+class LineStore(
+    private val db: LfgDatabase,
+    /** The tag of the language being learnt, which a line read now is in. */
+    private val language: () -> String = { Language.JAPANESE.tag },
+    private val onSaved: (GameLine) -> Unit = {},
+) {
 
     suspend fun gameOrNull(packageName: String): Game? = db.games().byPackage(packageName)
 
@@ -49,6 +55,7 @@ class LineStore(private val db: LfgDatabase, private val onSaved: (GameLine) -> 
             gameName = game.title,
             lineText = text,
             timestamp = nowMs / 1000.0,
+            language = language(),
             screenshotPath = screenshotPath,
             createdAt = nowMs,
             lastModified = nowMs,

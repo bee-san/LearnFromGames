@@ -17,6 +17,7 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.core.Blocks
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.core.TreeText
@@ -219,7 +220,8 @@ class LfgAccessibilityService : AccessibilityService() {
         scope.launch {
             combine(app.settings.prefs, app.models.screenAi) { prefs, _ -> prefs }.collect { prefs ->
                 FrameRing.enabled = prefs.animatedPicture
-                withContext(Dispatchers.Default) { Readers.refresh(this@LfgAccessibilityService, app.models) }
+                val language = Language.of(prefs.language) ?: Language.JAPANESE
+                withContext(Dispatchers.Default) { Readers.refresh(this@LfgAccessibilityService, app.models, language) }
             }
         }
         scope.launch {
@@ -476,8 +478,9 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /**
      * Starts lookup mode, or stops it. With [anyApp], an ordinary app in front
-     * is read first; without it, a press where there is nothing to look up
-     * says so, since the game did not get the button either.
+     * is read first. A press in a game where nothing has been read yet does
+     * nothing: the message it used to bring sat over the game's text, which
+     * was then not read from under it.
      */
     private fun toggleLookup(anyApp: Boolean) {
         val state = controller.state.value
@@ -491,7 +494,6 @@ class LfgAccessibilityService : AccessibilityService() {
             // Nothing read in a game with a dialogue box: the box may be in the wrong place, and with no
             // line there is no lookup to change it from. It is shown, to keep, draw again or take away.
             front?.game?.let { app.dialogueBoxes[it.id] } != null -> pickRegion()
-            !anyApp -> front?.let { overlays.notice(it.displayId, "LFG has read no text on this screen yet.") }
         }
     }
 

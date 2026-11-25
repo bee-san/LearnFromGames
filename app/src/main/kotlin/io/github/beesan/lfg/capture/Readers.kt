@@ -3,6 +3,7 @@ package io.github.beesan.lfg.capture
 
 import android.content.Context
 import io.github.beesan.lfg.core.Box
+import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.ocr.Frame
 import io.github.beesan.lfg.ocr.ModelStore
@@ -76,6 +77,20 @@ class PixelProbe : ChangeProbe {
     }
 }
 
+/**
+ * The reader as its own probe, for a language VOCR cannot read
+ * ([Language.Probe.READER]): the signature is what it reads. A look costs a
+ * whole read, less the lines it remembers from the look before.
+ */
+class ReaderProbe(private val reader: TextReader) : ChangeProbe {
+    override suspend fun signature(frame: Frame): String = look(frame).signature
+
+    override suspend fun look(frame: Frame): Look {
+        val lines = reader.read(frame)
+        return Look(lines.joinToString("\n") { it.text }, lines.map { it.box })
+    }
+}
+
 class ScreenAiReader(private val engine: ScreenAi) : TextReader {
     override val name = "screenai"
     override suspend fun read(frame: Frame): List<TextLine> = withContext(Dispatchers.Default) { engine.read(frame) }
@@ -95,24 +110,30 @@ object Readers {
     private var opened = ""
 
     /**
-     * Opens ScreenAI once its library and files are there. Until then there
-     * is no reader, and the service takes no pictures.
+     * Opens ScreenAI for [language] once its library and files are there. Until then there
+     * is no reader, and the service takes no pictures. The probe is the language's:
+     * VOCR for Japanese, the reader itself for one VOCR cannot read.
      */
     @Synchronized
-    fun refresh(context: Context, models: ModelStore) {
-        if (vocr == null) {
-            vocr = Vocr.open(context)
-            vocr?.let { probe = VocrProbe(it) }
-        }
+    fun refresh(context: Context, models: ModelStore, language: Language = Language.JAPANESE) {
         val dir = models.screenAiDir()
-        val wanted = if (dir != null && ScreenAi.available()) "screenai" else ""
-        if (wanted == opened) return
-        reader = try {
-            if (wanted.isEmpty()) null else ScreenAi.open(dir!!)?.let(::ScreenAiReader)
-        } catch (e: Throwable) {
-            android.util.Log.w("LfgReaders", "could not open ScreenAI", e)
-            null
+        val wanted = if (dir != null && ScreenAi.available()) "screenai:${language.tag}" else ""
+        if (wanted != opened) {
+            reader = try {
+                if (wanted.isEmpty()) null else ScreenAi.open(dir!!, language.tag)?.let(::ScreenAiReader)
+            } catch (e: Throwable) {
+                android.util.Log.w("LfgReaders", "could not open ScreenAI", e)
+                null
+            }
+            opened = if (reader != null) wanted else ""
         }
-        opened = if (reader != null) wanted else ""
+        if (language.probe == Language.Probe.VOCR && vocr == null) vocr = Vocr.open(context)
+        probe = probeFor(language, vocr?.let(::VocrProbe), reader)
     }
+
+    /** The probe [language] asks for, of what could be opened; the pixels when it could not. */
+    internal fun probeFor(language: Language, vocr: ChangeProbe?, reader: TextReader?): ChangeProbe = when (language.probe) {
+        Language.Probe.VOCR -> vocr
+        Language.Probe.READER -> reader?.let(::ReaderProbe)
+    } ?: PixelProbe()
 }

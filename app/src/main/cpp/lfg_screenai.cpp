@@ -34,6 +34,7 @@ struct Api {
   bool (*init)() = nullptr;
   void (*light_mode)(bool) = nullptr;
   void (*fast_mode)(bool) = nullptr;
+  void (*language)(const char*) = nullptr;
   char* (*perform)(const Bitmap*, uint32_t*) = nullptr;
   void (*free_chars)(char*) = nullptr;
 };
@@ -43,6 +44,7 @@ Api g_api;
 bool g_loaded = false;
 bool g_ready = false;
 std::string g_dir;
+std::string g_language;
 
 // Files are asked for by their path under the component's resources directory.
 bool safe(const char* path) { return path != nullptr && path[0] != '/' && std::strstr(path, "..") == nullptr; }
@@ -75,6 +77,7 @@ bool load() {
   g_api.init = reinterpret_cast<bool (*)()>(dlsym(lib, "InitOCRUsingCallback"));
   g_api.light_mode = reinterpret_cast<void (*)(bool)>(dlsym(lib, "SetOCRLightMode"));
   g_api.fast_mode = reinterpret_cast<void (*)(bool)>(dlsym(lib, "SetOCRFastMode"));
+  g_api.language = reinterpret_cast<void (*)(const char*)>(dlsym(lib, "SetOCRLanguage"));
   g_api.perform = reinterpret_cast<char* (*)(const Bitmap*, uint32_t*)>(dlsym(lib, "PerformOCR"));
   g_api.free_chars = reinterpret_cast<void (*)(char*)>(dlsym(lib, "FreeLibraryAllocatedCharArray"));
   if (g_api.set_files == nullptr || g_api.init == nullptr || g_api.perform == nullptr || g_api.free_chars == nullptr) {
@@ -82,6 +85,13 @@ bool load() {
     return false;
   }
   return true;
+}
+
+std::string bytes_of(JNIEnv* env, jbyteArray array) {
+  const jsize len = env->GetArrayLength(array);
+  std::string out(static_cast<size_t>(len), '\0');
+  env->GetByteArrayRegion(array, 0, len, reinterpret_cast<jbyte*>(out.data()));
+  return out;
 }
 
 }  // namespace
@@ -93,12 +103,19 @@ JNIEXPORT jboolean JNICALL Java_io_github_beesan_lfg_ocr_ScreenAi_nativeAvailabl
   return load() ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT jboolean JNICALL Java_io_github_beesan_lfg_ocr_ScreenAi_nativeInit(JNIEnv* env, jclass, jbyteArray dir) {
+JNIEXPORT jboolean JNICALL Java_io_github_beesan_lfg_ocr_ScreenAi_nativeInit(JNIEnv* env, jclass, jbyteArray dir,
+                                                                               jbyteArray language) {
   std::lock_guard<std::mutex> guard(g_lock);
   if (!load()) return JNI_FALSE;
-  const jsize len = env->GetArrayLength(dir);
-  std::string path(static_cast<size_t>(len), '\0');
-  env->GetByteArrayRegion(dir, 0, len, reinterpret_cast<jbyte*>(path.data()));
+  const std::string path = bytes_of(env, dir);
+  const std::string tag = bytes_of(env, language);
+  // The language on screen, when the app knows it (tools/screenai/0005): each line is read once, as that
+  // language, and given before init the recognisers it does not need are never loaded. A library built without
+  // it guesses each line's script, as before.
+  if (g_api.language != nullptr && tag != g_language) {
+    g_language = tag;
+    g_api.language(tag.c_str());
+  }
   if (g_ready && path == g_dir) return JNI_TRUE;
   g_dir = path;
   g_api.set_files(file_size, file_content);

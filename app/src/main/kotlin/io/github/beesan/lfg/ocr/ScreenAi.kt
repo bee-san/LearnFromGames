@@ -40,13 +40,18 @@ class ScreenAi private constructor() {
         /** Whether this build of the app carries the library at all. */
         fun available(): Boolean = loaded
 
-        fun open(dir: File): ScreenAi? = if (loaded && nativeInit(dir.path.toByteArray())) ScreenAi() else null
+        /**
+         * [language] is the tag of the language on screen (`ja`), when it is known: every line is then read
+         * once, as that language (tools/screenai/0005). Empty, each line's script is guessed first, as Chrome does.
+         */
+        fun open(dir: File, language: String = ""): ScreenAi? =
+            if (loaded && nativeInit(dir.path.toByteArray(), language.toByteArray())) ScreenAi() else null
 
         @JvmStatic
         private external fun nativeAvailable(): Boolean
 
         @JvmStatic
-        private external fun nativeInit(dir: ByteArray): Boolean
+        private external fun nativeInit(dir: ByteArray, language: ByteArray): Boolean
 
         @JvmStatic
         private external fun nativeRead(pixels: IntArray, width: Int, height: Int): ByteArray?
@@ -281,8 +286,9 @@ object ScreenAiFiles {
     /**
      * Whether a file of the package is one the reader needs. Everything under
      * `resources/` is kept except the recognisers of other scripts, the
-     * main-content models and Chrome's library. Kanji-only lines use the Hani
-     * recogniser and kana lines the Jpan one, so both stay.
+     * main-content models and Chrome's library. Told the language is Japanese
+     * the reader opens only the Jpan recogniser; the multi-script and Hani
+     * ones stay for a library that cannot be told.
      */
     fun wanted(entry: String): String? {
         val path = entry.removePrefix("resources/")

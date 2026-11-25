@@ -6,6 +6,7 @@ import android.graphics.drawable.ColorDrawable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.core.view.WindowCompat
+import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.core.Updates
@@ -154,7 +155,7 @@ class MainActivity : ComponentActivity() {
                 asked?.let { page = it }
                 requested.value = null
             }
-            val ready = setup.complete(dictionary, reader) && prefs.keepDialogueAsked
+            val ready = setup.complete(dictionary, reader) && prefs.keepDialogueAsked && Language.of(prefs.language) != null
             val showPractice = page == Page.PRACTICE || (page == Page.HOME && ready && !practiceDone)
 
             // The first word is looked up before anything is tapped, as the controller cursor is.
@@ -200,6 +201,8 @@ class MainActivity : ComponentActivity() {
                                     onRetryDownloads = model::retryDownloads,
                                     wifiOnly = prefs.wifiOnly,
                                     onWifiOnly = model::setWifiOnly,
+                                    language = Language.of(prefs.language),
+                                    onLanguage = { picked -> model.updatePrefs { it.copy(language = picked.tag) } },
                                     askKeepDialogue = !prefs.keepDialogueAsked,
                                     onKeepDialogue = { yes -> model.updatePrefs { it.copy(keepDialogue = yes, keepDialogueAsked = true) } },
                                 )

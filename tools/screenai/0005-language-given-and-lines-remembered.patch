@@ -1,0 +1,392 @@
+LearnFromGames: the language can be given (SetOCRLanguage), and fast mode remembers the lines it read.
+
+The original reads every line with the multi-script recognizer, asks a language ID what it read, and reads the
+line again with the recognizer of the script that was guessed: on a Japanese game's screen, most lines twice and
+the kanji-only ones as Chinese. A caller that knows the language now says so, and every line goes once to that
+language's recognizer (Jpan for "ja"); the multi-script recognizer and the language ID are not even loaded.
+ - The script recognizers have no direction head, so a line runs the way its box does: across, or down for a
+   box turned a quarter.
+ - The layout's confidence filter counted on that head to tell text from scenery. The stand-in value is set so
+   that it drops as many lines as before: on 210 game screens cut to their text bands, 8.8 lines a screen were
+   kept either way, 3.4% of the dialogue's characters were missed for 3.6%, and a read took 122 ms for 147 on
+   a desktop.
+With no language given, or one whose recognizer is not installed, nothing changes.
+
+Fast mode also keeps the tensors of the 64 line images read last, by recognizer. A line whose pixels come again
+(a name, a menu, the screen read a second time) is not computed again; the same pixels give the same tensors,
+so the output is the same. A screen read twice in a row: 42 ms of recognition, then 2.
+
+diff --git a/cpp/capi/c_api.cc b/cpp/capi/c_api.cc
+index f86d306..70c5efe 100644
+--- a/cpp/capi/c_api.cc
++++ b/cpp/capi/c_api.cc
+@@ -31,6 +31,7 @@ std::unique_ptr<screenai::OcrEngine> g_engine;
+ int g_max_image_dimension = 0;
+ bool g_light_mode = false;
+ bool g_fast_mode = false;
++std::string g_language;
+ 
+ char* CopyOut(const std::string& s, uint32_t* length) {
+   *length = static_cast<uint32_t>(s.size());
+@@ -57,7 +58,7 @@ SCREENAI_EXPORT bool InitOCRUsingCallback() {
+   } else {
+     return false;
+   }
+-  g_engine = screenai::OcrEngine::Create(std::move(resources));
++  g_engine = screenai::OcrEngine::Create(std::move(resources), g_language);
+   if (!g_engine) return false;
+   g_engine->SetLightMode(g_light_mode);
+   g_engine->SetFastMode(g_fast_mode);
+@@ -79,6 +80,14 @@ SCREENAI_EXPORT void SetOCRFastMode(bool fast) {
+   if (g_engine) g_engine->SetFastMode(fast);
+ }
+ 
++// LearnFromGames, not in the original: the language of what is read, as a tag ("ja"); null or "" for not known.
++// See LineRecognizer::SetLanguage. Set before init, the recognizers the language does not need are not loaded.
++// Like the modes it can also be set after init and survives UninitializeOCR.
++SCREENAI_EXPORT void SetOCRLanguage(const char* language) {
++  g_language = language ? language : "";
++  if (g_engine) g_engine->SetLanguage(g_language);
++}
++
+ SCREENAI_EXPORT uint32_t GetMaxImageDimension() { return g_max_image_dimension; }
+ 
+ // The original keeps reporting the max image dimension after uninitialization.
+diff --git a/cpp/capi/exports.map b/cpp/capi/exports.map
+index fe45d23..1688fe6 100644
+--- a/cpp/capi/exports.map
++++ b/cpp/capi/exports.map
+@@ -1,6 +1,6 @@
+ {
+   global:
+-    SetFileContentFunctions; InitOCRUsingCallback; SetOCRLightMode; SetOCRFastMode; GetMaxImageDimension; UninitializeOCR;
++    SetFileContentFunctions; InitOCRUsingCallback; SetOCRLightMode; SetOCRFastMode; SetOCRLanguage; GetMaxImageDimension; UninitializeOCR;
+     PerformOCR; FreeLibraryAllocatedCharArray; FreeLibraryAllocatedInt32Array; GetLibraryVersion; EnableDebugMode;
+   local: *;
+ };
+diff --git a/cpp/capi/exports.txt b/cpp/capi/exports.txt
+index 84af31c..c815901 100644
+--- a/cpp/capi/exports.txt
++++ b/cpp/capi/exports.txt
+@@ -2,6 +2,7 @@ _SetFileContentFunctions
+ _InitOCRUsingCallback
+ _SetOCRLightMode
+ _SetOCRFastMode
++_SetOCRLanguage
+ _GetMaxImageDimension
+ _UninitializeOCR
+ _PerformOCR
+diff --git a/cpp/capi/ocr_engine.cc b/cpp/capi/ocr_engine.cc
+index c0ac66b..d603000 100644
+--- a/cpp/capi/ocr_engine.cc
++++ b/cpp/capi/ocr_engine.cc
+@@ -10,11 +10,11 @@
+ 
+ namespace screenai {
+ 
+-std::unique_ptr<OcrEngine> OcrEngine::Create(std::shared_ptr<Resources> resources) {
++std::unique_ptr<OcrEngine> OcrEngine::Create(std::shared_ptr<Resources> resources, const std::string& language) {
+   auto engine = std::unique_ptr<OcrEngine>(new OcrEngine);
+   engine->resources_ = std::move(resources);
+   engine->detector_ = TextDetector::Create(*engine->resources_);
+-  engine->recognizer_ = LineRecognizer::Create(*engine->resources_);
++  engine->recognizer_ = LineRecognizer::Create(*engine->resources_, language);
+   engine->layout_analyzer_ = LayoutAnalyzer::Create(*engine->resources_);
+   if (!engine->detector_ || !engine->recognizer_ || !engine->layout_analyzer_) return nullptr;
+   return engine;
+@@ -31,6 +31,11 @@ void OcrEngine::SetFastMode(bool fast) {
+   recognizer_->SetFastMode(fast);
+ }
+ 
++void OcrEngine::SetLanguage(const std::string& language) {
++  std::lock_guard<std::mutex> lock(mu_);
++  recognizer_->SetLanguage(language);
++}
++
+ namespace {
+ 
+ // SCREENAI_STAGE_DUMP=<dir>: writes each stage's output as goodoc.PageLayoutProto, named like trace/stage_dump.py
+diff --git a/cpp/capi/ocr_engine.h b/cpp/capi/ocr_engine.h
+index 74e3dd6..7c8f6f7 100644
+--- a/cpp/capi/ocr_engine.h
++++ b/cpp/capi/ocr_engine.h
+@@ -17,7 +17,8 @@ namespace screenai {
+ 
+ class OcrEngine {
+  public:
+-  static std::unique_ptr<OcrEngine> Create(std::shared_ptr<Resources> resources);
++  // `language`: see SetLanguage.
++  static std::unique_ptr<OcrEngine> Create(std::shared_ptr<Resources> resources, const std::string& language = "");
+ 
+   // Serialized chrome_screen_ai.VisualAnnotation; false if a stage failed.
+   bool Run(const RgbaImage& rgba, std::string* visual_annotation);
+@@ -31,6 +32,8 @@ class OcrEngine {
+   // LearnFromGames: the same lines, text and boxes for less work (LineRecognizer::SetFastMode,
+   // LayoutAnalyzer::AnalyzeFast). The lines come in the order detected, without colors or line texts.
+   void SetFastMode(bool fast);
++  // LearnFromGames: the language of what is read, "" for not known (LineRecognizer::SetLanguage).
++  void SetLanguage(const std::string& language);
+ 
+  private:
+   std::shared_ptr<Resources> resources_;
+diff --git a/cpp/src/recognizer.cc b/cpp/src/recognizer.cc
+index 30dd698..a7fd0e8 100644
+--- a/cpp/src/recognizer.cc
++++ b/cpp/src/recognizer.cc
+@@ -294,11 +294,27 @@ class ScriptRecognizer {
+   }
+   int num_labels() const { return static_cast<int>(labels_.size()); }
+   void SetTightBatches(bool tight) { tight_batches_ = tight; }
++  void SetRemember(bool remember) {
++    remember_ = remember;
++    if (!remember) remembered_.clear();
++  }
+ 
+  private:
+   Config cfg_;
+   std::vector<std::unique_ptr<TfliteModel>> models_;  // interpreter pool
+   bool tight_batches_ = false;  // LearnFromGames: see Run
++  // LearnFromGames: the line images read last and what the model gave for them. A screen read again mostly holds
++  // lines it held before (a name, a menu, the line that has not changed), and the same pixels give the same
++  // tensors, so those are not computed twice. Least recently used goes first.
++  struct Remembered {
++    GrayImage image;
++    LineTensors tensors;
++    uint64_t used = 0;
++  };
++  static constexpr size_t kRemembered = 64;
++  bool remember_ = false;
++  std::vector<Remembered> remembered_;
++  uint64_t reads_ = 0;
+   std::map<int, std::string> labels_;
+   std::unique_ptr<CtcBeamDecoder> decoder_;
+   std::map<std::string, int> out_tensor_;  // signature output name -> tensor index
+@@ -403,8 +419,16 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+   };
+   std::vector<std::vector<uint8_t>> chunks;
+   std::vector<ChunkRef> refs;
++  // LearnFromGames: lines whose pixels were read before take their tensors from then (see remembered_).
++  std::vector<int> known(lines.size(), -1);
++  if (remember_)
++    for (size_t li = 0; li < lines.size(); li++)
++      for (size_t k = 0; k < remembered_.size() && known[li] < 0; k++)
++        if (remembered_[k].image.width == lines[li].width && remembered_[k].image.height == lines[li].height &&
++            remembered_[k].image.data == lines[li].data)
++          known[li] = static_cast<int>(k);
+   for (size_t li = 0; li < lines.size(); li++) {
+-    if (lines[li].width <= 0) continue;
++    if (lines[li].width <= 0 || known[li] >= 0) continue;
+     auto cs = Chunks(lines[li]);
+     for (size_t c = 0; c < cs.size(); c++) {
+       const int off = static_cast<int>(c) * kChunkWidth;
+@@ -573,6 +597,29 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+       *v = ReduceGatedSoftmax(act, gate, L.frames, C);
+     }
+   }
++  if (remember_) {
++    reads_++;
++    for (size_t li = 0; li < lines.size(); li++) {
++      if (known[li] < 0) continue;
++      out[li] = remembered_[known[li]].tensors;
++      remembered_[known[li]].used = reads_;
++    }
++    for (size_t li = 0; li < lines.size(); li++) {
++      if (known[li] >= 0 || out[li].frames == 0) continue;
++      size_t slot = remembered_.size();
++      if (slot < kRemembered) {
++        remembered_.emplace_back();
++      } else {
++        slot = 0;
++        for (size_t k = 1; k < remembered_.size(); k++)
++          if (remembered_[k].used < remembered_[slot].used) slot = k;
++        if (remembered_[slot].used == reads_) break;  // this read alone fills the memory
++      }
++      remembered_[slot].image = lines[li];
++      remembered_[slot].tensors = out[li];
++      remembered_[slot].used = reads_;
++    }
++  }
+   return out;
+ }
+ 
+@@ -834,7 +881,7 @@ LineDecode DecodeLine(const LineTensors& L, const ScriptRecognizer& r, const Gra
+ 
+ LineRecognizer::~LineRecognizer() = default;
+ 
+-std::unique_ptr<LineRecognizer> LineRecognizer::Create(const Resources& res) {
++std::unique_ptr<LineRecognizer> LineRecognizer::Create(const Resources& res, const std::string& language) {
+   std::unique_ptr<LineRecognizer> r(new LineRecognizer());
+   r->res_ = &res;
+   std::string bytes;
+@@ -867,10 +914,31 @@ std::unique_ptr<LineRecognizer> LineRecognizer::Create(const Resources& res) {
+     }
+   }
+   if (!r->config_files_.count(r->default_key_)) return nullptr;
++  // LearnFromGames: with the language given and its recognizer there, the multi-script recognizer and the
++  // language ID are not loaded until a read needs them (the language taken away again).
++  r->SetLanguage(language);
++  if (!r->language_key_.empty()) return r;
++  return r->LoadDefault() ? std::move(r) : nullptr;
++}
++
++bool LineRecognizer::LoadDefault() {
++  if (default_loaded_) return true;
+   // Language ID is optional, as in the original: without a loadable model, lines get no language from it.
+-  r->langid_ = LanguageIdentifier::Create(res);
+-  if (!r->Get(r->default_key_)) return nullptr;
+-  return r;
++  langid_ = LanguageIdentifier::Create(*res_);
++  if (!Get(default_key_)) return false;
++  return default_loaded_ = true;
++}
++
++void LineRecognizer::SetLanguage(const std::string& language) {
++  language_.clear();
++  language_key_.clear();
++  if (language.empty()) return;
++  Entity line;
++  line.languages = {language};
++  const std::optional<std::string> key = SelectKey(line);
++  if (!key || !Get(*key)) return;  // no recognizer for it here: the scripts are found line by line, as before
++  language_ = language;
++  language_key_ = *key;
+ }
+ 
+ rec::ScriptRecognizer* LineRecognizer::Get(const std::string& key) {
+@@ -1015,17 +1083,37 @@ bool LineRecognizer::Recognize(const RgbaImage& rgba, const GrayImage& gray, Pag
+   std::optional<std::vector<DetectorPyramidLevel>> pyramid;  // built for the first line of large text
+ 
+   // Recognizes `which` lines with recognizer `key`; first pass also handles the direction head.
++  // LearnFromGames: with the language given (SetLanguage) every line is read once, by that language's
++  // recognizer, and no line's script or language is looked for.
++  const bool direct = !language_key_.empty();
++  if (!direct && !LoadDefault()) return false;
++  const std::string& first_key = direct ? language_key_ : default_key_;
++  // The script recognizers have no direction head; given the language, the line's box says which way it runs.
++  // A box turned past a quarter either way is taken from its other end, so its text is not read upside down.
++  auto angle_of = [](const RotatedBox& b) {
++    float a = fmodf(b.angle, 360.0f);
++    if (a > 180.0f) a -= 360.0f;
++    if (a <= -180.0f) a += 360.0f;
++    return a;
++  };
++
+   auto run_pass = [&](const std::string& key, const std::vector<int>& which) {
+     rec::ScriptRecognizer* r = Get(key);
+     if (!r) return false;
+     r->SetTightBatches(fast_);
++    r->SetRemember(fast_);
+     const rec::Config& cfg = r->config();
++    const bool by_box = direct && cfg.direction_index <= 0;
+     std::vector<GrayImage> images, scaled;
+     for (int w : which) {
+       // Later passes cut the line from its pass-1 box and turn the image when the direction head flipped the
+       // box (not the same pixels as cutting the flipped box: that is off by one pixel in x and y).
+-      const Entity& e = layout->entities[line_idx[w]];
++      Entity& e = layout->entities[line_idx[w]];
+       LineState& st = state[w];
++      if (by_box && e.box && !e.box->curve) {
++        const float a = angle_of(*e.box);
++        if (a > 135.0f || a < -45.0f) e.box = rec::RotateClockwise(*e.box, 2);
++      }
+       if (st.key.empty() && e.box) {
+         const int dis = e.detection ? e.detection->detection_image_scale : 1000;
+         const DetectorPyramidLevel* level = nullptr;
+@@ -1062,7 +1150,19 @@ bool LineRecognizer::Recognize(const RgbaImage& rgba, const GrayImage& gray, Pag
+       st.image = images[k];
+       if (L.frames == 0) continue;
+       bool reversed = false;
+-      if (!L.direction.empty()) {
++      if (by_box && e.box) {
++        const float a = angle_of(*e.box);
++        const int d = a > 45.0f && a <= 135.0f ? 3 : 0;  // 3: a column, read from the top
++        e.orientation = rec::OrientationFromAngle(rec::RotateClockwise(*e.box, d).angle);
++        e.writing_direction = d == 3 ? 2 : 0;
++        e.textline_order = d == 3 ? 1 : 2;
++        e.predicted_direction = d;
++        // The layout's confidence filter adds up the line's confidences with the direction head's, and takes
++        // off what that head calls garbage; neither is known here. 0.1 makes it drop as many lines of scenery as
++        // it did with them: on 210 game screens 8.8 lines a screen were kept either way, and less of the
++        // dialogue was missed (3.4% of its characters for 3.6%). At the head's usual 0.9, 11.7 were kept.
++        e.direction_confidence = 0.1f;
++      } else if (!L.direction.empty()) {
+         const int d = rec::Argmax(L.direction, 4);
+         const RotatedBox rotated = rec::RotateClockwise(*e.box, d);
+         if (d == 1 || d == 2) {
+@@ -1116,7 +1216,9 @@ bool LineRecognizer::Recognize(const RgbaImage& rgba, const GrayImage& gray, Pag
+       }
+       std::string language;
+       std::optional<std::string> predicted_script;
+-      if (!L.script.empty()) {
++      if (direct) {
++        language = language_;
++      } else if (!L.script.empty()) {
+         const int s = rec::Argmax(L.script, static_cast<int>(L.script.size()));
+         const std::string name = s < static_cast<int>(cfg.script_names.size()) ? cfg.script_names[s] : "";
+         predicted_script = name;
+@@ -1159,8 +1261,8 @@ bool LineRecognizer::Recognize(const RgbaImage& rgba, const GrayImage& gray, Pag
+     return p >= 0 && p < static_cast<int>(layout->entities.size()) ? p : line_idx[k];
+   };
+   std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return parent_rank(a) < parent_rank(b); });
+-  if (!run_pass(default_key_, order)) return false;
+-  if ((light_ ? 1 : maximum_iterations_) > 1) {
++  if (!run_pass(first_key, order)) return false;
++  if (!direct && (light_ ? 1 : maximum_iterations_) > 1) {
+     // Second pass: lines whose language selects another recognizer are re-recognized by it; the multi-pass
+     // mutator moves them behind the others, grouped by recognizer key.
+     std::map<std::string, std::vector<int>> second;
+@@ -1244,7 +1346,7 @@ bool LineRecognizer::Recognize(const RgbaImage& rgba, const GrayImage& gray, Pag
+     // Lines kept from the first pass map from their box as recognized. For curved lines the round trip rounds the
+     // curve to float (testdata/extra_fuzz/curve_2pass).
+     RotatedBox lb = line.box ? *line.box : RotatedBox();
+-    if (vertical && state[k].key != default_key_)
++    if (vertical && state[k].key != first_key)
+       lb = rec::RotateClockwise(rec::RotateClockwise(lb, 3), 1);
+     // Curved lines: line-image boxes follow the mid-line curve back onto the page.
+     std::optional<rec::CurveMapper> mapper;
+diff --git a/cpp/src/recognizer.h b/cpp/src/recognizer.h
+index c578a73..cb0aefe 100644
+--- a/cpp/src/recognizer.h
++++ b/cpp/src/recognizer.h
+@@ -27,7 +27,8 @@ class ScriptRecognizer;
+ 
+ class LineRecognizer {
+  public:
+-  static std::unique_ptr<LineRecognizer> Create(const Resources& res);
++  // `language`: see SetLanguage.
++  static std::unique_ptr<LineRecognizer> Create(const Resources& res, const std::string& language = "");
+   ~LineRecognizer();
+ 
+   bool Recognize(const RgbaImage& rgba, const GrayImage& gray, PageLayout* layout);
+@@ -42,11 +43,22 @@ class LineRecognizer {
+ 
+   // LearnFromGames: the same text and boxes for less work. Batches hold only the chunks there are, spread over
+   // the interpreter pool (ScriptRecognizer::Run), and word colors are not estimated.
++  // It also keeps the tensors of the lines read last, so a line whose pixels come again is not computed again.
+   void SetFastMode(bool fast) { fast_ = fast; }
+ 
++  // LearnFromGames: the language of what is read ("ja"), for a caller that knows it; "" for not known, as in
++  // the original. Every line then goes once to that language's recognizer (Jpan for "ja"; the multi-script one
++  // for a language without its own), instead of to the multi-script recognizer first, to the language ID, and
++  // then to the recognizer of whatever script was guessed: a kanji-only line is no longer read as Chinese, and
++  // a read is one pass instead of two or three. A script recognizer has no direction head, so a line runs the
++  // way its box does: across, or down for a box turned a quarter. A language whose recognizer is not installed
++  // changes nothing.
++  void SetLanguage(const std::string& language);
++
+  private:
+   LineRecognizer() = default;
+   rec::ScriptRecognizer* Get(const std::string& key);  // lazily loads the recognizer of a multi-pass key
++  bool LoadDefault();  // the multi-script recognizer and the language ID, once
+ 
+   const Resources* res_ = nullptr;
+   std::unique_ptr<LanguageIdentifier> langid_;
+@@ -55,6 +67,8 @@ class LineRecognizer {
+   int maximum_iterations_ = 2;
+   bool light_ = false;
+   bool fast_ = false;
++  bool default_loaded_ = false;
++  std::string language_, language_key_;  // SetLanguage: the tag, and its recognizer's key ("" for none)
+   std::map<std::string, std::unique_ptr<rec::ScriptRecognizer>> recognizers_;
+ };
+ 

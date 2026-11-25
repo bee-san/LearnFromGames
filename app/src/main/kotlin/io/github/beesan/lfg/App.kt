@@ -2,6 +2,7 @@
 package io.github.beesan.lfg
 
 import android.app.Application
+import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.anki.AnkiBridge
 import io.github.beesan.lfg.anki.CardMaker
 import io.github.beesan.lfg.anki.MediaAttacher
@@ -38,7 +39,7 @@ class App : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val database by lazy { LfgDatabase.open(this) }
     val lines by lazy {
-        LineStore(database) { line ->
+        LineStore(database, language = { (Language.of(settings.prefs.value.language) ?: Language.JAPANESE).tag }) { line ->
             StatsWidgets.requestUpdate(this)
             // "Every line": each new line is translated as it is read, behind the reading. A menu label is not a line.
             val prefs = settings.prefs.value
