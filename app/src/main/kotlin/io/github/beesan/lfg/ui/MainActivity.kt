@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
             val draft by model.draft.collectAsStateWithLifecycle()
             val translation by model.translation.collectAsStateWithLifecycle()
             val explanation by model.explanation.collectAsStateWithLifecycle()
+            val explained by model.explained.collectAsStateWithLifecycle()
             val keyTest by model.keyTest.collectAsStateWithLifecycle()
             val recap by model.recap.collectAsStateWithLifecycle()
             val asking by model.asking.collectAsStateWithLifecycle()
@@ -165,7 +166,8 @@ class MainActivity : ComponentActivity() {
                     else -> Page.SETTINGS
                 }
             }
-            BackHandler(enabled = page != Page.HOME) { back() }
+            // A line's page opened from over a game to ask about the line goes back to the game's lines.
+            BackHandler(enabled = page != Page.HOME) { if (page == Page.LINE && askFromGame) finish() else back() }
 
             Box(Modifier.fillMaxSize().background(Lfg.Bg).safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
                 val frame = Modifier.widthIn(max = 980.dp).padding(horizontal = 24.dp, vertical = 20.dp)
@@ -242,6 +244,7 @@ class MainActivity : ComponentActivity() {
                         )
                         page == Page.LINES -> LinesScreen(
                             lines = lines,
+                            explained = explained,
                             shortcut = shortcutLabel(prefs),
                             loaded = linesLoaded,
                             // Sentence audio is on from the start, and Android has to be asked each session before it can listen.
@@ -329,7 +332,9 @@ class MainActivity : ComponentActivity() {
                             translateContext = prefs.translateContext,
                             onTranslate = model::translateLine,
                             onExplain = model::explainLine,
-                            onBack = ::back,
+                            onAsk = model::askLine,
+                            askNow = askFromGame,
+                            onBack = { if (askFromGame) finish() else back() },
                             pad = LinePad(
                                 onFocused = model.lineLookup::startCursor,
                                 onStep = { forward -> model.lineLookup.move(if (forward) Move.RIGHT else Move.LEFT) },
@@ -550,8 +555,18 @@ class MainActivity : ComponentActivity() {
     /** The note page was opened from over a game: saving or leaving it goes back to the game's lines. */
     private var noteFromGame = false
 
+    /** A line's page was opened from over a game to write a question on: leaving it goes back to the game's lines. */
+    private var askFromGame by mutableStateOf(false)
+
     private fun take(intent: Intent?) {
         if (intent?.action == ACTION_STATS) requested.value = Page.STATS
+        askFromGame = false
+        if (intent?.action == ACTION_ASK_LINE) {
+            model.askFromGame(intent.getStringExtra(EXTRA_LINE)) { found ->
+                askFromGame = found
+                if (found) requested.value = Page.LINE
+            }
+        }
         noteFromGame = intent?.action == ACTION_NOTE
         if (noteFromGame) {
             model.noteFromGame(intent?.getStringExtra(EXTRA_LINE), (intent?.getIntExtra(EXTRA_AT, -1) ?: -1))
@@ -622,6 +637,8 @@ class MainActivity : ComponentActivity() {
 
         /** A note written from over a game: [EXTRA_LINE] is the line's id, [EXTRA_AT] where its word starts in it. */
         const val ACTION_NOTE = "io.github.beesan.lfg.action.NOTE"
+        /** A question to be written about an explained line, from over a game: [EXTRA_LINE] is the line's id. */
+        const val ACTION_ASK_LINE = "io.github.beesan.lfg.action.ASK_LINE"
         const val EXTRA_LINE = "line"
         const val EXTRA_AT = "at"
         private const val EXTRA_MOVED = "moved"

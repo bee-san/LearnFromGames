@@ -16,6 +16,7 @@ import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
+import io.github.beesan.lfg.dict.FoldedDictionaries
 import io.github.beesan.lfg.lookup.CardButton
 import io.github.beesan.lfg.lookup.LookupState
 import kotlinx.serialization.json.JsonPrimitive
@@ -73,6 +74,16 @@ class EntryWebView(
         isFocusable = false
         isFocusableInTouchMode = false
         isVerticalScrollBarEnabled = false
+        // A dictionary folded away in one list is folded in them all, and stays so.
+        if (onLink != null) {
+            addJavascriptInterface(
+                object {
+                    @android.webkit.JavascriptInterface
+                    fun fold(dictionary: String, folded: Boolean) = FoldedDictionaries.set(context, dictionary, folded)
+                },
+                "lfgApp",
+            )
+        }
         webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val url = request.url
@@ -143,7 +154,7 @@ class EntryWebView(
         }
         val head = Perf.measure("entry.head") { EntryHtml.listHead(styles, palette, glass) }
         val body = Perf.measure("entry.html") { EntryHtml.listBody(entries, notes, askVn, back) { audio?.has(it) == true } }
-        val state = "lfgState([" + states.joinToString(",") { "'$it'" } + "],$current,$scroll)"
+        val state = EntryHtml.foldScript(FoldedDictionaries.get(context)) + "lfgState([" + states.joinToString(",") { "'$it'" } + "],$current,$scroll)"
         val script = when {
             head != listHead -> {
                 // New styles or colours: the whole page, once.

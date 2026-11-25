@@ -69,4 +69,14 @@ class KanjiTest {
         assertEquals(beeTitle, DictionaryRepository.kanjiDictionary(all, "Gone")?.title)
         assertNull(DictionaryRepository.kanjiDictionary(listOf(d("KANJIDIC")), ""))
     }
+
+    @Test
+    fun inAListADictionarysNameFoldsItAwayAndAPageOfOneEntryHasNoSuchButton() {
+        val entry = Entry(expression = "生", glossaries = listOf(io.github.beesan.lfg.dict.Glossary(dictionary = "JMdict", glossary = "[\"life\"]")))
+        val listed = EntryHtml.listBody(listOf(entry)) { false }
+        assertTrue(listed.contains("""<div class="lfg-fold" role="button" aria-expanded="true" onclick="lfgToggle(this)"><span class="lfg-source">JMdict</span>"""))
+        assertFalse(EntryHtml.page(entry, emptyList()).contains("lfgToggle(this)"))
+        assertEquals("""lfgFold(["A \"b\"","JMdict"]);""", EntryHtml.foldScript(setOf("JMdict", "A \"b\"")))
+        assertTrue(EntryHtml.listHead(emptyList(), io.github.beesan.lfg.core.Palette.of(io.github.beesan.lfg.core.Palette.PINK, io.github.beesan.lfg.core.Palette.THEME_DARK, systemDark = true)).contains("function lfgToggle"))
+    }
 }

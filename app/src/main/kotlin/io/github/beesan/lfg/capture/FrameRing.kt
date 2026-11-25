@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.capture
 
+import io.github.beesan.lfg.core.BlackBars
+import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.ocr.Frame
 import java.io.File
 
@@ -50,15 +52,22 @@ object FrameRing {
      * move or the encoder fails.
      */
     @Synchronized
-    fun animation(fromMs: Long?, dir: File, name: String): File? {
+    fun animation(fromMs: Long?, dir: File, name: String, trimBars: Boolean = false): File? {
         val chosen = frames.filter { fromMs == null || it.atMs >= fromMs - 1500 }.ifEmpty { frames.toList() }
         // One picture does not move; the still is better than that.
         if (chosen.size < 2) return null
         val durations = IntArray(chosen.size) { i ->
             if (i + 1 < chosen.size) (chosen[i + 1].atMs - chosen[i].atMs).toInt().coerceIn(40, 1000) else 1500
         }
+        // The bars are where the last picture, with the whole line on it, has them.
+        val last = chosen.last()
+        val whole = Box(0, 0, last.width, last.height)
+        val box = if (trimBars) BlackBars.inside(last.argb, last.width, last.height) else whole
         val bytes = try {
-            AnimatedWebp.encode(Array(chosen.size) { chosen[it].argb }, chosen[0].width, chosen[0].height, durations, 70)
+            AnimatedWebp.encode(
+                Array(chosen.size) { if (box == whole) chosen[it].argb else BlackBars.crop(chosen[it].argb, last.width, box) },
+                box.width, box.height, durations, 70,
+            )
         } catch (_: Throwable) {
             null
         } ?: return null

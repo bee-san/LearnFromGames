@@ -148,10 +148,19 @@ class LfgAccessibilityService : AccessibilityService() {
                     val result = withContext(Dispatchers.IO) {
                         runCatching {
                             val line = app.database.lines().byId(id) ?: error("That line is not saved.")
-                            if (what == OverlayHost.Ask.TRANSLATE) app.translator.translate(line) else app.explainer.explain(line)
+                            if (what == OverlayHost.Ask.TRANSLATE) app.translator.translate(line) else app.explainer.explain(line).explanation
                         }
                     }
                     overlays.onAnswer(id, what, result.getOrNull(), result.exceptionOrNull()?.let { it.message ?: "That did not work. Try again." })
+                }
+            },
+            conversation = { app.explainer.kept(it) },
+            onAskMore = { id, question ->
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching { app.explainer.ask(app.database.lines().byId(id) ?: error("That line is not saved."), question) }
+                    }
+                    overlays.onMore(id, result.exceptionOrNull()?.let { it.message ?: "That did not work. Try again." })
                 }
             },
             onRecapAsked = { gameId, name, what ->
@@ -188,6 +197,8 @@ class LfgAccessibilityService : AccessibilityService() {
             },
         )
         scope.launch { app.dictionaries.state.collect { styles = app.dictionaries.styles() } }
+        // Conversations read in as the app starts, or added to on the app's own page, show over the game too.
+        scope.launch { app.explainer.conversations.collect { overlays.onExplained() } }
         ignored = ignoredPackages()
         instance = this
         _running.value = true
@@ -1213,7 +1224,9 @@ class LfgAccessibilityService : AccessibilityService() {
                 else -> {
                     // A swipe from the edge slides the system bars over a game for a few seconds; it is still the game.
                     val now = SystemClock.uptimeMillis()
-                    if (c.fullscreen) lastFullscreen[c.name] = now
+                    // A question or a note being written in our own card brings the keyboard, and the bars with it,
+                    // for as long as it is written: the game under it is still the game.
+                    if (c.fullscreen || (overlays.typing && front?.game?.packageName == c.name)) lastFullscreen[c.name] = now
                     c.fullscreen || now - (lastFullscreen[c.name] ?: -BARS_GRACE_MS) < BARS_GRACE_MS || declaredGame(c.name)
                 }
             }

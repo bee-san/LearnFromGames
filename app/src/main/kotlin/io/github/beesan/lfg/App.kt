@@ -54,7 +54,10 @@ class App : Application() {
         }
     }
     val translator by lazy { Translator(database) { settings.prefs.value } }
-    val explainer by lazy { io.github.beesan.lfg.ask.Explainer(database) { settings.prefs.value } }
+    val explainer by lazy {
+        io.github.beesan.lfg.ask.Explainer(database, { settings.prefs.value }) { lineId -> cards.refreshExplained(lineId) }
+            .also { made -> scope.launch(Dispatchers.IO) { made.load() } }
+    }
     val recapper by lazy { Recapper(database, { settings.prefs.value }) }
     val asker by lazy { Asker(database, { settings.prefs.value }) }
     val dictionaries by lazy { DictionaryRepository(this) }

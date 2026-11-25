@@ -199,3 +199,19 @@ data class QuestionRow(
     val model: String,
     @ColumnInfo(name = "created_at") val createdAt: Long,
 )
+
+/**
+ * A line's explanation and the questions asked about it afterwards, one row a
+ * line: "Explain again" writes over it. [turns] is JSON
+ * ([io.github.beesan.lfg.ask.Explainer.Turn]); [suggestions] are the
+ * questions offered next, one a line.
+ */
+@Entity(tableName = "explanations")
+data class ExplanationRow(
+    @PrimaryKey @ColumnInfo(name = "line_id") val lineId: String,
+    val explanation: String,
+    @ColumnInfo(defaultValue = "[]") val turns: String = "[]",
+    @ColumnInfo(defaultValue = "") val suggestions: String = "",
+    val model: String,
+    @ColumnInfo(name = "updated_at") val updatedAt: Long,
+)

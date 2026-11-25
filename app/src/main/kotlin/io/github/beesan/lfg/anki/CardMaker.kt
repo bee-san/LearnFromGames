@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.anki
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import io.github.beesan.lfg.Prefs
+import io.github.beesan.lfg.ask.Explainer
+import io.github.beesan.lfg.core.BlackBars
+import io.github.beesan.lfg.core.Sentence
 import io.github.beesan.lfg.capture.FrameRing
 import io.github.beesan.lfg.data.Card
 import io.github.beesan.lfg.data.LfgDatabase
@@ -103,10 +108,14 @@ class CardMaker(
 
         val pictureName = "lfg_${card.createdAt}"
         // A short moving picture of the line appearing, when that is switched on and the frames are there; else the still.
-        val moving = if (prefs().animatedPicture && !content.fromApp) FrameRing.animation(content.lineStartMs, mediaDir, pictureName) else null
-        val picture = moving ?: content.picturePath?.let(::File)?.takeIf { it.isFile }
+        val trim = prefs().trimBars && !content.fromApp
+        val moving = if (prefs().animatedPicture && !content.fromApp) FrameRing.animation(content.lineStartMs, mediaDir, pictureName, trim) else null
+        val still = content.picturePath?.let(::File)?.takeIf { moving == null && it.isFile }
+        val trimmed = still?.takeIf { trim }?.let { withoutBars(it, pictureName) }
+        val picture = moving ?: trimmed ?: still
         val pictureHtml = picture?.let { anki.addPicture(it, pictureName) } ?: ""
         moving?.delete()
+        trimmed?.delete()
         // The word said by a person, from the word audio, when the note type has a field for it.
         val soundName = "lfg_word_${card.createdAt}"
         val sound = if (wordAudio != null && !content.kanji && NoteTypes.hasWordAudioField(target.family, target.fields)) {
@@ -116,7 +125,7 @@ class CardMaker(
         }
         val soundTag = sound?.let { anki.addSound(it, soundName) } ?: ""
         sound?.delete()
-        val fields = NoteTypes.fill(target.family, target.fields, content, pictureHtml, soundTag)
+        val fields = NoteTypes.fill(target.family, target.fields, content, pictureHtml, soundTag, explained(card.lineId))
         val noteId = anki.addNote(target, fields, setOfNotNull("LFG", NoteTypes.gameTag(content.gameName), "Kanji".takeIf { content.kanji }))
         if (noteId == null) {
             db.cards().update(card.copy(state = Card.STATE_FAILED))
@@ -127,5 +136,58 @@ class CardMaker(
         store.attachNote(card.lineId, noteId)
         media.audioFor(added, target, content.lineStartMs, content.fromApp)
         return CardResult.Added(noteId)
+    }
+
+    /** The line's explanation and what was asked about it, as the card's field has it; empty when there is none. */
+    private suspend fun explained(lineId: String): String =
+        db.explanations().of(lineId)?.let { Explainer.html(Explainer.conversation(it), Sentence::escapeHtml) }.orEmpty()
+
+    /**
+     * The line was explained, or asked about, after its cards were made: they take what was said now.
+     * Only where the field still holds what this app put there, so nothing written by hand is lost.
+     */
+    suspend fun refreshExplained(lineId: String) = withContext(Dispatchers.IO) {
+        try {
+            if (anki.status() != AnkiStatus.READY) return@withContext
+            val cards = db.cards().addedFor(lineId)
+            if (cards.isEmpty()) return@withContext
+            val target = anki.target ?: return@withContext
+            val index = NoteTypes.miscField(target.family, target.fields) ?: return@withContext
+            val text = explained(lineId)
+            for (card in cards) {
+                val noteId = card.noteId ?: continue
+                val game = try {
+                    Json.decodeFromString<CardContent>(card.payload).gameName
+                } catch (_: Exception) {
+                    continue
+                }
+                anki.setFieldIf(noteId, index, NoteTypes.misc(game, text)) { it == NoteTypes.misc(game, "") || it.startsWith(NoteTypes.misc(game, "") + NoteTypes.MISC_BREAK) }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("LfgCards", "a card's explanation was not updated", e)
+        }
+    }
+
+    /** [picture] without its black bars, as a new file to send and delete; null when it has none or cannot be read. */
+    private fun withoutBars(picture: File, name: String): File? = try {
+        val bitmap = BitmapFactory.decodeFile(picture.path)
+        if (bitmap == null) {
+            null
+        } else {
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            val box = BlackBars.inside(pixels, bitmap.width, bitmap.height)
+            if (box.width == bitmap.width && box.height == bitmap.height) {
+                null
+            } else {
+                mediaDir.mkdirs()
+                File(mediaDir, "$name.trim.jpg").also { out ->
+                    out.outputStream().use { Bitmap.createBitmap(bitmap, box.left, box.top, box.width, box.height).compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                }
+            }
+        }
+    } catch (e: Throwable) {
+        android.util.Log.w("LfgCards", "trimming a picture failed", e)
+        null
     }
 }

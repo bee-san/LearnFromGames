@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import android.widget.TextView
 import io.github.beesan.lfg.Prefs
+import io.github.beesan.lfg.ask.Explainer
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.TapGate
 import io.github.beesan.lfg.core.WheelAction
@@ -38,6 +39,7 @@ import io.github.beesan.lfg.ui.EntryLink
 import io.github.beesan.lfg.ui.EntryScroller
 import io.github.beesan.lfg.ui.Lfg
 import io.github.beesan.lfg.ui.LineRowUi
+import io.github.beesan.lfg.ui.TalkUi
 import io.github.beesan.lfg.ui.EntryWebView
 import io.github.beesan.lfg.ui.htmlState
 import io.github.beesan.lfg.ui.palette
@@ -87,6 +89,10 @@ class OverlayHost(
     private val gameBoxes: () -> List<Box?>,
     /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
     private val onAsk: (lineId: String, what: Ask) -> Unit,
+    /** A line's explanation and what was asked about it since, as kept with the line; null for a line not explained. */
+    private val conversation: (lineId: String) -> Explainer.Conversation?,
+    /** A question asked about an explained line; [onMore] hears when it is answered, and [conversation] then has the answer. */
+    private val onAskMore: (lineId: String, question: String) -> Unit,
     /** A question about the game in front, asked from the wheel; the answer comes back through [onGameAnswer]. */
     private val onAskGame: (question: String) -> Unit,
     /** A recap chosen on the lines' screen for the game being read; it comes back through [onRecap]. */
@@ -1216,7 +1222,8 @@ class OverlayHost(
                 // The translation is short: it stays under its line. What went wrong, or that it is being asked, is in the sheet.
                 translation = id?.let { translations[it]?.text } ?: row.saved?.translation,
                 card = row.saved?.noteIds?.isNotEmpty() == true,
-                explained = id != null && explanations[id]?.text != null,
+                explained = id != null && conversation(id) != null,
+                questions = id?.let { conversation(it)?.turns?.size } ?: 0,
                 current = row.onScreen >= 0,
                 lit = lit,
                 markStart = if (mark) state.spanStart else 0,
@@ -1234,7 +1241,9 @@ class OverlayHost(
             val line = sheetLine()
             val translating = tab == SheetTab.TRANSLATE
             val asked = line?.let { (if (translating) translations else explanations)[it.id] }
-            val known = asked?.text ?: if (translating) line?.translation?.ifBlank { null } else null
+            val talk = line?.takeIf { !translating }?.let { conversation(it.id) }
+            val known = if (translating) asked?.text ?: line?.translation?.ifBlank { null } else talk?.explanation
+            val confirm = talk != null && confirmAgain == line?.id
             val name = tab.label
             val text = when {
                 line == null -> "This text is not kept as a line, so it cannot be asked about."
@@ -1250,6 +1259,9 @@ class OverlayHost(
                 again = if (!ai || line == null) null else if (asked?.busy == true) "$name…" else if (known != null) "$name again" else name,
                 againEnabled = asked?.busy != true,
                 key = "$tab:${line?.id}",
+                talk = talk?.takeIf { asked?.busy != true }?.let { talkUi(line!!.id, it) },
+                canAsk = ai && talk != null && !talk.full && asked?.busy != true && moreAsked[line?.id]?.busy != true,
+                confirm = if (confirm && talk != null) startOver(talk) else null,
             )
         }
 
@@ -1277,12 +1289,13 @@ class OverlayHost(
 
         /** A tab chosen: the sheet opens on it, and a line not yet translated or explained is asked about at once. */
         private fun pickTab(tab: SheetTab) {
+            confirmAgain = null
             openSheet(tab)
             val line = sheetLine() ?: return
             if (!prefs().aiReady) return
             when (tab) {
                 SheetTab.TRANSLATE -> if (translations[line.id]?.let { it.text ?: it.error } == null && line.translation.isNullOrBlank()) ask(line.id, Ask.TRANSLATE)
-                SheetTab.EXPLAIN -> if (explanations[line.id]?.let { it.text ?: it.error } == null) ask(line.id, Ask.EXPLAIN)
+                SheetTab.EXPLAIN -> if (conversation(line.id) == null && explanations[line.id]?.error == null) ask(line.id, Ask.EXPLAIN)
                 SheetTab.RECAP -> Unit
             }
         }
@@ -1341,11 +1354,32 @@ class OverlayHost(
                 else beginNote(Noting(lookupLine(line), null), "Note on this line")
             }
 
-            override fun closeSheet() = if (sheetTab != null) openSheet(null) else controller.clear()
+            override fun closeSheet() {
+                confirmAgain = null
+                if (sheetTab != null) openSheet(null) else controller.clear()
+            }
 
             override fun again() {
                 val line = sheetLine() ?: return
-                ask(line.id, if (sheetTab == SheetTab.EXPLAIN) Ask.EXPLAIN else Ask.TRANSLATE)
+                if (sheetTab == SheetTab.EXPLAIN) explainAgain(line.id) else ask(line.id, Ask.TRANSLATE)
+            }
+
+            override fun keep() {
+                confirmAgain = null
+                refresh()
+            }
+
+            override fun askMore(question: String) {
+                sheetLine()?.let { this@OverlayHost.askMore(it.id, question) }
+            }
+
+            /** Written on the app's own page, which has the keyboard: nothing drawn over other apps can have it above it. */
+            override fun typeMore() {
+                val line = sheetLine() ?: return
+                openApp(
+                    android.content.Intent(io.github.beesan.lfg.ui.MainActivity.ACTION_ASK_LINE)
+                        .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_LINE, line.id),
+                )
             }
 
             /** Asks for a recap of the game being read, which its newest kept line names. */
@@ -1395,7 +1429,78 @@ class OverlayHost(
     private class Answer(val text: String? = null, val busy: Boolean = false, val error: String? = null)
 
     private val translations = HashMap<String, Answer>()
+
+    /** Whether each line's explanation is being asked for, and what went wrong; the explanation itself is [conversation]'s. */
     private val explanations = HashMap<String, Answer>()
+
+    /** A question asked about an explained line that has no answer yet: being answered, or what went wrong. */
+    private class More(val question: String, val busy: Boolean, val error: String? = null)
+
+    private val moreAsked = HashMap<String, More>()
+
+    /** The line "Explain again" was pressed on and must be pressed on once more: its questions go with its explanation. */
+    private var confirmAgain: String? = null
+
+    /** The card's questions to ask next, as last drawn, and which the controller is on. */
+    private var cardAsks: List<CardChoice> = emptyList()
+    private var askCursor = 0
+
+    /** A question is being written in the Explain card, and whether the card as last drawn lets one be. */
+    private var explainTyping = false
+    private var cardCanType = false
+
+    /** What was asked about [lineId] after its explanation, with the question waiting for its answer. */
+    private fun talkUi(lineId: String, talk: Explainer.Conversation): TalkUi {
+        val more = moreAsked[lineId]
+        return TalkUi(
+            turns = talk.turns, asking = more?.question, error = more?.error,
+            suggestions = if (more?.busy == true || talk.full) emptyList() else talk.suggestions, full = talk.full,
+        )
+    }
+
+    private fun startOver(talk: Explainer.Conversation) =
+        "Start over? " + (if (talk.turns.size == 1) "The question asked goes" else "The ${talk.turns.size} questions asked go") + " with this explanation."
+
+    /** The conversation about a line changed: wherever it shows is drawn again. */
+    private fun talkChanged() {
+        panelView?.refresh()
+        if (cardFor == WheelAction.EXPLAIN) render()
+    }
+
+    /** The conversations kept were read in, or one was added to elsewhere. */
+    fun onExplained() = talkChanged()
+
+    /** Explain again: asked twice of a line with questions, which go with the explanation they were asked of. */
+    private fun explainAgain(lineId: String) {
+        if (explanations[lineId]?.busy == true) return
+        if ((conversation(lineId)?.turns?.size ?: 0) > 0 && confirmAgain != lineId) {
+            confirmAgain = lineId
+            talkChanged()
+            return
+        }
+        confirmAgain = null
+        moreAsked.remove(lineId)
+        ask(lineId, Ask.EXPLAIN)
+        if (cardFor == WheelAction.EXPLAIN) render()
+    }
+
+    private fun askMore(lineId: String, question: String) {
+        val asked = question.trim()
+        val talk = conversation(lineId) ?: return
+        if (asked.isEmpty() || talk.full || moreAsked[lineId]?.busy == true || explanations[lineId]?.busy == true) return
+        confirmAgain = null
+        moreAsked[lineId] = More(asked, busy = true)
+        askCursor = 0
+        talkChanged()
+        onAskMore(lineId, asked)
+    }
+
+    /** A question about a line was answered, and [conversation] has the answer; or it was not, and [error] says why. */
+    fun onMore(lineId: String, error: String?) {
+        val asked = moreAsked[lineId]
+        if (error == null || asked == null) moreAsked.remove(lineId) else moreAsked[lineId] = More(asked.question, busy = false, error = error)
+        talkChanged()
+    }
 
     private fun answers(what: Ask) = if (what == Ask.TRANSLATE) translations else explanations
 
@@ -1511,10 +1616,14 @@ class OverlayHost(
     val canOpenWheel: Boolean
         get() = gameInFront && !asking && gameDisplay != Display.INVALID_DISPLAY && picker == null && noting == null
 
+    /** Whether something is being written in a window of ours over the game, with the keyboard up for it. */
+    val typing: Boolean get() = noting != null || (cardFor != null && cardTyping())
+
     private fun focusView(): FocusView? = focus?.view as? FocusView
 
     /** A note or a question is being written in the card: it has the focus, for the keyboard. */
-    private fun cardTyping() = cardFor == WheelAction.NOTE || (cardFor == WheelAction.ASK && prefs().aiReady && prefs().ask)
+    private fun cardTyping() = cardFor == WheelAction.NOTE || (cardFor == WheelAction.ASK && prefs().aiReady && prefs().ask) ||
+        (cardFor == WheelAction.EXPLAIN && explainTyping)
 
     /**
      * Opens the wheel over the game, as the shortcut is held; false when it
@@ -1578,6 +1687,8 @@ class OverlayHost(
             return
         }
         cardFor = null
+        explainTyping = false
+        confirmAgain = null
         cardScrollSpeed = 0f
         handler.removeCallbacks(cardScroller)
         card?.setFocusable(false)
@@ -1616,12 +1727,15 @@ class OverlayHost(
     /** The card for [action], asking for its answer if there is none yet. */
     private fun openCard(action: WheelAction) {
         cardFor = action
+        explainTyping = false
+        confirmAgain = null
+        askCursor = 0
         recapCursor = recapOf?.ordinal ?: 0
         val id = wheelLine?.lineId
         val ai = prefs().aiReady
         when (action) {
             WheelAction.TRANSLATE -> if (ai && id != null && translations[id]?.text == null && savedTranslation(id) == null) ask(id, Ask.TRANSLATE)
-            WheelAction.EXPLAIN -> if (ai && id != null && explanations[id]?.text == null) ask(id, Ask.EXPLAIN)
+            WheelAction.EXPLAIN -> if (ai && id != null && conversation(id) == null) ask(id, Ask.EXPLAIN)
             // A fresh question each time, unless one is still being answered.
             WheelAction.ASK -> if (gameAnswer?.busy != true) gameAnswer = null
             else -> Unit
@@ -1691,8 +1805,24 @@ class OverlayHost(
         val screen = bounds(displayId) ?: return
         val view = cardView ?: AnswerCard(
             context,
-            onClose = { putAwayWheel() },
-            onAsk = ::askGame,
+            // From a question being written about a line, back to the line's card.
+            onClose = {
+                if (cardFor == WheelAction.EXPLAIN && explainTyping) {
+                    explainTyping = false
+                    render()
+                } else {
+                    putAwayWheel()
+                }
+            },
+            onAsk = { text ->
+                if (cardFor == WheelAction.EXPLAIN) {
+                    explainTyping = false
+                    wheelLine?.lineId?.let { askMore(it, text) }
+                    render()
+                } else {
+                    askGame(text)
+                }
+            },
             onSaveNote = { text, keep -> saveNote(text, keep) },
             onNoteBack = { endNote(); render() },
         ).also { made ->
@@ -1712,12 +1842,14 @@ class OverlayHost(
         }
         val edge = context.dp(10f)
         val landscape = screen.width > screen.height
-        // Landscape: a box at the right of the screen, as tall as what it says, from the top, where a
-        // game's dialogue seldom is. Portrait: the width of the screen, above or below the line.
+        // Landscape: a box down the right of the screen, the whole height of it, so what it says has
+        // room. Portrait: the width of the screen, as tall as what it says, above or below the line.
         val width = if (landscape) minOf(context.dp(480f), screen.width * 42 / 100) else screen.width - 2 * edge
         val most = if (landscape) screen.height - 2 * edge else screen.height * 62 / 100
         val height = if (what == WheelAction.NOTE) {
             minOf(most, context.dp(330f))
+        } else if (landscape) {
+            most
         } else {
             view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
             view.measuredHeight.coerceIn(context.dp(96f), most)
@@ -1756,28 +1888,82 @@ class OverlayHost(
                 val translate = what == WheelAction.TRANSLATE
                 val kind = if (translate) Ask.TRANSLATE else Ask.EXPLAIN
                 val answer = id?.let { answers(kind)[it] }
-                val known = answer?.text ?: if (translate) id?.let(::savedTranslation) else null
+                val talk = id?.takeIf { !translate }?.let(conversation)
+                val known = if (translate) answer?.text ?: id?.let(::savedTranslation) else talk?.explanation
                 val doing = if (translate) "translated" else "explained"
                 val (text, color) = when {
                     line == null -> "Nothing has been read on this screen yet." to Ink.DIM
                     id == null -> "This text is not kept as one of the game's lines, so it cannot be $doing." to Ink.DIM
                     !p.aiReady -> "${what.label} uses the model in Settings › Translation, with your OpenRouter key." to Ink.DIM
                     answer?.error != null -> answer.error to Ink.ACCENT
+                    answer?.busy == true && !translate -> "Explaining…" to Ink.DIM
                     known != null -> known to Ink.TEXT
                     else -> (if (translate) "Translating…" else "Explaining…") to Ink.DIM
                 }
                 val other = if (translate) WheelAction.EXPLAIN else WheelAction.TRANSLATE
                 val usable = p.aiReady && id != null
+                // The conversation about the line, once it is explained and not being explained anew.
+                val said = talk?.takeIf { usable && answer?.busy != true }?.let { talkUi(id!!, it) }
+                val startingOver = said != null && confirmAgain == id
+                val typing = said != null && explainTyping
+                val canAsk = said != null && !said.full && moreAsked[id]?.busy != true
+                val asks = if (said == null || startingOver || typing) emptyList() else {
+                    val offered = said.suggestions.map { q -> q to { askMore(id!!, q) } } +
+                        if (canAsk) listOf("Ask something else…" to { explainTyping = true; render() }) else emptyList()
+                    askCursor = askCursor.coerceIn(0, (offered.size - 1).coerceAtLeast(0))
+                    offered.mapIndexed { i, (label, press) -> CardChoice(label, chosen = false, marked = pad && i == askCursor, enabled = true, onPress = press) }
+                }
+                cardAsks = asks
+                cardCanType = asks.isNotEmpty() && canAsk
+                val turns = said?.let { s ->
+                    s.turns.map { CardTurn(it.question, it.answer) } +
+                        listOfNotNull(s.asking?.let { CardTurn(it, s.error, if (s.error != null) Ink.ACCENT else Ink.TEXT) })
+                }.orEmpty()
+                val count = said?.turns?.size ?: 0
                 CardContent(
-                    title = if (translate) "Translation" else "Explanation",
+                    title = if (translate) "Translation" else "Explanation" + when (count) {
+                        0 -> ""
+                        1 -> " · 1 question"
+                        else -> " · $count questions"
+                    },
                     line = line?.text,
+                    question = typing,
+                    questionHint = "Ask about this line",
                     body = text,
                     bodyColor = color,
-                    pills = if (!usable) emptyList() else listOf(
-                        CardPill(if (answer?.busy == true) "${what.label}…" else "Again", enabled = answer?.busy != true) { id?.let { ask(it, kind) }; render() },
-                        CardPill(other.label) { openCard(other) },
+                    turns = turns,
+                    asks = asks,
+                    prompt = when {
+                        startingOver -> startOver(talk!!)
+                        said?.full == true -> "That is ${Explainer.MAX_QUESTIONS} questions on this line. Again starts over."
+                        else -> null
+                    },
+                    pills = when {
+                        !usable -> emptyList()
+                        // Only Close beside a question being written: there is little room over the keyboard.
+                        typing -> emptyList()
+                        startingOver -> listOf(
+                            CardPill("Start over") { explainAgain(id!!) },
+                            CardPill("Keep") { confirmAgain = null; render() },
+                        )
+                        else -> listOf(
+                            CardPill(if (answer?.busy == true) "${what.label}…" else "Again", enabled = answer?.busy != true) {
+                                if (translate) ask(id!!, kind) else explainAgain(id!!)
+                                render()
+                            },
+                            CardPill(other.label) { openCard(other) },
+                        )
+                    },
+                    hints = keys(
+                        when {
+                            !usable -> "$close Close"
+                            translate -> "$confirm ${other.label}    $close Close    ▲ ▼ Scroll"
+                            startingOver -> "$confirm Start over    $close Keep"
+                            asks.isNotEmpty() -> "$confirm Ask    X Type your own    ▲ ▼ Choose    Stick Scroll    Y Translate    $close Close"
+                            else -> "$confirm ${other.label}    $close Close    ▲ ▼ Scroll"
+                        },
                     ),
-                    hints = keys(if (usable) "$confirm ${other.label}    $close Close    ▲ ▼ Scroll" else "$close Close"),
+                    key = "$what:$id",
                 )
             }
             WheelAction.RECAP -> {
@@ -1934,14 +2120,41 @@ class OverlayHost(
         val close = if (swap) KeyEvent.KEYCODE_BUTTON_A else KeyEvent.KEYCODE_BUTTON_B
         val step = service.dp(90f)
         when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP -> if (down) cardView?.scrollBy(-step)
-            KeyEvent.KEYCODE_DPAD_DOWN -> if (down) cardView?.scrollBy(step)
+            KeyEvent.KEYCODE_DPAD_UP -> if (down && !moveAskCursor(-1)) cardView?.scrollBy(-step)
+            KeyEvent.KEYCODE_DPAD_DOWN -> if (down && !moveAskCursor(1)) cardView?.scrollBy(step)
+            // On release: the field the question is written in must not get this button's up.
+            KeyEvent.KEYCODE_BUTTON_X -> if (!down && explainAsks() && cardCanType) {
+                explainTyping = true
+                render()
+            }
+            KeyEvent.KEYCODE_BUTTON_Y -> if (down && event.repeatCount == 0 && cardFor == WheelAction.EXPLAIN && prefs().aiReady && wheelLine?.lineId != null) {
+                openCard(WheelAction.TRANSLATE)
+            }
             KeyEvent.KEYCODE_DPAD_LEFT -> if (down && event.repeatCount == 0) moveRecapCursor(-1)
             KeyEvent.KEYCODE_DPAD_RIGHT -> if (down && event.repeatCount == 0) moveRecapCursor(1)
             confirm, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (down && event.repeatCount == 0) cardConfirm()
-            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) putAwayWheel()
+            // "Start over?" is answered first: no keeps the conversation and the card.
+            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) {
+                if (cardFor == WheelAction.EXPLAIN && confirmAgain != null) {
+                    confirmAgain = null
+                    render()
+                } else {
+                    putAwayWheel()
+                }
+            }
             else -> return KeyEvent.isGamepadButton(event.keyCode)
         }
+        return true
+    }
+
+    /** Whether the Explain card is offering questions to ask, which the controller chooses among. */
+    private fun explainAsks() = cardFor == WheelAction.EXPLAIN && cardAsks.isNotEmpty()
+
+    /** Moves the controller among the questions to ask next; false when the card has none, and it scrolls. */
+    private fun moveAskCursor(by: Int): Boolean {
+        if (!explainAsks()) return false
+        askCursor = (askCursor + by).coerceIn(0, cardAsks.size - 1)
+        render()
         return true
     }
 
@@ -1985,7 +2198,16 @@ class OverlayHost(
     private fun cardConfirm() {
         when (cardFor) {
             WheelAction.TRANSLATE -> if (prefs().aiReady && wheelLine?.lineId != null) openCard(WheelAction.EXPLAIN)
-            WheelAction.EXPLAIN -> if (prefs().aiReady && wheelLine?.lineId != null) openCard(WheelAction.TRANSLATE)
+            // The question the controller is on; "Start over?" answered yes; else, as on Translate, the other of the two.
+            WheelAction.EXPLAIN -> {
+                val id = wheelLine?.lineId
+                when {
+                    !prefs().aiReady || id == null -> Unit
+                    confirmAgain == id -> explainAgain(id)
+                    explainAsks() -> cardAsks.getOrNull(askCursor)?.onPress?.invoke()
+                    else -> openCard(WheelAction.TRANSLATE)
+                }
+            }
             WheelAction.RECAP -> gameLineNow()?.takeIf { prefs().aiReady }?.let { askRecapOf(it, RecapOf.entries[recapCursor]) }
             WheelAction.LINES -> {
                 putAwayWheel()

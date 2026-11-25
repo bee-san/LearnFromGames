@@ -727,6 +727,9 @@ fun MediaScreen(prefs: Prefs, recording: Boolean, onChange: ((Prefs) -> Prefs) -
     Card("Animated picture", "The moments around the line as a short moving picture, instead of a still.") {
         OnOff(prefs.animatedPicture) { v -> onChange { it.copy(animatedPicture = v) } }
     }
+    Card("Trim black bars", "A card’s picture is cut to the game, without the black an emulator puts round it.") {
+        OnOff(prefs.trimBars) { v -> onChange { it.copy(trimBars = v) } }
+    }
 }
 
 /** Ordinary apps: how a reading is asked for, and what is kept from it. */

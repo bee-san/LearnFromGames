@@ -100,7 +100,11 @@ object NoteTypes {
         }.sortedWith(compareByDescending<Choice> { it.candidate.noteCount }.thenBy { it.candidate.id }).firstOrNull()
 
     /** The value of every field of the note type, in its own order. Unmapped fields stay empty. */
-    fun fill(family: Family, fields: List<String>, content: CardContent, pictureHtml: String = "", wordAudio: String = ""): Array<String> {
+    fun fill(
+        family: Family, fields: List<String>, content: CardContent, pictureHtml: String = "", wordAudio: String = "",
+        /** The line's explanation and what was asked about it, as HTML; empty for none. */
+        explained: String = "",
+    ): Array<String> {
         val lookupFamily = if (family == Family.OWN) Family.LAPIS else family
         val definition = definitionHtml(content.senses)
         val hasDefinitionField = fields.any { slotOf(lookupFamily, it) == Slot.DEFINITION }
@@ -131,10 +135,23 @@ object NoteTypes {
                     else -> content.pitchPositions.joinToString("", "<ol>", "</ol>") { "<li>$it</li>" }
                 }
                 Slot.FREQUENCY -> content.frequencyRank?.toString() ?: ""
-                Slot.MISC -> Sentence.escapeHtml(content.gameName)
+                Slot.MISC -> misc(content.gameName, explained)
                 null -> ""
             }
         }.toTypedArray()
+    }
+
+    /** Between the game's name and the explanation in the field that holds both. */
+    const val MISC_BREAK = "<br><br>"
+
+    /** The game's name, and under it the line's explanation and what was asked about it ([explained], HTML) when there is one. */
+    fun misc(gameName: String, explained: String): String =
+        Sentence.escapeHtml(gameName) + if (explained.isEmpty()) "" else MISC_BREAK + explained
+
+    /** Which field of the note type takes the game's name and the explanation, if it has one. */
+    fun miscField(family: Family, fields: List<String>): Int? {
+        val lookupFamily = if (family == Family.OWN) Family.LAPIS else family
+        return fields.indexOfFirst { slotOf(lookupFamily, it) == Slot.MISC }.takeIf { it >= 0 }
     }
 
     /** Whether the note type has a field for the word's own sound. */
@@ -181,6 +198,6 @@ object NoteTypes {
 .sentence b { color: #b1a5ee; }
 .definition { text-align: left; display: inline-block; max-width: 34em; }
 .picture img { max-width: 100%; max-height: 50vh; }
-.misc { color: #aaa8b2; font-size: 12px; }
+.misc { color: #aaa8b2; font-size: 12px; text-align: left; display: inline-block; max-width: 44em; }
 hr { border: 0; border-top: 1px solid #454653; }"""
 }

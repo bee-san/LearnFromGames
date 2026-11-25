@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import io.github.beesan.lfg.App
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.anki.AnkiStatus
+import io.github.beesan.lfg.ask.Explainer
 import io.github.beesan.lfg.ask.OpenRouter
 import io.github.beesan.lfg.backup.Backup
 import android.content.Intent
@@ -318,7 +319,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openLine(line: GameLine) {
         opened = line
         _translation.value = TranslationState(line.translation)
-        _explanation.value = TranslationState(app.explainer.kept(line.id))
+        _explanation.value = ExplainState(app.explainer.kept(line.id))
+        // Explained long ago, it is not in memory: it is read from the line's row.
+        viewModelScope.launch {
+            val kept = app.explainer.conversation(line.id)
+            if (opened?.id == line.id && _explanation.value.talk == null) _explanation.update { it.copy(talk = kept) }
+        }
         lineLookup.setLines(listOf(LookupLine(line.lineText, line.id, picture(line), line.gameName, gameId = line.gameId)))
     }
 
@@ -347,22 +353,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** The open line's explanation: kept since the app started, being asked for, or what went wrong. */
-    private val _explanation = MutableStateFlow(TranslationState())
-    val explanation: StateFlow<TranslationState> = _explanation
+    /**
+     * The open line's explanation and what was asked about it since ([talk]): being explained ([busy]) or
+     * why it was not ([error]); the question waiting for its answer ([asking]) or why it got none ([askError]).
+     */
+    data class ExplainState(
+        val talk: Explainer.Conversation? = null,
+        val busy: Boolean = false,
+        val error: String? = null,
+        val asking: String? = null,
+        val askError: String? = null,
+    )
 
+    /** The lines explained, as far as memory holds them: marked in the list of lines. */
+    val explained: StateFlow<Map<String, Explainer.Conversation>> get() = app.explainer.conversations
+
+    private val _explanation = MutableStateFlow(ExplainState())
+    val explanation: StateFlow<ExplainState> = _explanation
+
+    /** Explains the open line, in place of any explanation and questions it has. */
     fun explainLine() {
         val line = opened ?: return
         if (_explanation.value.busy) return
-        _explanation.update { it.copy(busy = true, error = null) }
+        _explanation.update { it.copy(busy = true, error = null, asking = null, askError = null) }
         viewModelScope.launch {
             val answer = try {
-                TranslationState(app.explainer.explain(line))
+                ExplainState(app.explainer.explain(line))
             } catch (e: OpenRouter.Failure) {
-                TranslationState(_explanation.value.text, error = e.message)
+                ExplainState(_explanation.value.talk, error = e.message)
             }
             // Another line may have been opened while this one was asked about.
             if (opened?.id == line.id) _explanation.value = answer
+        }
+    }
+
+    /** Asks [question] about the open line, after its explanation. */
+    fun askLine(question: String) {
+        val line = opened ?: return
+        val asked = question.trim()
+        val now = _explanation.value
+        if (asked.isEmpty() || now.busy || now.talk == null || (now.asking != null && now.askError == null)) return
+        _explanation.update { it.copy(asking = asked, askError = null) }
+        viewModelScope.launch {
+            val answer = try {
+                ExplainState(app.explainer.ask(line, asked))
+            } catch (e: OpenRouter.Failure) {
+                _explanation.value.copy(askError = e.message)
+            }
+            if (opened?.id == line.id) _explanation.value = answer
+        }
+    }
+
+    /**
+     * A line opened from over a game to have a question written about it: [lineId]'s page, or nothing
+     * when the line is gone.
+     */
+    fun askFromGame(lineId: String?, then: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val line = lineId?.let { id -> withContext(Dispatchers.IO) { app.database.lines().byId(id) } }
+            if (line != null) openLine(line)
+            then(line != null)
         }
     }
 

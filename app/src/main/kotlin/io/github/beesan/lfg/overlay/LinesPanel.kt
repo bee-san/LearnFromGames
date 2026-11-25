@@ -64,6 +64,9 @@ import io.github.beesan.lfg.ui.LfgButton
 import io.github.beesan.lfg.ui.LineItem
 import io.github.beesan.lfg.ui.LineRowUi
 import io.github.beesan.lfg.ui.NoteItem
+import io.github.beesan.lfg.ui.TalkChips
+import io.github.beesan.lfg.ui.TalkTurns
+import io.github.beesan.lfg.ui.TalkUi
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -75,7 +78,15 @@ sealed interface PanelSheet {
     data class Entry(val heading: String, val message: String?) : PanelSheet
 
     /** [again] is the button that asks once more, or null for none; [key] changes for another line or tab, which starts at the top. */
-    data class Answer(val tab: SheetTab, val text: String, val tone: Tone, val again: String?, val againEnabled: Boolean, val key: String) : PanelSheet
+    data class Answer(
+        val tab: SheetTab, val text: String, val tone: Tone, val again: String?, val againEnabled: Boolean, val key: String,
+        /** What was asked about the line after its explanation; null on Translate, and until it is explained. */
+        val talk: TalkUi? = null,
+        /** Another question can be asked now. */
+        val canAsk: Boolean = false,
+        /** "Start over?", asked before the explanation and its questions are written over; null when not asked. */
+        val confirm: String? = null,
+    ) : PanelSheet
 
     data class Recap(val choices: List<RecapChoice>, val text: String, val tone: Tone) : PanelSheet
 }
@@ -113,6 +124,15 @@ interface PanelActions {
     fun noteTab()
     fun closeSheet()
     fun again()
+
+    /** "Start over?" answered no. */
+    fun keep()
+
+    /** A question offered under an explanation was tapped. */
+    fun askMore(question: String)
+
+    /** The box to write a question of one's own in was tapped. */
+    fun typeMore()
     fun recap(what: RecapOf)
     fun crop()
     fun recapButton()
@@ -127,7 +147,9 @@ interface PanelActions {
  * read, oldest first, the one on screen last and largest, drawn with the same
  * rows as the app's Lines page. Every character can be tapped. A touch beside
  * a line opens the sheet under the lines on it, whose tabs are its translation
- * and explanation, the game's recap, and a note; the lines never move for it,
+ * and explanation, the game's recap, and a note. Under an explanation are the
+ * questions asked about the line since, three more to ask with a tap, and a
+ * box for one of your own, written on the app's page. The lines never move for it,
  * and the recap, about the whole game, takes their place until it is closed.
  * Notes written while playing sit among the lines, at their time. A word
  * picked here has its entry in the sheet.
@@ -167,7 +189,9 @@ fun LinesPanel(
         }
 
         ui.sheet?.let { sheet ->
-            Column(Modifier.fillMaxWidth().weight(if (fullSheet) 1f else SHEET_WEIGHT)) {
+            // An explanation with its questions needs the room: the lines keep the one it is about in sight.
+            val talking = (sheet as? PanelSheet.Answer)?.talk != null
+            Column(Modifier.fillMaxWidth().weight(if (fullSheet) 1f else if (talking) TALK_WEIGHT else SHEET_WEIGHT)) {
                 HorizontalDivider(color = Lfg.Border)
                 Row(
                     Modifier.fillMaxWidth().background(Lfg.Surface).padding(start = 16.dp, top = 6.dp, end = 12.dp, bottom = 6.dp),
@@ -187,10 +211,7 @@ fun LinesPanel(
                         sheet.message?.let { Text(it, color = Lfg.Dim, fontSize = 12.5.sp, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 6.dp)) }
                     }
                     is PanelSheet.Answer -> {
-                        // Another line or tab starts at the top of its answer.
-                        val scroll = key(sheet.key) { rememberScrollState() }
-                        Answer(sheet.text, sheet.tone, Modifier.weight(1f).verticalScroll(scroll).padding(16.dp, 12.dp))
-                        sheet.again?.let { LfgButton(it, actions::again, enabled = sheet.againEnabled, compact = true, modifier = Modifier.padding(start = 16.dp, bottom = 10.dp)) }
+                        AnswerSheet(sheet, actions)
                     }
                     is PanelSheet.Recap -> {
                         if (sheet.choices.isNotEmpty()) {
@@ -267,6 +288,54 @@ private fun Lines(ui: PanelUi, actions: PanelActions, clock: SimpleDateFormat) {
     }
 }
 
+/**
+ * A line's translation, or its explanation with what was asked about it since: the answer and the
+ * questions scroll; under them stay the questions to ask next, the box for one's own, and "again".
+ */
+@Composable
+private fun ColumnScope.AnswerSheet(sheet: PanelSheet.Answer, actions: PanelActions) {
+    // Another line or tab starts at the top of its answer.
+    val scroll = key(sheet.key) { rememberScrollState() }
+    val talk = sheet.talk
+    val said = (talk?.turns?.size ?: 0) + if (talk?.asking != null) 1 else 0
+    Column(Modifier.weight(1f).verticalScroll(scroll).padding(16.dp, 12.dp)) {
+        Answer(sheet.text, sheet.tone, Modifier)
+        if (talk != null && said > 0 || talk?.full == true) TalkTurns(talk, Modifier.padding(top = 10.dp))
+    }
+    // A question just asked, or its answer, is brought into sight; a line opened with questions starts at its explanation.
+    var seen by remember(sheet.key) { mutableStateOf(said) }
+    LaunchedEffect(sheet.key, said, talk?.turns?.size) {
+        if (said > seen || (said == seen && talk?.asking == null && said > 0 && scroll.value > 0)) {
+            withFrameNanos { }
+            scroll.animateScrollTo(scroll.maxValue)
+        }
+        seen = said
+    }
+    val edges = Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, bottom = 10.dp)
+    Column(Modifier.fillMaxWidth()) {
+        if (sheet.confirm != null) {
+            Row(edges, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(sheet.confirm, color = Lfg.Accent, fontSize = 13.5.sp, lineHeight = 19.sp, modifier = Modifier.weight(1f))
+                LfgButton("Start over", actions::again, compact = true)
+                LfgButton("Keep", actions::keep, primary = true, compact = true)
+            }
+        } else {
+            if (talk != null) TalkChips(talk.suggestions, sheet.canAsk, actions::askMore, Modifier.padding(start = 16.dp, end = 12.dp, bottom = 8.dp))
+            Row(edges, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (talk != null && sheet.canAsk) {
+                    val shape = RoundedCornerShape(6.dp)
+                    Text(
+                        "Ask about this line…", color = Lfg.Dim, fontSize = 15.sp, maxLines = 1,
+                        modifier = Modifier.weight(1f).background(Lfg.Sunken, shape).border(1.dp, Lfg.BorderStrong, shape).clickable(onClick = actions::typeMore)
+                            .defaultMinSize(minHeight = 40.dp).padding(horizontal = 12.dp, vertical = 10.dp),
+                    )
+                }
+                sheet.again?.let { LfgButton(it, actions::again, enabled = sheet.againEnabled, compact = true) }
+            }
+        }
+    }
+}
+
 /** The sheet's tabs: the line's translation and explanation, the game's recap, and a note. */
 @Composable
 private fun Tabs(open: SheetTab, actions: PanelActions, modifier: Modifier) {
@@ -293,7 +362,7 @@ private fun androidx.compose.foundation.layout.RowScope.Tab(label: String, chose
 }
 
 @Composable
-private fun ColumnScope.Answer(text: String, tone: Tone, modifier: Modifier) {
+private fun Answer(text: String, tone: Tone, modifier: Modifier) {
     Text(
         text,
         color = when (tone) {
@@ -309,6 +378,9 @@ private fun ColumnScope.Answer(text: String, tone: Tone, modifier: Modifier) {
 
 /** The sheet under the lines takes this much to the lines' 1. */
 private const val SHEET_WEIGHT = 1.35f
+
+/** And this much while it holds an explanation and the questions asked about it. */
+private const val TALK_WEIGHT = 3.2f
 
 /**
  * A Compose view in a window drawn over other apps: such a window has no

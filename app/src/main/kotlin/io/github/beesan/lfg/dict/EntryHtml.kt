@@ -174,7 +174,13 @@ object EntryHtml {
         if (entry.path.isNotEmpty()) append("<div class=\"lfg-path\">").append(escape(entry.path)).append("</div>")
         for ((dictionary, glossaries) in entry.glossaries.groupBy { it.dictionary }) {
             append("<div class=\"lfg-dict\" data-dictionary=\"").append(escape(dictionary)).append("\">")
-            append("<div class=\"lfg-source\">").append(escape(dictionary)).append("</div>")
+            if (index != null) {
+                // In a list the dictionary's name folds it away, in every entry, and unfolds it ([STATE_SCRIPT]'s lfgToggle).
+                append("<div class=\"lfg-fold\" role=\"button\" aria-expanded=\"true\" onclick=\"lfgToggle(this)\"><span class=\"lfg-source\">")
+                append(escape(dictionary)).append("</span>").append(CHEVRON).append("</div>")
+            } else {
+                append("<div class=\"lfg-source\">").append(escape(dictionary)).append("</div>")
+            }
             append("<ol class=\"lfg-senses\">")
             for (g in glossaries) {
                 append("<li>")
@@ -410,6 +416,8 @@ object EntryHtml {
 
     private val UNITLESS = setOf("fontWeight")
 
+    private const val CHEVRON = """<svg class="lfg-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>"""
+
     private const val PENCIL = """<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>"""
 
     private const val SPEAKER = """<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>"""
@@ -423,15 +431,27 @@ object EntryHtml {
     /**
      * The popup's one script. `lfgState(states, current, scroll)` sets each
      * card button's state and name, marks the entry the controller is on, and
-     * scrolls to it when asked. Dictionary content never carries script:
-     * [glossary] keeps only [TAGS] and data, style, lang and title attributes.
+     * scrolls to it when asked. `lfgFold(names)` folds those dictionaries
+     * away in every entry, leaving their names; a tap on a name (`lfgToggle`)
+     * folds or unfolds it and tells the app (`lfgApp.fold`), which keeps it for
+     * every list. Dictionary content never carries script: [glossary] keeps
+     * only [TAGS] and data, style, lang and title attributes.
      */
     private const val STATE_SCRIPT = "var LFG_NAMES={'add':'Add card','adding':'Adding…','in-anki':'Open in Anki','waiting':'Waiting for AnkiDroid'};" +
         "function lfgState(s,c,go){for(var i=0;i<s.length;i++){var b=document.getElementById('c'+i);" +
         "if(b){b.dataset.state=s[i];b.setAttribute('aria-label',LFG_NAMES[s[i]]);b.title=LFG_NAMES[s[i]];}" +
         "var e=document.getElementById('e'+i);if(e){if(i==c)e.setAttribute('data-current','');else e.removeAttribute('data-current');}}" +
         "if(go){var t=document.getElementById('e'+c);if(t)t.scrollIntoView();}}" +
-        "function lfgShow(h){document.body.innerHTML=h;window.scrollTo(0,0);}"
+        "var LFG_FOLD=[];function lfgFolds(){var d=document.querySelectorAll('.lfg-dict');for(var i=0;i<d.length;i++){" +
+        "var f=LFG_FOLD.indexOf(d[i].dataset.dictionary)>=0;if(f)d[i].setAttribute('data-folded','');else d[i].removeAttribute('data-folded');" +
+        "var h=d[i].firstElementChild;if(h)h.setAttribute('aria-expanded',f?'false':'true');}}" +
+        "function lfgFold(a){LFG_FOLD=a;lfgFolds();}" +
+        "function lfgToggle(h){var n=h.parentNode.dataset.dictionary,i=LFG_FOLD.indexOf(n);if(i>=0)LFG_FOLD.splice(i,1);else LFG_FOLD.push(n);" +
+        "lfgFolds();if(window.lfgApp)lfgApp.fold(n,i<0);}" +
+        "function lfgShow(h){document.body.innerHTML=h;lfgFolds();window.scrollTo(0,0);}"
+
+    /** The call that folds the dictionaries named [folded], and unfolds the rest. */
+    fun foldScript(folded: Set<String>): String = "lfgFold(" + JsonArray(folded.sorted().map { JsonPrimitive(it) }) + ");"
 
     private val DEFAULT_PALETTE = Palette.of(Palette.PINK, Palette.THEME_DARK, systemDark = true)
 
@@ -503,6 +523,13 @@ body{margin:0;padding:10px 12px 14px;overflow-wrap:anywhere}
 .lfg-path{color:var(--dim);font-size:.78em;margin:.25em 2px 0}
 .lfg-dict{border:1px solid var(--border);border-radius:10px;background:var(--card);margin-top:8px;padding:7px 10px 9px;box-shadow:0 1px 4px rgba(0,0,0,.14)}
 .lfg-source{display:inline-block;font-size:.68em;font-weight:700;letter-spacing:.02em;line-height:1.65;color:var(--accent);background:var(--soft);border-radius:5px;padding:0 .55em}
+.lfg-fold{display:flex;align-items:center;justify-content:space-between;margin:-7px -10px -4px;padding:7px 10px 4px;min-height:30px;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+.lfg-fold:active{background:var(--soft);border-radius:10px}
+.lfg-chevron{flex:none;width:18px;height:18px;fill:none;stroke:var(--dim);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;transform:rotate(180deg)}
+.lfg-dict[data-folded]{padding-bottom:7px}
+.lfg-dict[data-folded]>.lfg-fold{margin-bottom:-7px;padding-bottom:7px}
+.lfg-dict[data-folded]>:not(.lfg-fold){display:none}
+.lfg-dict[data-folded] .lfg-chevron{transform:none}
 .lfg-senses{margin:.3em 0 0;padding-left:1.35em}
 .lfg-senses>li{margin:.15em 0}
 .lfg-senses>li:only-child{list-style:none;margin-left:-1.35em}

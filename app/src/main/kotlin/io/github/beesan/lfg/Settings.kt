@@ -52,6 +52,8 @@ data class Prefs(
     val spokenLines: Boolean = true,
     /** An animated picture of the moments before the card was made, instead of a still. */
     val animatedPicture: Boolean = false,
+    /** A card's picture loses the black bars an emulator puts round the game. */
+    val trimBars: Boolean = true,
     /** Daily reading goals on the stats screen; 0 is none. */
     val goalMinutes: Int = 60,
     val goalChars: Int = 5_000,
@@ -195,6 +197,7 @@ class Settings(context: Context) {
             sentenceAudio = store.getBoolean("sentenceAudio", d.sentenceAudio),
             spokenLines = store.getBoolean("spokenLines", d.spokenLines),
             animatedPicture = store.getBoolean("animatedPicture", d.animatedPicture),
+            trimBars = store.getBoolean("trimBars", d.trimBars),
             goalMinutes = store.getInt("goalMinutes", d.goalMinutes),
             goalChars = store.getInt("goalChars", d.goalChars),
             goalCards = store.getInt("goalCards", d.goalCards),
@@ -252,6 +255,7 @@ class Settings(context: Context) {
             .putBoolean("sentenceAudio", next.sentenceAudio)
             .putBoolean("spokenLines", next.spokenLines)
             .putBoolean("animatedPicture", next.animatedPicture)
+            .putBoolean("trimBars", next.trimBars)
             .putInt("goalMinutes", next.goalMinutes)
             .putInt("goalChars", next.goalChars)
             .putInt("goalCards", next.goalCards)

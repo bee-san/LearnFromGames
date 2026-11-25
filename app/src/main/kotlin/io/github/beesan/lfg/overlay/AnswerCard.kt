@@ -30,6 +30,9 @@ internal class CardPill(val label: String, val enabled: Boolean = true, val onPr
 /** A line in the card's list of lines. */
 internal class CardRow(val time: String, val text: String, val translation: String?, val current: Boolean)
 
+/** A question asked about the card's line, and its answer; [answer] is null while it is being written. */
+internal class CardTurn(val question: String, val answer: String?, val answerColor: Int = Ink.TEXT)
+
 /** What the card shows: its title, the line it is about, and what came back. Every part but the title may be left out. */
 internal class CardContent(
     val title: String,
@@ -37,11 +40,20 @@ internal class CardContent(
     val choices: List<CardChoice> = emptyList(),
     /** The field to write a question in. */
     val question: Boolean = false,
+    val questionHint: String = "Your question",
     val body: String? = null,
     val bodyColor: Int = Ink.TEXT,
     val rows: List<CardRow> = emptyList(),
+    /** What was asked about the line after [body], oldest first. */
+    val turns: List<CardTurn> = emptyList(),
+    /** Questions to ask next, one under the other at the foot of the card; [CardChoice.marked] is the controller's. */
+    val asks: List<CardChoice> = emptyList(),
+    /** Why the pills are what they are, above [asks]: "Start over?". */
+    val prompt: String? = null,
     val pills: List<CardPill> = emptyList(),
     val hints: String = "",
+    /** Changes when the card is about something else: its turns then start from the top. */
+    val key: String = "",
 )
 
 /**
@@ -70,6 +82,11 @@ internal class AnswerCard(
     private val field = EditText(context)
     private val body = context.label(15.5f, Ink.TEXT)
     private val rows = LinearLayout(context)
+    private val turns = LinearLayout(context)
+    private val prompt = context.label(13.5f, Ink.ACCENT)
+    private val asks = LinearLayout(context)
+    private var shownKey = ""
+    private var shownTurns = 0
     private val note = NoteEditor(context, onSaveNote, onNoteBack)
     private val hints = context.keyHints("")
 
@@ -88,6 +105,7 @@ internal class AnswerCard(
         bar.setPadding(pad, context.dp(6f), context.dp(10f), context.dp(6f))
         title.letterSpacing = 0.08f
         title.maxLines = 1
+        title.ellipsize = android.text.TextUtils.TruncateAt.END
         bar.addView(title, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         pills.orientation = HORIZONTAL
         bar.addView(pills)
@@ -129,6 +147,8 @@ internal class AnswerCard(
         content.addView(body, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         rows.orientation = VERTICAL
         content.addView(rows, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        turns.orientation = VERTICAL
+        content.addView(turns, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
         scroll.isFocusable = false
         scroll.isVerticalScrollBarEnabled = false
@@ -136,6 +156,11 @@ internal class AnswerCard(
         addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         note.visibility = GONE
         addView(note, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        prompt.setPadding(pad, context.dp(8f), pad, 0)
+        addView(prompt)
+        asks.orientation = VERTICAL
+        asks.setPadding(context.dp(10f), context.dp(6f), context.dp(10f), context.dp(2f))
+        addView(asks, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         hints.setPadding(pad, context.dp(4f), pad, context.dp(8f))
         addView(hints)
     }
@@ -173,6 +198,7 @@ internal class AnswerCard(
 
         val wasAsking = asking.visibility == VISIBLE
         asking.visibility = if (next.question) VISIBLE else GONE
+        field.hint = next.questionHint
         if (next.question && !wasAsking) {
             field.setText("")
             keyboard()
@@ -189,8 +215,66 @@ internal class AnswerCard(
         // A list of lines opens at its newest, as the lines' screen does.
         if (next.rows.isNotEmpty() && hadRows == 0) scroll.post { scroll.scrollTo(0, content.height) }
 
+        turns.removeAllViews()
+        next.turns.forEach { turn(it) }
+        turns.visibility = if (next.turns.isEmpty()) GONE else VISIBLE
+        // A question just asked, or its answer: brought into sight. Another line's start from the top.
+        if (next.key != shownKey) {
+            scroll.scrollTo(0, 0)
+        } else if (next.turns.size > shownTurns) {
+            val first = shownTurns * 2
+            scroll.post { scroll.smoothScrollTo(0, (turns.top + (turns.getChildAt(first)?.top ?: 0) - context.dp(8f)).coerceAtLeast(0)) }
+        }
+        shownKey = next.key
+        shownTurns = next.turns.size
+
+        prompt.text = next.prompt.orEmpty()
+        prompt.visibility = if (next.prompt.isNullOrEmpty()) GONE else VISIBLE
+        asks.removeAllViews()
+        for (a in next.asks) asks.addView(ask(a), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(4f) })
+        asks.visibility = if (next.asks.isEmpty()) GONE else VISIBLE
+
         hints.text = next.hints
         hints.visibility = if (next.hints.isEmpty()) GONE else VISIBLE
+    }
+
+    /** A question, to the right in its bubble, and its answer under it. */
+    private fun turn(t: CardTurn) {
+        turns.addView(
+            context.label(14.5f, Ink.TEXT).apply {
+                text = t.question
+                setLineSpacing(context.dp(3f).toFloat(), 1f)
+                background = rounded(Ink.WASH, Ink.BORDER, context.dp(10f).toFloat())
+                setPadding(context.dp(12f), context.dp(7f), context.dp(12f), context.dp(7f))
+            },
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                gravity = Gravity.END
+                topMargin = context.dp(14f)
+                leftMargin = context.dp(48f)
+            },
+        )
+        turns.addView(
+            context.label(15.5f, t.answerColor).apply {
+                text = t.answer ?: "Asking…"
+                if (t.answer == null) setTextColor(Ink.DIM)
+                setLineSpacing(context.dp(4f).toFloat(), 1f)
+            },
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8f) },
+        )
+    }
+
+    /** A question to ask next: a row the whole width of the card, outlined when the controller is on it. */
+    private fun ask(a: CardChoice): View = context.label(14.5f, Ink.TEXT).apply {
+        text = a.label
+        maxLines = 2
+        gravity = Gravity.CENTER_VERTICAL
+        minHeight = context.dp(40f)
+        setPadding(context.dp(12f), context.dp(6f), context.dp(12f), context.dp(6f))
+        background = rounded(if (a.marked) Ink.WASH else Ink.SURFACE, if (a.marked) Ink.ACCENT else Ink.BORDER, context.dp(8f).toFloat(), if (a.marked) context.dp(2f) else 1)
+        isEnabled = a.enabled
+        isFocusable = false
+        alpha = if (a.enabled) 1f else 0.5f
+        setOnClickListener { a.onPress() }
     }
 
     /** The note editor in place of the rest, ready to write in. */

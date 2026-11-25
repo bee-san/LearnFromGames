@@ -47,9 +47,12 @@ object OpenRouter {
 
     /**
      * The request's body. [webSearch] lets the model search the web for this request alone;
-     * [image] is a `data:` URL of a picture sent after the prompt.
+     * [image] is a `data:` URL of a picture sent after the prompt. [talk] is what was said after
+     * the prompt, the model's answer and the user's next question in turn, ending on a question.
      */
-    fun body(model: String, system: String, prompt: String, webSearch: Boolean = false, image: String? = null): String = buildJsonObject {
+    fun body(
+        model: String, system: String, prompt: String, webSearch: Boolean = false, image: String? = null, talk: List<String> = emptyList(),
+    ): String = buildJsonObject {
         put("model", model)
         putJsonArray("messages") {
             addJsonObject {
@@ -71,6 +74,12 @@ object OpenRouter {
                             putJsonObject("image_url") { put("url", image) }
                         }
                     }
+                }
+            }
+            talk.forEachIndexed { i, said ->
+                addJsonObject {
+                    put("role", if (i % 2 == 0) "assistant" else "user")
+                    put("content", said)
                 }
             }
         }

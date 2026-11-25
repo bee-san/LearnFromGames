@@ -60,6 +60,41 @@ class AskTest {
         assertTrue(system.contains("in French") && system.contains("no Markdown") && system.contains("no romaji"))
     }
 
+    @Test
+    fun anExplanationComesWithThreeQuestionsToAskNextUnderItsMarker() {
+        assertTrue(Explainer.system("English").contains(Explainer.MARKER))
+        val (text, questions) = Explainer.split("I got a new sword!\n新しい（あたらしい） - new\n\nQUESTIONS\n- Why を here?\n2. More with 手に入れる\n・Is this polite?\nA fourth")
+        assertEquals("I got a new sword!\n新しい（あたらしい） - new", text)
+        assertEquals(listOf("Why を here?", "More with 手に入れる", "Is this polite?"), questions)
+        // A model that left the questions out still explained the line.
+        assertEquals("Just this." to emptyList<String>(), Explainer.split(" Just this.\n"))
+        assertEquals(listOf("One?"), Explainer.split("a\n**Questions:**\nOne?").second)
+    }
+
+    @Test
+    fun aQuestionIsSentAfterTheExplanationAndEverythingAskedSince() {
+        val so = Explainer.Conversation("It means X.", listOf(Explainer.Turn("Why が?", "Because.")), listOf("More?"))
+        val talk = Explainer.talk(so, "And は?")
+        assertEquals(listOf("It means X.", "Why が?", "Because.", "And は?"), talk)
+        val messages = Json.parseToJsonElement(OpenRouter.body("m", Explainer.followUp("English"), "explain", talk = talk)).jsonObject["messages"]!!.jsonArray
+        assertEquals(listOf("system", "user", "assistant", "user", "assistant", "user"), messages.map { it.jsonObject["role"]!!.jsonPrimitive.content })
+        assertEquals("And は?", messages.last().jsonObject["content"]!!.jsonPrimitive.content)
+        assertTrue(Explainer.followUp("English").contains("Ask on the wheel"))
+        assertFalse(so.full)
+        assertTrue(so.copy(turns = List(Explainer.MAX_QUESTIONS) { Explainer.Turn("q", "a") }).full)
+    }
+
+    @Test
+    fun aCardCarriesTheExplanationAndItsQuestionsUnderTheGamesName() {
+        val so = Explainer.Conversation("It means <X>.\nPart", listOf(Explainer.Turn("Why が?", "Because.")))
+        val html = Explainer.html(so) { it.replace("<", "&lt;").replace(">", "&gt;") }
+        assertEquals("It means &lt;X&gt;.<br>Part<br><br><b>Why が?</b><br>Because.", html)
+        assertEquals("Quest", io.github.beesan.lfg.anki.NoteTypes.misc("Quest", ""))
+        assertEquals("Quest<br><br>$html", io.github.beesan.lfg.anki.NoteTypes.misc("Quest", html))
+        val row = io.github.beesan.lfg.data.ExplanationRow("l", "e", """[{"question":"q","answer":"a"}]""", "one\ntwo", "m", 0)
+        assertEquals(Explainer.Conversation("e", listOf(Explainer.Turn("q", "a")), listOf("one", "two")), Explainer.conversation(row))
+    }
+
     private fun line(id: String, text: String, day: Int) = GameLine(
         id = id, gameId = "g", gameName = "Quest", lineText = text,
         // Noon on 2 or 3 November 2026, UTC, well clear of the 04:00 day turn.

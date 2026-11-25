@@ -238,10 +238,23 @@ interface QuestionDao {
     }
 }
 
+@Dao
+interface ExplanationDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(row: ExplanationRow)
+
+    @Query("SELECT * FROM explanations WHERE line_id = :lineId")
+    suspend fun of(lineId: String): ExplanationRow?
+
+    /** The newest, which the lines over a game are likely to be among. */
+    @Query("SELECT * FROM explanations ORDER BY updated_at DESC LIMIT :count")
+    suspend fun newest(count: Int): List<ExplanationRow>
+}
+
 /** Schema changes add a numbered migration; nothing here is ever rebuilt destructively. */
 @Database(
-    entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class, QuestionRow::class],
-    version = 7,
+    entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class, QuestionRow::class, ExplanationRow::class],
+    version = 8,
     exportSchema = true,
     // 2: a crop and a translation for each line, notes, and recaps. Room writes it from the exported schemas.
     // 3: a row for each game named inside an emulator.
@@ -249,9 +262,10 @@ interface QuestionDao {
     // 5: whether a line is interface text (a menu label, a name plate), and an index to find a line's text in a game.
     // 6: the visual novel on VNDB a game is linked to, for its character names.
     // 7: questions asked about a game, and their answers.
+    // 8: a line's explanation and the questions asked about it, kept with the line.
     autoMigrations = [
         AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6),
-        AutoMigration(from = 6, to = 7),
+        AutoMigration(from = 6, to = 7), AutoMigration(from = 7, to = 8),
     ],
 )
 abstract class LfgDatabase : RoomDatabase() {
@@ -262,6 +276,7 @@ abstract class LfgDatabase : RoomDatabase() {
     abstract fun notes(): NoteDao
     abstract fun recaps(): RecapDao
     abstract fun questions(): QuestionDao
+    abstract fun explanations(): ExplanationDao
 
     companion object {
         fun open(context: Context): LfgDatabase =

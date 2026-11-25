@@ -184,6 +184,14 @@ class AnkiBridge(private val context: Context) {
         }
     }
 
+    /** Sets one field of a note, as [setField] does, only while [unless] holds for what it has now. */
+    fun setFieldIf(noteId: Long, index: Int, value: String, unless: (String) -> Boolean): Boolean {
+        val fields = api.getNote(noteId)?.fields ?: return false
+        if (index !in fields.indices || !unless(fields[index]) || fields[index] == value) return false
+        fields[index] = value
+        return api.updateNoteFields(noteId, fields)
+    }
+
     /** Stores a sound in AnkiDroid's media folder and returns the `[sound:…]` tag for the field, or null. */
     fun addSound(file: File, preferredName: String): String? = addMedia(file, preferredName, "audio")
 

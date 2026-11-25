@@ -27,7 +27,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import io.github.beesan.lfg.ask.Explainer
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -106,6 +120,8 @@ fun LinesScreen(
     onAsk: () -> Unit,
     shortcut: String = "L3 + R3",
     loaded: Boolean = true,
+    /** The lines explained, by id: marked, with how many questions were asked of each. */
+    explained: Map<String, Explainer.Conversation> = emptyMap(),
 ) {
     val time = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val zone = remember { ZoneId.systemDefault() }
@@ -146,7 +162,10 @@ fun LinesScreen(
                 }
                 item(key = line.id) {
                     LineItem(
-                        LineRowUi(line.id, line.createdAt, line.lineText, line.translation, card = line.noteIds.isNotEmpty()),
+                        LineRowUi(
+                            line.id, line.createdAt, line.lineText, line.translation, card = line.noteIds.isNotEmpty(),
+                            explained = line.id in explained, questions = explained[line.id]?.turns?.size ?: 0,
+                        ),
                         time,
                         onClick = { onOpenLine(line) },
                         modifier = Modifier.fillMaxWidth().focusRing(RoundedCornerShape(6.dp), inside = true),
@@ -258,6 +277,8 @@ data class LineRowUi(
     /** A card was made from it. */
     val card: Boolean = false,
     val explained: Boolean = false,
+    /** Questions asked about it since it was explained. */
+    val questions: Int = 0,
     /** On the game's screen now: larger, and marked at its edge. */
     val current: Boolean = false,
     /** What the sheet under the lines speaks of: outlined. */
@@ -301,10 +322,92 @@ fun LineItem(
             row.translation?.takeIf { it.isNotBlank() }?.let {
                 Text(it, color = Lfg.Dim, fontSize = 14.5.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 5.dp))
             }
-            val tags = listOfNotNull("CARD".takeIf { row.card }, "EXPLAINED".takeIf { row.explained }).joinToString("   ")
+            val tags = listOfNotNull("CARD".takeIf { row.card }, "EXPLAINED".takeIf { row.explained }?.let { it + questionsTag(row.questions) }).joinToString("   ")
             if (tags.isNotEmpty()) {
                 Text(tags, color = Lfg.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp, modifier = Modifier.padding(top = 6.dp))
             }
+        }
+    }
+}
+
+private fun questionsTag(count: Int) = when (count) {
+    0 -> ""
+    1 -> " · 1 QUESTION"
+    else -> " · $count QUESTIONS"
+}
+
+/**
+ * A line's explanation, the questions asked about it since with their answers, three more to ask
+ * with a tap, and a box for one's own. "Explain again" asks first when questions would go with it.
+ */
+@Composable
+private fun Explanation(state: MainViewModel.ExplainState, onExplain: () -> Unit, onAsk: (String) -> Unit, askNow: Boolean) {
+    val talk = state.talk
+    var confirm by remember(talk?.explanation) { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            if (confirm) "Start over? The questions asked go with this explanation." else "Explanation",
+            color = if (confirm) Lfg.Accent else Lfg.Dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+        )
+        if (confirm) {
+            LfgButton("Start over", { confirm = false; onExplain() })
+            LfgButton("Keep", { confirm = false }, primary = true)
+        } else {
+            LfgButton(
+                if (talk == null) "Explain" else "Explain again",
+                { if (talk != null && talk.turns.isNotEmpty()) confirm = true else onExplain() },
+                enabled = !state.busy,
+            )
+        }
+    }
+    when {
+        state.busy && talk == null -> Text("Explaining…", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp))
+        talk != null -> Text(talk.explanation, color = Lfg.Text, fontSize = 15.sp, lineHeight = 23.sp, modifier = Modifier.padding(top = 8.dp))
+    }
+    if (state.busy && talk != null) Text("Explaining…", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp))
+    state.error?.let { Text(it, color = Lfg.Warn, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
+    if (talk != null && !state.busy) Talk(talk, state, onAsk, askNow)
+}
+
+/** What was asked about an explained line, the questions to ask next, and the box for one's own. */
+@Composable
+private fun Talk(talk: Explainer.Conversation, state: MainViewModel.ExplainState, onAsk: (String) -> Unit, askNow: Boolean) {
+    val waiting = state.asking != null && state.askError == null
+    val ui = TalkUi(talk.turns, state.asking, state.askError, if (waiting || talk.full) emptyList() else talk.suggestions, talk.full)
+    if (ui.turns.isNotEmpty() || ui.asking != null || ui.full) TalkTurns(ui, Modifier.padding(top = 12.dp))
+    if (!talk.full) {
+        TalkChips(ui.suggestions, !waiting, onAsk, Modifier.padding(top = 12.dp))
+        var question by rememberSaveable(talk.explanation) { mutableStateOf("") }
+        // The question stays in the box until its answer is kept, so one that failed can be sent again.
+        LaunchedEffect(talk.turns.size) { if (talk.turns.lastOrNull()?.question == question.trim()) question = "" }
+        val send = { if (!waiting && question.isNotBlank()) onAsk(question) }
+        val focus = remember { FocusRequester() }
+        LaunchedEffect(askNow) { if (askNow) runCatching { focus.requestFocus() } }
+        // A question asked, and then its answer, push the box down the page: it is kept in sight.
+        // A line opened with questions already asked starts at its top, as any line does.
+        val inSight = remember { BringIntoViewRequester() }
+        val said = talk.turns.size to state.asking
+        var seen by remember(talk.explanation) { mutableStateOf(said) }
+        LaunchedEffect(said) {
+            if (said != seen) inSight.bringIntoView()
+            seen = said
+        }
+        Row(Modifier.padding(top = 10.dp).bringIntoViewRequester(inSight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BasicTextField(
+                value = question,
+                onValueChange = { question = it.take(Explainer.QUESTION_LENGTH) },
+                textStyle = TextStyle(color = Lfg.Text, fontSize = 16.sp, lineHeight = 24.sp),
+                cursorBrush = SolidColor(Lfg.Accent),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { send() }),
+                decorationBox = { field ->
+                    if (question.isEmpty()) Text("Ask about this line…", color = Lfg.Dim, fontSize = 16.sp)
+                    field()
+                },
+                modifier = Modifier.weight(1f).focusRequester(focus).clip(RoundedCornerShape(6.dp)).background(Lfg.Sunken)
+                    .border(1.dp, Lfg.BorderStrong, RoundedCornerShape(6.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
+            )
+            LfgButton("Ask", send, primary = true, enabled = !waiting && question.isNotBlank())
         }
     }
 }
@@ -353,12 +456,16 @@ fun LineLookupScreen(
     onTap: (Int) -> Unit,
     onLink: (EntryLink, Int) -> Unit,
     translation: MainViewModel.TranslationState,
-    explanation: MainViewModel.TranslationState,
+    explanation: MainViewModel.ExplainState,
     /** There is an OpenRouter key: Translate and Explain show. Without one nothing is offered. */
     ai: Boolean,
     translateContext: Int,
     onTranslate: () -> Unit,
     onExplain: () -> Unit,
+    /** A question about the line, asked after its explanation. */
+    onAsk: (String) -> Unit,
+    /** Opened from over a game to write a question: the box for it has the keyboard at once. */
+    askNow: Boolean = false,
     onBack: () -> Unit,
     /** The pad, as over a game: a cursor over the line, a card, the word said, a note, and the entries in turn. */
     pad: LinePad? = null,
@@ -418,18 +525,11 @@ fun LineLookupScreen(
                         LfgButton(if (translation.text == null) "Translate" else "Translate again", onTranslate, enabled = !translation.busy)
                     }
                     HorizontalDivider(color = Lfg.Border, modifier = Modifier.padding(top = 14.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
-                        Text("Explanation", color = Lfg.Dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        LfgButton(if (explanation.text == null) "Explain" else "Explain again", onExplain, enabled = !explanation.busy)
-                    }
-                    when {
-                        explanation.text != null -> Text(explanation.text, color = Lfg.Text, fontSize = 15.sp, lineHeight = 23.sp, modifier = Modifier.padding(top = 8.dp))
-                        explanation.busy -> Text("Explaining…", color = Lfg.Dim, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp))
-                    }
-                    explanation.error?.let { Text(it, color = Lfg.Warn, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
+                    Explanation(explanation, onExplain, onAsk, askNow)
                 }
             }
-            Column(Modifier.weight(1.2f).fillMaxHeight().padding(top = 6.dp)) {
+            // Opened to ask about the line, the conversation has the page's whole width until a word is tapped.
+            if (state.selected || !askNow) Column(Modifier.weight(1.2f).fillMaxHeight().padding(top = 6.dp)) {
                 if (state.selected) {
                     EntryList(state, styles, media, onLink, Modifier.fillMaxWidth().weight(1f), scroller = entries)
                     state.message.takeIf { state.entries.isNotEmpty() }?.let {
