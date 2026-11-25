@@ -16,6 +16,7 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
 import android.util.TypedValue
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import androidx.core.graphics.PathParser
@@ -32,14 +33,15 @@ import kotlin.math.sin
  * The wheel over a game: the screen dimmed but for the line it acts on
  * ([holes]), and a ring of [WheelAction]s round a middle that names the one
  * pointed at ([hover]). A stick or the D-pad points through [OverlayHost]; a
- * finger points here, and lifting it on a slice picks that slice, anywhere
- * else puts the wheel away.
+ * finger points here, and lifting it on a slice picks that slice, in the
+ * middle goes back a level ([onBack]), anywhere else puts the wheel away.
  */
 @SuppressLint("ViewConstructor")
 internal class WheelView(
     context: Context,
     private val onPick: (WheelSlice) -> Unit,
     private val onDismiss: () -> Unit,
+    private val onBack: () -> Unit,
 ) : View(context) {
     /** The slice pointed at, by its place in [slices]; null for none yet. */
     var hover: Int? = null
@@ -47,6 +49,8 @@ internal class WheelView(
             if (field == value) return
             field = value
             contentDescription = "LFG wheel" + (value?.let { ": " + actions[it].label } ?: "")
+            // A tick for each slice pointed at, to aim without looking away from the game.
+            if (value != null) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             invalidate()
         }
 
@@ -80,6 +84,13 @@ internal class WheelView(
             invalidate()
         }
     private val actions: List<WheelSlice> get() = slices
+
+    /** Why a slice cannot act now, or null when it can. A slice that cannot is dimmed, and says why in the middle. */
+    var whyNot: (WheelSlice) -> String? = { null }
+        set(value) {
+            field = value
+            invalidate()
+        }
     private var icons = slices.map { PathParser.createPathFromPathData(ICONS.getValue(it.action)) }
 
     private val dim = Paint().apply { color = Color.argb(158, 0, 0, 0) }
@@ -208,15 +219,20 @@ internal class WheelView(
         val iconSize = context.dp(22f).toFloat()
         actions.indices.forEach { i ->
             val on = i == hover
-            fill.color = if (on) Ink.FILL else Ink.SURFACE
-            edge.color = if (on) Ink.FILL else Ink.BORDER_STRONG
+            val off = whyNot(actions[i]) != null
+            fill.color = if (on && !off) Ink.FILL else Ink.SURFACE
+            edge.color = if (on && !off) Ink.FILL else Ink.BORDER_STRONG
             canvas.drawPath(shapes[i], fill)
             canvas.drawPath(shapes[i], edge)
             if (on) {
                 rim.color = Ink.ACCENT
                 canvas.drawPath(rims[i], rim)
             }
-            val ink = if (on) Ink.ON_FILL else Ink.TEXT
+            val ink = when {
+                off -> Ink.DIM
+                on -> Ink.ON_FILL
+                else -> Ink.TEXT
+            }
             val angle = Math.toRadians((-90f + i * step).toDouble())
             val x = cx + middle * cos(angle).toFloat()
             val y = cy + middle * sin(angle).toFloat()
@@ -268,12 +284,19 @@ internal class WheelView(
 
         val chosen = hover?.let { actions[it] }
         val undrawn = chosen?.action == WheelAction.BOX && boxes.getOrNull(chosen.box - 1) == null
+        val why = chosen?.let(whyNot)
         val textWidth = (radius * 1.55f).toInt().coerceAtLeast(1)
         title.color = if (chosen == null) Ink.DIM else Ink.TEXT
         about.color = Ink.DIM
-        val name = StaticLayout.Builder.obtain(chosen?.label ?: "Point", 0, (chosen?.label ?: "Point").length, title, textWidth)
+        val heading = chosen?.label ?: "Point"
+        val name = StaticLayout.Builder.obtain(heading, 0, heading.length, title, textWidth)
             .setAlignment(Layout.Alignment.ALIGN_CENTER).setMaxLines(1).setEllipsize(TextUtils.TruncateAt.END).build()
-        val line = if (undrawn) "Not drawn yet" else chosen?.about ?: "with a stick"
+        val line = when {
+            why != null -> why
+            undrawn -> "Not drawn yet"
+            chosen != null -> chosen.about
+            else -> "with a stick"
+        }
         val more = StaticLayout.Builder.obtain(line, 0, line.length, about, textWidth)
             .setAlignment(Layout.Alignment.ALIGN_CENTER).setMaxLines(3).setEllipsize(TextUtils.TruncateAt.END).build()
 
@@ -315,7 +338,11 @@ internal class WheelView(
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> sliceAt(event.x, event.y)?.let { hover = it }
             MotionEvent.ACTION_UP -> {
                 val slice = sliceAt(event.x, event.y)
-                if (slice != null) onPick(actions[slice]) else onDismiss()
+                when {
+                    slice != null -> onPick(actions[slice])
+                    hypot(event.x - cx, event.y - cy) < inner -> onBack()
+                    else -> onDismiss()
+                }
             }
         }
         return true

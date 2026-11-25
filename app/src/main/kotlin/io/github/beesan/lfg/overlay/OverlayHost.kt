@@ -555,6 +555,7 @@ class OverlayHost(
             if (wheelOpen) {
                 wheel.holes = wheelLine?.geometry?.rows.orEmpty()
                 wheel.boxes = gameBoxes()
+                wheel.whyNot = ::wheelWhyNot
             }
         }
         renderCard(other)
@@ -842,7 +843,7 @@ class OverlayHost(
     @SuppressLint("ViewConstructor")
     private inner class FocusView(context: Context) : android.widget.FrameLayout(context) {
         /** The wheel, drawn here while it is up: this window has the controller it is pointed with. */
-        val wheel = WheelView(context, onPick = ::pickWheel, onDismiss = ::putAwayWheel).apply { visibility = View.GONE }
+        val wheel = WheelView(context, onPick = ::pickWheel, onDismiss = ::putAwayWheel, onBack = ::backWheel).apply { visibility = View.GONE }
 
         init {
             isFocusable = true
@@ -1695,14 +1696,50 @@ class OverlayHost(
         card?.hide()
     }
 
+    /** The level [slice] opens in the wheel, or null for a slice that acts. */
+    private fun levelOf(slice: WheelSlice): List<WheelSlice>? = when (slice.action) {
+        WheelAction.AI -> WheelLevels.AI
+        WheelAction.BOXES -> WheelLevels.boxes(gameBoxes().size)
+        else -> null
+    }
+
+    /** Why [slice] cannot act now, said in the wheel's middle; null when it can. */
+    private fun wheelWhyNot(slice: WheelSlice): String? {
+        val p = prefs()
+        val setUp = "Set up in Settings › Translation"
+        return when (slice.action) {
+            WheelAction.AI -> setUp.takeIf { !p.aiReady }
+            WheelAction.TRANSLATE, WheelAction.EXPLAIN -> when {
+                !p.aiReady -> setUp
+                wheelLine == null -> "Nothing read on this screen yet"
+                wheelLine?.lineId == null -> "This text is not a kept line"
+                else -> null
+            }
+            WheelAction.RECAP -> when {
+                !p.aiReady -> setUp
+                gameLineNow() == null -> "Nothing read in this game yet"
+                else -> null
+            }
+            WheelAction.ASK -> when {
+                !p.aiReady -> setUp
+                !p.ask -> "Turn on Ask in Settings › Translation"
+                else -> null
+            }
+            else -> null
+        }
+    }
+
+    /** B, or a tap in the middle: from AI's or the boxes' level back to the top one, else the wheel goes. */
+    private fun backWheel() {
+        if (wheelLevel === WheelLevels.TOP) putAwayWheel() else showLevel(WheelLevels.TOP)
+    }
+
     private fun pickWheel(slice: WheelSlice) {
         wheelHeld = false
+        // A slice that cannot act does nothing: the wheel says why, and stays.
+        if (wheelWhyNot(slice) != null) return render()
         // A level opens in the wheel, which stays up.
-        when (slice.action) {
-            WheelAction.AI -> return showLevel(WheelLevels.AI)
-            WheelAction.BOXES -> return showLevel(WheelLevels.boxes(gameBoxes().size))
-            else -> Unit
-        }
+        levelOf(slice)?.let { return showLevel(it) }
         wheelOpen = false
         val line = wheelLine
         when (slice.action) {
@@ -2045,6 +2082,10 @@ class OverlayHost(
         val wheel = focusView()?.wheel ?: return
         if (slice == null || slice == wheel.hover) return
         wheel.hover = slice
+        // With the shortcut still held, AI's or the boxes' level opens as soon as it is pointed at,
+        // so letting go picks in it: hold, point at AI, point at Translate, let go.
+        val pointed = wheelLevel.getOrNull(slice) ?: return
+        if (wheelHeld && wheelWhyNot(pointed) == null) levelOf(pointed)?.let(::showLevel)
     }
 
     private fun wheelOpenKey(event: KeyEvent): Boolean {
@@ -2072,9 +2113,7 @@ class OverlayHost(
             }
             // On release, as lookup's own close is: the button's up must not be left for what shows next.
             // In AI's or the boxes' level, back to the top one.
-            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) {
-                if (wheelLevel === WheelLevels.TOP) putAwayWheel() else showLevel(WheelLevels.TOP)
-            }
+            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) backWheel()
             // Pointed at a box that is drawn: it is drawn again.
             KeyEvent.KEYCODE_BUTTON_X -> if (down && event.repeatCount == 0) {
                 val slice = hovered()
