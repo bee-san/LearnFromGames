@@ -20,7 +20,7 @@ struct Bitmap {
   const uint8_t* pixels;
   size_t row_bytes;
   void* color_space;
-  int32_t color_type;  // 4: RGBA_8888
+  int32_t color_type;  // 14: Gray_8
   int32_t alpha_type;
   int32_t width;
   int32_t height;
@@ -33,6 +33,7 @@ struct Api {
   void (*set_files)(SizeFn, ContentFn) = nullptr;
   bool (*init)() = nullptr;
   void (*light_mode)(bool) = nullptr;
+  void (*fast_mode)(bool) = nullptr;
   char* (*perform)(const Bitmap*, uint32_t*) = nullptr;
   void (*free_chars)(char*) = nullptr;
 };
@@ -73,6 +74,7 @@ bool load() {
   g_api.set_files = reinterpret_cast<void (*)(SizeFn, ContentFn)>(dlsym(lib, "SetFileContentFunctions"));
   g_api.init = reinterpret_cast<bool (*)()>(dlsym(lib, "InitOCRUsingCallback"));
   g_api.light_mode = reinterpret_cast<void (*)(bool)>(dlsym(lib, "SetOCRLightMode"));
+  g_api.fast_mode = reinterpret_cast<void (*)(bool)>(dlsym(lib, "SetOCRFastMode"));
   g_api.perform = reinterpret_cast<char* (*)(const Bitmap*, uint32_t*)>(dlsym(lib, "PerformOCR"));
   g_api.free_chars = reinterpret_cast<void (*)(char*)>(dlsym(lib, "FreeLibraryAllocatedCharArray"));
   if (g_api.set_files == nullptr || g_api.init == nullptr || g_api.perform == nullptr || g_api.free_chars == nullptr) {
@@ -103,6 +105,9 @@ JNIEXPORT jboolean JNICALL Java_io_github_beesan_lfg_ocr_ScreenAi_nativeInit(JNI
   g_ready = g_api.init();
   // Light mode skips the script-specific second pass, which is the one that reads Japanese.
   if (g_ready && g_api.light_mode != nullptr) g_api.light_mode(false);
+  // Fast mode (tools/screenai/0003): the same lines, text and boxes for about half the work, in the order
+  // detected instead of reading order, which Blocks does not go by. A library built without it reads as before.
+  if (g_ready && g_api.fast_mode != nullptr) g_api.fast_mode(true);
   return g_ready ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -114,22 +119,21 @@ JNIEXPORT jbyteArray JNICALL Java_io_github_beesan_lfg_ocr_ScreenAi_nativeRead(J
   const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height);
   if (static_cast<size_t>(env->GetArrayLength(pixels)) < count) return nullptr;
 
-  std::vector<uint8_t> rgba(count * 4);
-  jint* argb = env->GetIntArrayElements(pixels, nullptr);
+  // The library reads only the gray of a picture, so that is what it is given: its own formula, a quarter of
+  // the bytes, and read where the array lies rather than from a copy of it.
+  std::vector<uint8_t> gray(count);
+  const jint* argb = static_cast<const jint*>(env->GetPrimitiveArrayCritical(pixels, nullptr));
   if (argb == nullptr) return nullptr;
   for (size_t i = 0; i < count; ++i) {
     const uint32_t p = static_cast<uint32_t>(argb[i]);
-    rgba[i * 4] = static_cast<uint8_t>(p >> 16);
-    rgba[i * 4 + 1] = static_cast<uint8_t>(p >> 8);
-    rgba[i * 4 + 2] = static_cast<uint8_t>(p);
-    rgba[i * 4 + 3] = 0xFF;
+    gray[i] = static_cast<uint8_t>((77 * ((p >> 16) & 0xFF) + 150 * ((p >> 8) & 0xFF) + 29 * (p & 0xFF) + 128) >> 8);
   }
-  env->ReleaseIntArrayElements(pixels, argb, JNI_ABORT);
+  env->ReleasePrimitiveArrayCritical(pixels, const_cast<jint*>(argb), JNI_ABORT);
 
   Bitmap bitmap{};
-  bitmap.pixels = rgba.data();
-  bitmap.row_bytes = static_cast<size_t>(width) * 4;
-  bitmap.color_type = 4;
+  bitmap.pixels = gray.data();
+  bitmap.row_bytes = static_cast<size_t>(width);
+  bitmap.color_type = 14;
   bitmap.alpha_type = 1;
   bitmap.width = width;
   bitmap.height = height;

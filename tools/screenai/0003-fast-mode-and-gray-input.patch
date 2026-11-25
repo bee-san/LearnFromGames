@@ -1,0 +1,414 @@
+LearnFromGames: a fast mode (SetOCRFastMode, off by default) and gray pixels taken as they are.
+
+Fast mode gives the same lines, text and boxes for about half the work on a game's screen:
+ - The line recognizers invoke on only the chunks there are, spread over the interpreter pool, where the
+   original always runs batches of 8, zero-padded. A dialogue screen is some 20 chunks over three passes (und,
+   Jpan, Hani) and was computed as 40.
+ - The layout analysis keeps its filters and its recomputed boxes but runs no cluster-sort model, sorts
+   nothing, and fills in no colors, line texts or page language: the app orders and groups lines itself.
+Lines then come in the order detected, not in reading order. With fast mode off nothing changes.
+
+A kGray_8 bitmap goes to the stages as it is instead of by way of RGBA; the recognizer never read the colors.
+
+diff --git a/cpp/capi/c_api.cc b/cpp/capi/c_api.cc
+index 7b14a11..f86d306 100644
+--- a/cpp/capi/c_api.cc
++++ b/cpp/capi/c_api.cc
+@@ -30,6 +30,7 @@ screenai::Resources::ContentFn g_content_fn = nullptr;
+ std::unique_ptr<screenai::OcrEngine> g_engine;
+ int g_max_image_dimension = 0;
+ bool g_light_mode = false;
++bool g_fast_mode = false;
+ 
+ char* CopyOut(const std::string& s, uint32_t* length) {
+   *length = static_cast<uint32_t>(s.size());
+@@ -59,6 +60,7 @@ SCREENAI_EXPORT bool InitOCRUsingCallback() {
+   g_engine = screenai::OcrEngine::Create(std::move(resources));
+   if (!g_engine) return false;
+   g_engine->SetLightMode(g_light_mode);
++  g_engine->SetFastMode(g_fast_mode);
+   g_max_image_dimension = 2048;
+   return true;
+ }
+@@ -70,6 +72,13 @@ SCREENAI_EXPORT void SetOCRLightMode(bool light) {
+   if (g_engine) g_engine->SetLightMode(light);
+ }
+ 
++// LearnFromGames, not in the original: see OcrEngine::SetFastMode. Like the light mode it can be set before or
++// after init and survives UninitializeOCR.
++SCREENAI_EXPORT void SetOCRFastMode(bool fast) {
++  g_fast_mode = fast;
++  if (g_engine) g_engine->SetFastMode(fast);
++}
++
+ SCREENAI_EXPORT uint32_t GetMaxImageDimension() { return g_max_image_dimension; }
+ 
+ // The original keeps reporting the max image dimension after uninitialization.
+@@ -81,10 +90,21 @@ SCREENAI_EXPORT char* PerformOCR(const SkBitmap* bitmap, uint32_t* length) {
+   const int w = bitmap->width, h = bitmap->height;
+   // "Unsupported image size." (the original aborts on negative sizes; here they are rejected the same way)
+   if (w <= 0 || h <= 0 || w > 32768 || h > 32768) return new char[0];
++  const size_t n = static_cast<size_t>(w) * h;
++  if (bitmap->color_type == kGray_8) {
++    // LearnFromGames: gray goes in as it is. The original's way round, below, spreads it over R, G and B and
++    // takes the gray of that, which is the same value: (77 + 150 + 29) g + 128 >> 8 == g.
++    screenai::GrayImage gray;
++    gray.width = w;
++    gray.height = h;
++    gray.data.assign(bitmap->pixels, bitmap->pixels + n);
++    std::string out;
++    if (!g_engine->Run(gray, &out)) return nullptr;
++    return CopyOut(out, length);
++  }
+   screenai::RgbaImage rgba;
+   rgba.width = w;
+   rgba.height = h;
+-  const size_t n = static_cast<size_t>(w) * h;
+   if (bitmap->color_type == kRGBA_8888 || bitmap->color_type == kBGRA_8888) {
+     // The original hands both orders to the pipeline as the same 4-channel format.
+     rgba.data.assign(bitmap->pixels, bitmap->pixels + 4 * n);
+diff --git a/cpp/capi/exports.map b/cpp/capi/exports.map
+index afe623d..fe45d23 100644
+--- a/cpp/capi/exports.map
++++ b/cpp/capi/exports.map
+@@ -1,6 +1,6 @@
+ {
+   global:
+-    SetFileContentFunctions; InitOCRUsingCallback; SetOCRLightMode; GetMaxImageDimension; UninitializeOCR;
++    SetFileContentFunctions; InitOCRUsingCallback; SetOCRLightMode; SetOCRFastMode; GetMaxImageDimension; UninitializeOCR;
+     PerformOCR; FreeLibraryAllocatedCharArray; FreeLibraryAllocatedInt32Array; GetLibraryVersion; EnableDebugMode;
+   local: *;
+ };
+diff --git a/cpp/capi/exports.txt b/cpp/capi/exports.txt
+index 12a4a12..84af31c 100644
+--- a/cpp/capi/exports.txt
++++ b/cpp/capi/exports.txt
+@@ -1,6 +1,7 @@
+ _SetFileContentFunctions
+ _InitOCRUsingCallback
+ _SetOCRLightMode
++_SetOCRFastMode
+ _GetMaxImageDimension
+ _UninitializeOCR
+ _PerformOCR
+diff --git a/cpp/capi/ocr_engine.cc b/cpp/capi/ocr_engine.cc
+index 053ef58..c0ac66b 100644
+--- a/cpp/capi/ocr_engine.cc
++++ b/cpp/capi/ocr_engine.cc
+@@ -25,6 +25,12 @@ void OcrEngine::SetLightMode(bool light) {
+   recognizer_->SetLightMode(light);
+ }
+ 
++void OcrEngine::SetFastMode(bool fast) {
++  std::lock_guard<std::mutex> lock(mu_);
++  fast_ = fast;
++  recognizer_->SetFastMode(fast);
++}
++
+ namespace {
+ 
+ // SCREENAI_STAGE_DUMP=<dir>: writes each stage's output as goodoc.PageLayoutProto, named like trace/stage_dump.py
+@@ -55,11 +61,12 @@ class StageTimer {
+ 
+ }  // namespace
+ 
+-bool OcrEngine::RunLayout(const RgbaImage& rgba, PageLayout* layout) {
++bool OcrEngine::RunLayout(const RgbaImage& rgba, PageLayout* layout) { return RunLayout(RgbaToGray(rgba), layout); }
++
++bool OcrEngine::RunLayout(const GrayImage& gray, PageLayout* layout) {
+   std::lock_guard<std::mutex> lock(mu_);
+   StageTimer timer;
+-  const GrayImage gray = RgbaToGray(rgba);
+-  timer.Mark("gray");
++  const RgbaImage rgba;  // the recognizer takes it and reads only the gray image
+   *layout = PageLayout();
+   // The stages read the page size from the layout (the original keeps it in the mutator context).
+   layout->width = gray.width;
+@@ -70,12 +77,19 @@ bool OcrEngine::RunLayout(const RgbaImage& rgba, PageLayout* layout) {
+   if (!recognizer_->Recognize(rgba, gray, layout)) return false;
+   timer.Mark("recognize");
+   DumpStage(*layout, "002_lay_in");
+-  if (!layout_analyzer_->Analyze(gray, layout)) return false;
++  if (!(fast_ ? layout_analyzer_->AnalyzeFast(layout) : layout_analyzer_->Analyze(gray, layout))) return false;
+   timer.Mark("layout");
+   DumpStage(*layout, "003_final");
+   return true;
+ }
+ 
++bool OcrEngine::Run(const GrayImage& gray, std::string* visual_annotation) {
++  PageLayout layout;
++  if (!RunLayout(gray, &layout)) return false;
++  *visual_annotation = ConvertToVisualAnnotation(layout);
++  return true;
++}
++
+ bool OcrEngine::Run(const RgbaImage& rgba, std::string* visual_annotation) {
+   PageLayout layout;
+   if (!RunLayout(rgba, &layout)) return false;
+diff --git a/cpp/capi/ocr_engine.h b/cpp/capi/ocr_engine.h
+index e32db98..74e3dd6 100644
+--- a/cpp/capi/ocr_engine.h
++++ b/cpp/capi/ocr_engine.h
+@@ -25,6 +25,12 @@ class OcrEngine {
+   void SetLightMode(bool light);
+   // Same, stopping before the VisualAnnotation conversion.
+   bool RunLayout(const RgbaImage& rgba, PageLayout* layout);
++  // LearnFromGames: the same from a gray image, which is all the stages read of the page.
++  bool Run(const GrayImage& gray, std::string* visual_annotation);
++  bool RunLayout(const GrayImage& gray, PageLayout* layout);
++  // LearnFromGames: the same lines, text and boxes for less work (LineRecognizer::SetFastMode,
++  // LayoutAnalyzer::AnalyzeFast). The lines come in the order detected, without colors or line texts.
++  void SetFastMode(bool fast);
+ 
+  private:
+   std::shared_ptr<Resources> resources_;
+@@ -32,6 +38,7 @@ class OcrEngine {
+   std::unique_ptr<LineRecognizer> recognizer_;
+   std::unique_ptr<LayoutAnalyzer> layout_analyzer_;
+   std::mutex mu_;
++  bool fast_ = false;
+ };
+ 
+ }  // namespace screenai
+diff --git a/cpp/src/layout_analyzer.cc b/cpp/src/layout_analyzer.cc
+index 6e919c0..82b9093 100644
+--- a/cpp/src/layout_analyzer.cc
++++ b/cpp/src/layout_analyzer.cc
+@@ -2424,6 +2424,47 @@ bool LayoutAnalyzer::ClusterSort(PageLayout* l) {
+   return true;
+ }
+ 
++// LearnFromGames: ClusterSort without its model and its sorting. Boxes and confidences are recomputed from the
++// symbols exactly as there, and every PARAGRAPH that has lines gets a BLOCK of its own, which the VisualAnnotation
++// conversion needs; but the paragraphs stay in the order detected and the lines of a paragraph in theirs. For a
++// caller that orders and groups the lines itself.
++static void BlockPerParagraph(PageLayout* l) {
++  ReorderUsingDfs(l);
++  {
++    const auto kids = ChildLists(*l);
++    const auto all = AllDescendants(*l, kids);
++    for (auto it = all.rbegin(); it != all.rend(); ++it) RobustBoxEstimation(l, *it, kids);
++  }
++  RecomputeConfidencesFromSymbols(l);
++  const auto kids = ChildLists(*l);
++  const size_t n = l->entities.size();
++  std::vector<bool> del(n, false);
++  for (size_t i = 0; i < n; i++) {
++    Entity& p = l->entities[i];
++    if (p.type == Type::kBlock) del[i] = true;
++    if (p.type != Type::kParagraph) continue;
++    if (kids[i].empty()) {
++      del[i] = true;
++      continue;
++    }
++    if (!p.orientation && !p.writing_direction && !p.textline_order) {
++      const Entity& c = l->entities[kids[i][0]];
++      p.orientation = c.orientation, p.writing_direction = c.writing_direction, p.textline_order = c.textline_order;
++    }
++    Entity blk;
++    blk.type = Type::kBlock;
++    blk.orientation = p.orientation, blk.writing_direction = p.writing_direction;
++    blk.textline_order = p.textline_order;
++    blk.box = p.box;
++    l->entities.push_back(std::move(blk));
++    l->entities[i].parent = static_cast<int>(l->entities.size()) - 1;
++  }
++  del.resize(l->entities.size(), false);
++  DeleteWithDescendants(l, del);
++  ReorderUsingDfs(l);
++  RecomputeConfidencesFromSymbols(l);
++}
++
+ void LayoutAnalyzer::ClusterSortInputs(const PageLayout& layout, std::vector<float>* features,
+                                        std::vector<int64_t>* senders, std::vector<int64_t>* receivers) const {
+   const LineGraph g = BuildLineGraph(layout);
+@@ -2439,6 +2480,7 @@ bool LayoutAnalyzer::RunStep(const std::string& step, const GrayImage& gray, Pag
+   else if (step == "FillSymbolGaps") FillSymbolGaps(l, fill_symbol_gaps_);
+   else if (step == "CurvedOverlaps") RemoveOverlappingWithCurvedBoxes(l);
+   else if (step == "ClusterSort") return ClusterSort(l);
++  else if (step == "Blocks") BlockPerParagraph(l);
+   else if (step == "EstimateLines") EstimateLines(l);
+   else if (step == "AnalyzerEnd") RecomputeLineTextContent(l);
+   else if (step == "Colors") EstimateWordColors(l, gray);
+@@ -2447,6 +2489,13 @@ bool LayoutAnalyzer::RunStep(const std::string& step, const GrayImage& gray, Pag
+   return true;
+ }
+ 
++bool LayoutAnalyzer::AnalyzeFast(PageLayout* layout) {
++  const GrayImage unused;
++  for (const char* s : {"pre", "ConfidenceFilter", "WordPruning", "FillSymbolGaps", "CurvedOverlaps", "Blocks"})
++    if (!RunStep(s, unused, layout)) return false;
++  return true;
++}
++
+ bool LayoutAnalyzer::Analyze(const GrayImage& gray, PageLayout* layout) {
+   for (const char* s : {"pre", "ConfidenceFilter", "WordPruning", "FillSymbolGaps", "CurvedOverlaps", "ClusterSort",
+                         "EstimateLines", "AnalyzerEnd", "Colors", "PageLanguage"})
+diff --git a/cpp/src/layout_analyzer.h b/cpp/src/layout_analyzer.h
+index 928230a..b2e6792 100644
+--- a/cpp/src/layout_analyzer.h
++++ b/cpp/src/layout_analyzer.h
+@@ -41,10 +41,16 @@ class LayoutAnalyzer {
+   // MutateSub: everything between the recognizer output and the final layout.
+   bool Analyze(const GrayImage& gray, PageLayout* layout);
+ 
++  // LearnFromGames: Analyze for a caller that orders and groups the lines itself and reads only their words,
++  // symbols and boxes. The lines kept, their text and every box are those of Analyze; the lines come in the
++  // order detected instead of the reading order, and line texts, word colors and the page language are not
++  // filled in. Runs no model.
++  bool AnalyzeFast(PageLayout* layout);
++
+   // Runs one stage of Analyze (for testing against per-step dumps of the original): "pre" (detection confidence),
+   // "ConfidenceFilter", "WordPruning", "FillSymbolGaps", "CurvedOverlaps", "ClusterSort", "EstimateLines" (merges
+   // lines), "AnalyzerEnd" (line texts),
+-  // "Colors" (word colors), "PageLanguage" (+ creator_id).
++  // "Colors" (word colors), "PageLanguage" (+ creator_id). "Blocks" is AnalyzeFast's stand-in for "ClusterSort".
+   bool RunStep(const std::string& step, const GrayImage& gray, PageLayout* layout);
+ 
+   // ClusterSortGcn model inputs for the current layout: features [n, 30] and the two edge endpoint vectors.
+diff --git a/cpp/src/recognizer.cc b/cpp/src/recognizer.cc
+index d71a922..070b2ef 100644
+--- a/cpp/src/recognizer.cc
++++ b/cpp/src/recognizer.cc
+@@ -260,10 +260,12 @@ class ScriptRecognizer {
+     return it == labels_.end() ? nullptr : &it->second;
+   }
+   int num_labels() const { return static_cast<int>(labels_.size()); }
++  void SetTightBatches(bool tight) { tight_batches_ = tight; }
+ 
+  private:
+   Config cfg_;
+   std::vector<std::unique_ptr<TfliteModel>> models_;  // interpreter pool
++  bool tight_batches_ = false;  // LearnFromGames: see Run
+   std::map<int, std::string> labels_;
+   std::unique_ptr<CtcBeamDecoder> decoder_;
+   std::map<std::string, int> out_tensor_;  // signature output name -> tensor index
+@@ -381,13 +383,27 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+   const int first_frame = kPad / kFrameWidth;              // 4
+   std::vector<LineTensors> out(lines.size());
+   // Batch inputs, then the invokes spread over the interpreter pool, then the outputs in batch order.
+-  const size_t batch_bytes = static_cast<size_t>(kBatch) * kLineHeight * kChunkInput;
+-  const size_t num_batches = (chunks.size() + kBatch - 1) / kBatch;
+-  std::vector<std::vector<uint8_t>> inputs(num_batches, std::vector<uint8_t>(batch_bytes, 0));
++  // The original always invokes on kBatch chunks, zero-padding the last batch. LearnFromGames (tight batches):
++  // a batch holds only the chunks there are, and they are spread evenly over the interpreter pool, so a pass over
++  // three chunks computes three, on three threads, instead of eight on one. The chunks of a batch do not
++  // influence one another, so every chunk's output is what it was.
++  const size_t chunk_bytes = static_cast<size_t>(kLineHeight) * kChunkInput;
++  size_t num_batches = (chunks.size() + kBatch - 1) / kBatch;
++  if (tight_batches_ && !chunks.empty()) num_batches = std::max(num_batches, std::min(models_.size(), chunks.size()));
++  // batch b holds chunks [batch_start[b], batch_start[b + 1])
++  std::vector<size_t> batch_start(num_batches + 1, chunks.size());
++  for (size_t b = 0; b < num_batches; b++)
++    batch_start[b] = tight_batches_ ? b * (chunks.size() / num_batches) + std::min(b, chunks.size() % num_batches)
++                                    : b * kBatch;
++  auto batch_slots = [&](size_t b) {
++    return tight_batches_ ? batch_start[b + 1] - batch_start[b] : static_cast<size_t>(kBatch);
++  };
++  std::vector<std::vector<uint8_t>> inputs(num_batches);
+   for (size_t b = 0; b < num_batches; b++) {
+-    for (size_t j = 0; j < static_cast<size_t>(kBatch) && b * kBatch + j < chunks.size(); j++)
+-      memcpy(inputs[b].data() + j * kLineHeight * kChunkInput, chunks[b * kBatch + j].data(),
+-             chunks[b * kBatch + j].size());
++    inputs[b].assign(batch_slots(b) * chunk_bytes, 0);
++    const size_t batch_bytes = inputs[b].size();
++    for (size_t j = 0; batch_start[b] + j < batch_start[b + 1]; j++)
++      memcpy(inputs[b].data() + j * chunk_bytes, chunks[batch_start[b] + j].data(), chunks[batch_start[b] + j].size());
+     if (const char* dir = std::getenv("SCREENAI_REC_DUMP")) {  // debug: model input of every invoke
+       static int seq = 0;
+       char name[64];
+@@ -407,9 +423,11 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+   std::atomic<size_t> next_batch{0};
+   std::atomic<bool> ok{true};
+   auto worker = [&](TfliteModel* model) {
+-    if (!model->Resize(0, {kBatch, kLineHeight, kChunkInput, 1}) || !model->AllocateTensors()) return void(ok = false);
+     for (size_t b; (b = next_batch.fetch_add(1)) < num_batches && ok;) {
+-      memcpy(model->input(0)->data.uint8, inputs[b].data(), batch_bytes);
++      if (!model->Resize(0, {static_cast<int>(batch_slots(b)), kLineHeight, kChunkInput, 1}) ||
++          !model->AllocateTensors())
++        return void(ok = false);
++      memcpy(model->input(0)->data.uint8, inputs[b].data(), inputs[b].size());
+       if (!model->Invoke()) return void(ok = false);
+       for (const auto& [name, idx] : out_tensor_) {
+         const TfLiteTensor* t = model->interpreter()->tensor(idx);
+@@ -430,8 +448,11 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+     for (std::thread& t : threads) t.join();
+   }
+   if (!ok) return {};
+-  for (size_t b0 = 0; b0 < chunks.size(); b0 += kBatch) {
+-    const std::map<std::string, Output>& batch_out = outputs[b0 / kBatch];
++  for (size_t b = 0; b < num_batches; b++) {
++    const size_t b0 = batch_start[b];
++    const int in_batch = static_cast<int>(batch_start[b + 1] - b0);
++    const size_t slots = batch_slots(b);
++    const std::map<std::string, Output>& batch_out = outputs[b];
+     auto tensor = [&](const char* name) -> const Output* {
+       auto it = batch_out.find(name);
+       return it == batch_out.end() ? nullptr : &it->second;
+@@ -447,7 +468,7 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+       const size_t n = t->data.size();
+       d.v.resize(n);
+       DequantizeDense(t->data.data(), n, t->scale, t->zero_point, d.v.data());
+-      d.inner = static_cast<int>(n / (kBatch * frames_per_chunk));
++      d.inner = static_cast<int>(n / (slots * frames_per_chunk));
+       return d;
+     };
+     const char* names[] = {"symbol_left_offset", "symbol_right_offset", "symbol_top",
+@@ -458,7 +479,7 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+     for (int i = 0; i < 10; i++) d[i] = dense(names[i]);
+     const Output* lt = tensor("decode_logits");
+     const int C = lt->last_dim;
+-    for (int j = 0; j < kBatch && b0 + j < chunks.size(); j++) {
++    for (int j = 0; j < in_batch; j++) {
+       const ChunkRef& r = refs[b0 + j];
+       LineTensors& L = out[r.line];
+       const int nf = (r.width + kFrameWidth - 1) / kFrameWidth;
+@@ -475,7 +496,7 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+       }
+     }
+     // gated heads: keep the raw per-frame activations until all chunks of the line are merged
+-    for (int j = 0; j < kBatch && b0 + j < chunks.size(); j++) {
++    for (int j = 0; j < in_batch; j++) {
+       const ChunkRef& r = refs[b0 + j];
+       LineTensors& L = out[r.line];
+       const int nf = (r.width + kFrameWidth - 1) / kFrameWidth;
+@@ -957,6 +978,7 @@ bool LineRecognizer::Recognize(const RgbaImage& rgba, const GrayImage& gray, Pag
+   auto run_pass = [&](const std::string& key, const std::vector<int>& which) {
+     rec::ScriptRecognizer* r = Get(key);
+     if (!r) return false;
++    r->SetTightBatches(fast_);
+     const rec::Config& cfg = r->config();
+     std::vector<GrayImage> images, scaled;
+     for (int w : which) {
+@@ -1081,7 +1103,7 @@ bool LineRecognizer::Recognize(const RgbaImage& rgba, const GrayImage& gray, Pag
+       st.words = rec::BuildWords(st.decode.symbols, st.decode.text);
+       if (!rtl) {
+         rec::RecomputeSpaceWordBreakBoxes(st.decode.symbols, e.writing_direction == 2, &st.words);
+-        rec::EstimateWordColors(images[k], st.decode.symbols, &st.words);
++        if (!fast_) rec::EstimateWordColors(images[k], st.decode.symbols, &st.words);
+       }
+       if (st.box_scale != 1.0f) ScaleLineBoxes(st.box_scale, &st.decode.symbols, &st.words);
+     }
+diff --git a/cpp/src/recognizer.h b/cpp/src/recognizer.h
+index f946da7..c578a73 100644
+--- a/cpp/src/recognizer.h
++++ b/cpp/src/recognizer.h
+@@ -40,6 +40,10 @@ class LineRecognizer {
+   // maximum_iterations = 1 for "taser_line_recognition_mutator", i.e. no second, script-specific pass.
+   void SetLightMode(bool light) { light_ = light; }
+ 
++  // LearnFromGames: the same text and boxes for less work. Batches hold only the chunks there are, spread over
++  // the interpreter pool (ScriptRecognizer::Run), and word colors are not estimated.
++  void SetFastMode(bool fast) { fast_ = fast; }
++
+  private:
+   LineRecognizer() = default;
+   rec::ScriptRecognizer* Get(const std::string& key);  // lazily loads the recognizer of a multi-pass key
+@@ -50,6 +54,7 @@ class LineRecognizer {
+   std::string default_key_ = "und";
+   int maximum_iterations_ = 2;
+   bool light_ = false;
++  bool fast_ = false;
+   std::map<std::string, std::unique_ptr<rec::ScriptRecognizer>> recognizers_;
+ };
+ 

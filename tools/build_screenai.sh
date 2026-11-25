@@ -30,6 +30,8 @@
 #   0001-keep-first-pass-when-script-recognizer-missing   screenai_ocr: a line whose script recogniser is not
 #                                                         installed keeps its first-pass text; the page still reads
 #   0002-eigen-subset-without-vectorization-off-arm64     screenai_ocr: its Eigen subset lacks the x86 headers
+#   0003-fast-mode-and-gray-input                         screenai_ocr: SetOCRFastMode, the same lines, text and
+#                                                         boxes for about half the work; gray pixels as they are
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -262,7 +264,7 @@ check_library() {
     die "$so has a LOAD segment that is not 16 KB aligned"
   fi
   symbols="$("$LLVM_BIN/llvm-nm" -D --defined-only "$so")"
-  for sym in SetFileContentFunctions InitOCRUsingCallback SetOCRLightMode GetMaxImageDimension PerformOCR \
+  for sym in SetFileContentFunctions InitOCRUsingCallback SetOCRLightMode SetOCRFastMode GetMaxImageDimension PerformOCR \
     FreeLibraryAllocatedCharArray UninitializeOCR; do
     grep -q " T $sym\$" <<<"$symbols" || die "$so does not export $sym"
   done

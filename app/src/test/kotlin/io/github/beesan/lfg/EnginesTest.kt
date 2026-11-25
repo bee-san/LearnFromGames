@@ -56,6 +56,24 @@ class EnginesTest {
         assertEquals(1, Blocks.group(ScreenAi.decode(resource("/screenai/furigana.pb"))).size)
     }
 
+    @Test
+    fun screenAiLinesComeInReadingOrderWhateverOrderTheyWereFoundIn() {
+        fun line(text: String, left: Int, top: Int, right: Int, bottom: Int, vertical: Boolean = false) =
+            io.github.beesan.lfg.core.TextLine(text, io.github.beesan.lfg.core.Box(left, top, right, bottom), emptyList(), vertical)
+        // As the fast mode gave a real screen: the end of a row before its start, the buttons before both.
+        val found = listOf(
+            line("ッ!!", 860, 826, 1007, 882), line("自動", 1784, 932, 1866, 972), line("次へ", 1779, 1009, 1875, 1051),
+            line("ガリガリガリ", 216, 822, 581, 877),
+        )
+        assertEquals(listOf("ガリガリガリ", "ッ!!", "自動", "次へ"), ScreenAi.ordered(found).map { it.text })
+        // A row's second piece that sits a few pixels higher than its first still follows it.
+        val uneven = listOf(line("後", 600, 818, 700, 874), line("前", 200, 822, 500, 878), line("下", 200, 900, 500, 956))
+        assertEquals(listOf("前", "後", "下"), ScreenAi.ordered(uneven).map { it.text })
+        // Columns are read from the right, after the rows.
+        val mixed = listOf(line("左", 100, 100, 150, 500, vertical = true), line("右", 300, 100, 350, 500, vertical = true), line("横", 500, 600, 900, 650))
+        assertEquals(listOf("横", "右", "左"), ScreenAi.ordered(mixed).map { it.text })
+    }
+
     /** A ScreenAI line: each symbol with its left edge and width, all [height] tall at y=100. */
     private fun read(vararg symbols: Pair<String, IntRange>, height: Int = 50): Pair<String, List<io.github.beesan.lfg.core.CharBox>> {
         val text = StringBuilder()

@@ -22,7 +22,7 @@ import java.util.zip.ZipInputStream
 class ScreenAi private constructor() {
     fun read(frame: Frame): List<TextLine> {
         val bytes = nativeRead(frame.argb, frame.width, frame.height) ?: error("ScreenAI could not read the frame.")
-        return decode(bytes)
+        return ordered(decode(bytes))
     }
 
     companion object {
@@ -50,6 +50,28 @@ class ScreenAi private constructor() {
 
         @JvmStatic
         private external fun nativeRead(pixels: IntArray, width: Int, height: Int): ByteArray?
+
+        /**
+         * The library is asked for its fast mode (tools/screenai/0003), which gives the lines in the order it
+         * found them rather than in reading order. Here they are put top to bottom, the pieces of one row left
+         * to right, and columns after them from the right: the order a reader of the screen expects of a reader.
+         */
+        internal fun ordered(lines: List<TextLine>): List<TextLine> {
+            val (columns, rows) = lines.partition { it.vertical }
+            val byTop = rows.sortedBy { it.box.top }
+            val out = ArrayList<TextLine>(lines.size)
+            var i = 0
+            while (i < byTop.size) {
+                // A row: what starts above the middle of its topmost piece.
+                val middle = (byTop[i].box.top + byTop[i].box.bottom) / 2
+                var j = i + 1
+                while (j < byTop.size && byTop[j].box.top < middle) j++
+                out += byTop.subList(i, j).sortedBy { it.box.left }
+                i = j
+            }
+            out += columns.sortedWith(compareBy({ -it.box.right }, { it.box.top }))
+            return out
+        }
 
         /**
          * A serialized `chrome_screen_ai.VisualAnnotation` as lines. A
