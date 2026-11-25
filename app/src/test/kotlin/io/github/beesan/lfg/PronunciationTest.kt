@@ -82,7 +82,8 @@ class PronunciationTest {
         val listed = EntryHtml.body(e, audio = true, index = 3)
         assertTrue(listed.contains("""href="${EntryHtml.AUDIO_URL}/3""""))
         assertTrue(listed.contains("""id="c3" href="${EntryHtml.CARD_URL}/3" data-state="add""""))
-        assertTrue(listed.contains("""href="${EntryHtml.NOTE_URL}/3""""))
+        // The note button comes and goes with notes on words (data/Notes.kt).
+        assertEquals(io.github.beesan.lfg.data.Notes.WORD_NOTES, listed.contains("""href="${EntryHtml.NOTE_URL}/3""""))
         assertEquals("中高 2 · JPDB 1234㋕", Pronunciation.summary(e))
         // Nothing extra for an entry with neither.
         assertFalse(EntryHtml.body(Entry(expression = "見る", reading = "みる")).contains("lfg-meta"))

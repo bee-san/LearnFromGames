@@ -172,6 +172,7 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Item("Appearance", "Colours, and light or dark", Page.APPEARANCE)
     Item("Backup", "Back up, restore, and back up on a schedule", Page.BACKUP)
     Item("Translation", "Translate and explain lines with your OpenRouter key", Page.TRANSLATION)
+    Item("Diary", "When the model writes each day you played", Page.DIARY_SETTINGS)
     Item("Dictionaries", "Add, order and remove dictionaries", Page.DICTIONARIES)
     Item("Anki", "The note type and deck cards go to", Page.ANKI)
     Item("Controls", "The lookup shortcut, whole words or characters, and where the entry shows", Page.CONTROLS)
@@ -388,11 +389,11 @@ fun BackupScreen(
     onBack: () -> Unit,
 ) = Page("Backup", onBack) {
     message?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
-    Card("Back up now", "Lines, stats, notes, recaps, waiting cards and settings, in one file") { LfgButton("Back up…", onBackUp, primary = true) }
+    Card("Back up now", "Lines, stats, the diary, recaps, waiting cards and settings, in one file") { LfgButton("Back up…", onBackUp, primary = true) }
     if (pendingRestore == null) {
         Card("Restore", "Replaces what is here with a backup. What is here is backed up first.") { LfgButton("Restore…", onPickRestore) }
     } else {
-        Card("Restore from $pendingRestore?", "Lines, notes and settings here are replaced, and LFG starts again.") {
+        Card("Restore from $pendingRestore?", "Lines, the diary and settings here are replaced, and LFG starts again.") {
             LfgButton("Cancel", onCancelRestore)
             LfgButton("Restore", onRestore, primary = true)
         }
@@ -425,7 +426,7 @@ fun BackupScreen(
     Card("Keep", "Older automatic backups are deleted") {
         Choice(listOf("7" to "Last 7", "30" to "Last 30", "0" to "All"), "${prefs.backupKeep}") { v -> onChange { it.copy(backupKeep = v.toInt()) } }
     }
-    Card("Pictures", "Pictures of lines and notes") {
+    Card("Pictures", "Pictures of lines and diary entries") {
         Choice(listOf("in" to "Include", "out" to "Leave out"), if (prefs.backupPictures) "in" else "out") { v -> onChange { it.copy(backupPictures = v == "in") } }
     }
 }
@@ -1090,7 +1091,7 @@ internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINES, LINE, NOTES, NOTE_NEW, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE, BOX_DRAW }
+enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINES, LINE, DIARY, DIARY_MONTH, DIARY_DAY, DIARY_ENTRY, DIARY_WRITE, DIARY_SHARE, DIARY_SETTINGS, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE, BOX_DRAW }
 
 @Composable
 fun StorageScreen(
@@ -1107,7 +1108,7 @@ fun StorageScreen(
     } else {
         Card("Screens", "${mb(usage.screens)} · ${usage.screenCount} pictures, ${usage.keptScreens} kept for good")
         Card("Line pictures", "${mb(usage.crops)} · each line cut from its screen, kept for good")
-        Card("Cards and notes", "${mb(usage.cards + usage.notes)} · pictures and sound made for cards, and notes' own copies")
+        Card("Cards and notes", "${mb(usage.cards + usage.notes)} · pictures and sound made for cards, and diary entries' own copies")
         Card("Dictionaries", mb(usage.dictionaries))
         Card("Text recognition", mb(usage.reader))
         Card("Lines and stats", mb(usage.database))
@@ -1117,7 +1118,7 @@ fun StorageScreen(
     Card(
         "Keep screens",
         "The whole screen saved with each line. A line, its text and its own picture are never deleted, and neither is " +
-            "a screen a card was made from or a recap chose as a moment.",
+            "a screen a card was made from or a recap chose as a moment, and one a day for the diary.",
     ) {
         Choice(listOf("7" to "A week", "14" to "Two weeks", "30" to "A month", "90" to "Three months", "0" to "Always"), keepDays.toString()) {
             onKeepDays(it.toInt())

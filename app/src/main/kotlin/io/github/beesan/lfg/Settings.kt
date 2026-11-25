@@ -84,6 +84,11 @@ data class Prefs(
     val backupFolder: String = "",
     /** [BACKUP_OFF], [BACKUP_DAILY] or [BACKUP_WEEKLY]. */
     val backupEvery: String = BACKUP_OFF,
+    /**
+     * When the diary's days are written by the model: [DIARY_WITH_RECAP], only
+     * when a recap is, or [DIARY_EACH_DAY], also once each day is over.
+     */
+    val diaryWrite: String = DIARY_EACH_DAY,
     /** How many automatic backups are kept; 0 keeps all. */
     val backupKeep: Int = 7,
     /** Whether backups carry the pictures of lines and notes. */
@@ -163,6 +168,8 @@ data class Prefs(
         const val TRANSLATE_OFF = "off"
         const val TRANSLATE_ASK = "ask"
         const val TRANSLATE_EVERY = "every"
+        const val DIARY_WITH_RECAP = "recap"
+        const val DIARY_EACH_DAY = "day"
         const val BACKUP_OFF = "off"
         const val BACKUP_DAILY = "daily"
         const val BACKUP_WEEKLY = "weekly"
@@ -212,6 +219,7 @@ class Settings(context: Context) {
             ask = store.getBoolean("ask", d.ask),
             backupFolder = store.getString("backupFolder", d.backupFolder) ?: d.backupFolder,
             backupEvery = store.getString("backupEvery", d.backupEvery) ?: d.backupEvery,
+            diaryWrite = store.getString("diaryWrite", d.diaryWrite) ?: d.diaryWrite,
             backupKeep = store.getInt("backupKeep", d.backupKeep),
             backupPictures = store.getBoolean("backupPictures", d.backupPictures),
             gsmFile = store.getBoolean("gsmFile", d.gsmFile),
@@ -269,6 +277,7 @@ class Settings(context: Context) {
             .putBoolean("ask", next.ask)
             .putString("backupFolder", next.backupFolder)
             .putString("backupEvery", next.backupEvery)
+            .putString("diaryWrite", next.diaryWrite)
             .putInt("backupKeep", next.backupKeep)
             .putBoolean("backupPictures", next.backupPictures)
             .putBoolean("gsmFile", next.gsmFile)

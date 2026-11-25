@@ -168,6 +168,26 @@ data class Note(
 )
 
 /**
+ * A day of a game in the diary: the picture it keeps for good, chosen before
+ * the day's screens are cleared ([io.github.beesan.lfg.core.DayPicture]), and
+ * the title and few sentences the model wrote of it, when it has.
+ */
+@Entity(tableName = "diary_days", primaryKeys = ["game_id", "day"])
+data class DiaryDay(
+    @ColumnInfo(name = "game_id") val gameId: String,
+    /** The day ([io.github.beesan.lfg.core.ReadingStats.dayOf]) as days since 1970. */
+    val day: Long,
+    @ColumnInfo(defaultValue = "") val title: String = "",
+    @ColumnInfo(defaultValue = "") val summary: String = "",
+    @ColumnInfo(name = "picture_path") val picturePath: String? = null,
+    /** The line [picturePath] is the screen of, or empty. */
+    @ColumnInfo(name = "line_id", defaultValue = "") val lineId: String = "",
+    @ColumnInfo(defaultValue = "") val model: String = "",
+    /** When the title and summary were written, or 0. */
+    @ColumnInfo(name = "written_at", defaultValue = "0") val writtenAt: Long = 0,
+)
+
+/**
  * A game's story so far, as JSON ([io.github.beesan.lfg.recap.Recap]), from
  * its lines up to [lastLineId]. The next recap carries on from the newest one.
  */

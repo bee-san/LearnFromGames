@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.res.Configuration
 import android.view.InputDevice
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
@@ -229,6 +231,8 @@ fun LfgButton(
     enabled: Boolean = true,
     /** Smaller, for a crowded bar such as the lines' screen over a game. */
     compact: Boolean = false,
+    /** The pad's button that does the same, drawn as a small key before the text: "B" on Back. */
+    key: String? = null,
 ) {
     Button(
         onClick = onClick,
@@ -244,6 +248,12 @@ fun LfgButton(
             disabledContentColor = Lfg.Dim,
         ),
     ) {
+        if (key != null) {
+            Text(
+                key, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (primary) Lfg.OnFill else Lfg.Dim, maxLines = 1,
+                modifier = Modifier.padding(end = 8.dp).border(1.dp, if (primary) Lfg.OnFill else Lfg.BorderStrong, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+            )
+        }
         Text(text, fontSize = if (compact) 13.sp else 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }

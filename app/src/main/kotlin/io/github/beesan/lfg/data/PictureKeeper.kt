@@ -13,9 +13,10 @@ import java.io.File
  * handheld does not fill up over months of play. The line itself, its crop
  * (the line alone, a few KB) and its text are never deleted. A screen is kept
  * for good when a card was made from its line, a card waiting for AnkiDroid
- * still needs it, or a recap chose the line as a moment to look back at.
+ * still needs it, a recap chose the line as a moment to look back at, or it is
+ * the one picture the diary keeps of its day (data/Diary.kt).
  */
-class PictureKeeper(private val db: LfgDatabase, private val files: File) {
+class PictureKeeper(private val db: LfgDatabase, private val files: File, private val diary: Diary = Diary(db)) {
     val frames = File(files, "frames")
 
     /** The screens kept whatever their age: from a line a card was made from, or a recap's moment. */
@@ -28,7 +29,7 @@ class PictureKeeper(private val db: LfgDatabase, private val files: File) {
         val waiting = db.cards().pending().mapNotNull { card ->
             runCatching { JSON.parseToJsonElement(card.payload).jsonObject["picturePath"]?.jsonPrimitive?.contentOrNull }.getOrNull()
         }
-        return lines.keptPictures().toSet() + moments.chunked(500).flatMap { lines.picturesOf(it) } + waiting
+        return lines.keptPictures().toSet() + moments.chunked(500).flatMap { lines.picturesOf(it) } + waiting + db.diary().pictures()
     }
 
     /**
@@ -37,6 +38,8 @@ class PictureKeeper(private val db: LfgDatabase, private val files: File) {
      */
     suspend fun sweep(days: Int, now: Long = System.currentTimeMillis()): Int {
         val lines = db.lines()
+        // Each day about to lose its screens keeps one of them for the diary.
+        if (days > 0) diary.keepPictures(now - days * DAY_MS)
         val kept = keptForGood()
         var gone = 0
         if (days > 0) {

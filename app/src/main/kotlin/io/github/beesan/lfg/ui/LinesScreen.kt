@@ -115,7 +115,7 @@ fun LinesScreen(
     onOpenLine: (GameLine) -> Unit,
     onStats: () -> Unit,
     onSettings: () -> Unit,
-    onNotes: () -> Unit,
+    onDiary: () -> Unit,
     onRecap: () -> Unit,
     onAsk: () -> Unit,
     shortcut: String = "L3 + R3",
@@ -129,7 +129,7 @@ fun LinesScreen(
     val list = rememberLazyListState()
     Column(Modifier.fillMaxSize().padScroll(list).firstFocus()) {
         PageHeader("Lines") {
-            LfgButton("Notes", onNotes)
+            LfgButton("Diary", onDiary)
             LfgButton("Recap", onRecap)
             LfgButton("Ask", onAsk)
             LfgButton("Stats", onStats)
@@ -422,7 +422,7 @@ fun NoteItem(note: Note, clock: SimpleDateFormat, modifier: Modifier = Modifier)
                 .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 10.dp),
         ) {
             Text(
-                if (note.term.isEmpty()) "NOTE" else "NOTE  ·  ${note.term}",
+                if (note.term.isEmpty()) "DIARY ENTRY" else "NOTE  ·  ${note.term}",
                 color = Lfg.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp,
             )
             Text(note.text, color = Lfg.Text, fontSize = 15.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 4.dp))

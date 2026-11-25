@@ -3,4 +3,5 @@
     <files-path name="frames" path="frames/" />
     <files-path name="media" path="media/" />
     <cache-path name="dialogue" path="dialogue/" />
+    <cache-path name="share" path="share/" />
 </paths>

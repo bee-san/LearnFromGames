@@ -6,7 +6,7 @@ import kotlin.math.atan2
 /** What a slice of the wheel does. */
 enum class WheelAction(val label: String, val about: String) {
     AI("AI", "Translate, explain, recap or ask"),
-    NOTE("Note", "A note on this line"),
+    NOTE("Entry", "A diary entry on this moment"),
     READ_ONCE("Read once", "Two corners, read at once"),
     BOXES("Boxes", "The game’s own boxes"),
     LINES("Lines", "What was read lately"),

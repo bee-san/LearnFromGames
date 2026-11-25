@@ -71,7 +71,7 @@ fun HomeScreen(
     onLines: () -> Unit,
     onStats: () -> Unit,
     onGoals: () -> Unit,
-    onNotes: () -> Unit,
+    onDiary: () -> Unit,
     onRecap: () -> Unit,
     onAsk: () -> Unit,
     onSettings: () -> Unit,
@@ -106,7 +106,7 @@ fun HomeScreen(
                     }
                     Column(Modifier.width(300.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         todayCard()
-                        Tiles(2, onLines, onStats, onNotes, onAsk)
+                        Tiles(2, onLines, onStats, onDiary, onAsk)
                     }
                 }
             } else {
@@ -114,7 +114,7 @@ fun HomeScreen(
                     continueCard()
                     todayCard()
                     if (lines.size > 1) lastLines()
-                    Tiles(4, onLines, onStats, onNotes, onAsk)
+                    Tiles(4, onLines, onStats, onDiary, onAsk)
                 }
             }
         }
@@ -307,8 +307,8 @@ private fun LastLines(lines: List<GameLine>, onOpenLine: (GameLine) -> Unit, onL
 }
 
 @Composable
-private fun Tiles(columns: Int, onLines: () -> Unit, onStats: () -> Unit, onNotes: () -> Unit, onAsk: () -> Unit) {
-    val tiles = listOf("Lines" to onLines, "Stats" to onStats, "Notes" to onNotes, "Ask" to onAsk)
+private fun Tiles(columns: Int, onLines: () -> Unit, onStats: () -> Unit, onDiary: () -> Unit, onAsk: () -> Unit) {
+    val tiles = listOf("Lines" to onLines, "Stats" to onStats, "Diary" to onDiary, "Ask" to onAsk)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         for (row in tiles.chunked(columns)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

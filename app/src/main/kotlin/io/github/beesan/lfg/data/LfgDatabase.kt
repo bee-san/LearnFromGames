@@ -60,6 +60,17 @@ interface LineDao {
     @Query("SELECT DISTINCT screenshot_path FROM game_lines WHERE screenshot_path IS NOT NULL AND note_ids != ''")
     suspend fun keptPictures(): List<String>
 
+    /** The lines read before [before] (milliseconds) whose screens are still kept, in the order read: what the diary picks a day's picture from. */
+    @Query("SELECT * FROM game_lines WHERE screenshot_path IS NOT NULL AND created_at < :before AND source != 'practice' AND interface_text = 0 ORDER BY timestamp")
+    suspend fun withPicturesBefore(before: Long): List<GameLine>
+
+    /** The line of a game read just before [before]: the picture before, for a diary entry. */
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp < :before AND screenshot_path IS NOT NULL AND source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC LIMIT 1")
+    suspend fun pictureBefore(gameId: String, before: Double): GameLine?
+
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp > :after AND screenshot_path IS NOT NULL AND source != 'practice' AND interface_text = 0 ORDER BY timestamp LIMIT 1")
+    suspend fun pictureAfter(gameId: String, after: Double): GameLine?
+
     /** The screens of these lines that are still kept. */
     @Query("SELECT DISTINCT screenshot_path FROM game_lines WHERE id IN (:ids) AND screenshot_path IS NOT NULL")
     suspend fun picturesOf(ids: List<String>): List<String>
@@ -135,6 +146,9 @@ interface GameDao {
     @Query("SELECT * FROM games ORDER BY title COLLATE NOCASE")
     fun all(): Flow<List<Game>>
 
+    @Query("SELECT * FROM games")
+    suspend fun allNow(): List<Game>
+
     /** The rows of ordinary apps, whose lines can be left out of reading time. */
     @Query("SELECT id FROM games WHERE app = 1")
     fun appIds(): Flow<List<String>>
@@ -154,7 +168,13 @@ interface GameDao {
 interface LookupDao {
     @Insert
     suspend fun insert(lookup: LookupRecord)
+
+    /** How often each line was looked up in. */
+    @Query("SELECT line_id AS lineId, COUNT(*) AS count FROM lookups GROUP BY line_id")
+    suspend fun counts(): List<LookupCount>
 }
+
+data class LookupCount(val lineId: String, val count: Int)
 
 @Dao
 interface CardDao {
@@ -201,6 +221,32 @@ interface NoteDao {
     suspend fun forTerms(terms: List<String>): List<Note>
 
     @Query("SELECT picture_path FROM notes WHERE picture_path IS NOT NULL")
+    suspend fun pictures(): List<String>
+
+    @Update
+    suspend fun update(note: Note)
+
+    @Query("SELECT * FROM notes WHERE id = :id")
+    suspend fun byId(id: Long): Note?
+
+    /** The diary's entries: every note that is not on a word, oldest first. */
+    @Query("SELECT * FROM notes WHERE term = '' ORDER BY created_at")
+    suspend fun entries(): List<Note>
+}
+
+@Dao
+interface DiaryDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(day: DiaryDay)
+
+    @Query("SELECT * FROM diary_days WHERE game_id = :gameId AND day = :day")
+    suspend fun of(gameId: String, day: Long): DiaryDay?
+
+    @Query("SELECT * FROM diary_days")
+    suspend fun all(): List<DiaryDay>
+
+    /** The screens the diary keeps for good. */
+    @Query("SELECT picture_path FROM diary_days WHERE picture_path IS NOT NULL")
     suspend fun pictures(): List<String>
 }
 
@@ -253,8 +299,8 @@ interface ExplanationDao {
 
 /** Schema changes add a numbered migration; nothing here is ever rebuilt destructively. */
 @Database(
-    entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class, QuestionRow::class, ExplanationRow::class],
-    version = 8,
+    entities = [GameLine::class, Game::class, LookupRecord::class, Card::class, Note::class, RecapRow::class, QuestionRow::class, ExplanationRow::class, DiaryDay::class],
+    version = 9,
     exportSchema = true,
     // 2: a crop and a translation for each line, notes, and recaps. Room writes it from the exported schemas.
     // 3: a row for each game named inside an emulator.
@@ -263,9 +309,10 @@ interface ExplanationDao {
     // 6: the visual novel on VNDB a game is linked to, for its character names.
     // 7: questions asked about a game, and their answers.
     // 8: a line's explanation and the questions asked about it, kept with the line.
+    // 9: the diary's days: the picture each keeps for good, and what the model wrote of it.
     autoMigrations = [
         AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6),
-        AutoMigration(from = 6, to = 7), AutoMigration(from = 7, to = 8),
+        AutoMigration(from = 6, to = 7), AutoMigration(from = 7, to = 8), AutoMigration(from = 8, to = 9),
     ],
 )
 abstract class LfgDatabase : RoomDatabase() {
@@ -277,6 +324,7 @@ abstract class LfgDatabase : RoomDatabase() {
     abstract fun recaps(): RecapDao
     abstract fun questions(): QuestionDao
     abstract fun explanations(): ExplanationDao
+    abstract fun diary(): DiaryDao
 
     companion object {
         fun open(context: Context): LfgDatabase =

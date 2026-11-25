@@ -171,7 +171,7 @@ fun LinesPanel(
                 // Crop draws the box the game is read in; while it is drawn it is Cancel, the only way out of a box drawn by finger.
                 LfgButton(if (ui.picking) "Cancel" else "Crop", actions::crop, compact = true)
                 LfgButton("Recap", actions::recapButton, compact = true)
-                LfgButton("Note", actions::note, compact = true)
+                LfgButton("Entry", actions::note, compact = true)
                 LfgButton("LFG", actions::openApp, compact = true)
             }
             Text(ui.stats, color = Lfg.Dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp))
@@ -342,7 +342,7 @@ private fun Tabs(open: SheetTab, actions: PanelActions, modifier: Modifier) {
     val shape = RoundedCornerShape(12.dp)
     Row(modifier.background(Lfg.Sunken, shape).border(1.dp, Lfg.Border, shape).padding(3.dp)) {
         for (tab in SheetTab.entries) Tab(tab.label, tab == open) { actions.tab(tab) }
-        Tab("Note", false, actions::noteTab)
+        Tab("Entry", false, actions::noteTab)
     }
 }
 

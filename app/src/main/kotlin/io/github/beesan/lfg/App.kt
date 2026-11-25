@@ -58,7 +58,8 @@ class App : Application() {
         io.github.beesan.lfg.ask.Explainer(database, { settings.prefs.value }) { lineId -> cards.refreshExplained(lineId) }
             .also { made -> scope.launch(Dispatchers.IO) { made.load() } }
     }
-    val recapper by lazy { Recapper(database, { settings.prefs.value }) }
+    val diary by lazy { io.github.beesan.lfg.data.Diary(database) }
+    val recapper by lazy { Recapper(database, { settings.prefs.value }, diary = diary) }
     val asker by lazy { Asker(database, { settings.prefs.value }) }
     val dictionaries by lazy { DictionaryRepository(this) }
     val wordAudio by lazy { WordAudio(this) }
@@ -69,7 +70,7 @@ class App : Application() {
     val media by lazy { MediaAttacher(this, scope, anki, database, { settings.prefs.value }, Speech(this)) }
     val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media"), wordAudio) { StatsWidgets.requestUpdate(this) } }
     val models by lazy { ModelStore(this) }
-    val pictures by lazy { PictureKeeper(database, filesDir) }
+    val pictures by lazy { PictureKeeper(database, filesDir, diary) }
     val notes by lazy { Notes(database, File(filesDir, "notes")) }
     val gameFinder by lazy { GameFinder(this, scope) { settings.prefs.value } }
     val characterNames by lazy { io.github.beesan.lfg.names.CharacterNames(this, database, dictionaries, scope, { settings.prefs.value }) }
@@ -84,6 +85,11 @@ class App : Application() {
         scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme, it.widgetSize) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
         // WorkManager keeps the automatic backup across restarts; it changes only when the setting does.
         scope.launch { settings.prefs.map { it.backupEvery }.distinctUntilChanged().drop(1).collect { BackupWorker.schedule(this@App, it) } }
+        // The diary's days are written once each is over, while that is on and there is a key to write them with.
+        scope.launch {
+            settings.prefs.map { it.diaryWrite == Prefs.DIARY_EACH_DAY && it.aiReady }.distinctUntilChanged()
+                .collect { on -> io.github.beesan.lfg.data.DiaryWorker.schedule(this@App, on) }
+        }
         // The same for the daily look for newer dictionaries, which is also set going on a first start.
         scope.launch { settings.prefs.map { it.updateDictionaries to it.wifiOnly }.distinctUntilChanged().collect { (on, wifi) -> io.github.beesan.lfg.dict.DictionaryUpdateWorker.schedule(this@App, on, wifi) } }
     }

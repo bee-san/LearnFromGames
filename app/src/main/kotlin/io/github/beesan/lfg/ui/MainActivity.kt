@@ -48,7 +48,9 @@ import io.github.beesan.lfg.capture.LfgAccessibilityService
 import io.github.beesan.lfg.capture.SoundCapture
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.ocr.ScreenAi
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val model: MainViewModel by viewModels()
@@ -73,8 +75,9 @@ class MainActivity : ComponentActivity() {
             val games by model.games.collectAsStateWithLifecycle()
             val stats by model.stats.collectAsStateWithLifecycle()
             val lookup by model.lineLookup.state.collectAsStateWithLifecycle()
-            val notes by model.notes.collectAsStateWithLifecycle()
-            val draft by model.draft.collectAsStateWithLifecycle()
+            val diary by model.diary.state.collectAsStateWithLifecycle()
+            val draft by model.diary.draft.collectAsStateWithLifecycle()
+            val sharing by model.diary.sharing.collectAsStateWithLifecycle()
             val translation by model.translation.collectAsStateWithLifecycle()
             val explanation by model.explanation.collectAsStateWithLifecycle()
             val explained by model.explained.collectAsStateWithLifecycle()
@@ -121,6 +124,12 @@ class MainActivity : ComponentActivity() {
             // The game whose own stats page is open, and the period it opened on.
             var statsGame by rememberSaveable { mutableStateOf("") }
             var statsGamePeriod by rememberSaveable { mutableStateOf(StatsPeriod.DAYS_30) }
+            // Where an entry's writing page was opened from, so leaving it returns there.
+            var writeFrom by rememberSaveable { mutableStateOf(Page.DIARY) }
+            val openDiary = {
+                model.diary.load()
+                page = Page.DIARY
+            }
             val saved = rememberSaveableStateHolder()
 
             val ankiPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -157,8 +166,12 @@ class MainActivity : ComponentActivity() {
                 if (page == Page.STATS) saved.removeState(Page.STATS)
                 page = when (page) {
                     Page.LINE -> lineFrom
-                    Page.LINES, Page.NOTES, Page.RECAP, Page.ASK, Page.STATS, Page.SETTINGS -> Page.HOME
-                    Page.NOTE_NEW -> Page.NOTES
+                    Page.LINES, Page.DIARY, Page.RECAP, Page.ASK, Page.STATS, Page.SETTINGS -> Page.HOME
+                    Page.DIARY_MONTH -> Page.DIARY
+                    Page.DIARY_DAY -> Page.DIARY_MONTH
+                    Page.DIARY_ENTRY -> Page.DIARY_DAY
+                    Page.DIARY_WRITE -> writeFrom
+                    Page.DIARY_SHARE -> Page.DIARY_ENTRY
                     Page.SOURCES -> Page.DICTIONARIES
                     Page.VN_SEARCH, Page.BOX_DRAW -> Page.GAMES
                     Page.GOALS, Page.GAME_STATS -> Page.STATS
@@ -167,7 +180,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             // A line's page opened from over a game to ask about the line goes back to the game's lines.
-            BackHandler(enabled = page != Page.HOME) { if (page == Page.LINE && askFromGame) finish() else back() }
+            BackHandler(enabled = page != Page.HOME) { if ((page == Page.LINE && askFromGame) || (page == Page.DIARY_WRITE && noteFromGame)) finish() else back() }
 
             Box(Modifier.fillMaxSize().background(Lfg.Bg).safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
                 val frame = Modifier.widthIn(max = 980.dp).padding(horizontal = 24.dp, vertical = 20.dp)
@@ -231,7 +244,7 @@ class MainActivity : ComponentActivity() {
                             onLines = { page = Page.LINES },
                             onStats = { page = Page.STATS },
                             onGoals = { page = Page.GOALS },
-                            onNotes = { page = Page.NOTES },
+                            onDiary = openDiary,
                             onRecap = {
                                 model.openRecap()
                                 page = Page.RECAP
@@ -257,7 +270,7 @@ class MainActivity : ComponentActivity() {
                             },
                             onStats = { page = Page.STATS },
                             onSettings = { page = Page.SETTINGS },
-                            onNotes = { page = Page.NOTES },
+                            onDiary = openDiary,
                             onRecap = {
                                 model.openRecap()
                                 page = Page.RECAP
@@ -286,27 +299,101 @@ class MainActivity : ComponentActivity() {
                             onKey = { page = Page.TRANSLATION },
                             onBack = ::back,
                         )
-                        page == Page.NOTES -> NotesScreen(
-                            notes = notes,
-                            onNew = {
-                                model.newNote()
-                                page = Page.NOTE_NEW
+                        page == Page.DIARY -> DiaryShelfScreen(
+                            state = diary,
+                            onBook = {
+                                model.diary.openBook(it)
+                                page = Page.DIARY_MONTH
+                            },
+                            onCalendar = {
+                                model.diary.openCalendar()
+                                page = Page.DIARY_MONTH
+                            },
+                            onSettings = { page = Page.DIARY_SETTINGS },
+                            onBack = ::back,
+                        )
+                        page == Page.DIARY_MONTH -> DiaryMonthScreen(
+                            state = diary,
+                            today = diaryToday(),
+                            onMonth = { model.diary.month(it.toLong()) },
+                            onOpen = {
+                                model.diary.openDay(it)
+                                page = Page.DIARY_DAY
                             },
                             onBack = ::back,
                         )
-                        page == Page.NOTE_NEW -> NoteNewScreen(
+                        page == Page.DIARY_DAY -> diary.page.let { open ->
+                            if (open == null) {
+                                // The day is being read, or is not in the diary after all.
+                                if (diary.loaded) LaunchedEffect(Unit) { page = Page.DIARY }
+                            } else {
+                                DiaryDayScreen(
+                                    page = open,
+                                    today = diaryToday(),
+                                    before = model.diary.neighbour(-1),
+                                    after = model.diary.neighbour(1),
+                                    onStep = { by -> model.diary.neighbour(by)?.let(model.diary::openDay) },
+                                    onEntry = {
+                                        model.diary.openEntry(it.id)
+                                        page = Page.DIARY_ENTRY
+                                    },
+                                    onWrite = {
+                                        model.diary.write(open)
+                                        writeFrom = Page.DIARY_DAY
+                                        page = Page.DIARY_WRITE
+                                    },
+                                    onBack = ::back,
+                                )
+                            }
+                        }
+                        page == Page.DIARY_ENTRY -> diary.entry.let { entry ->
+                            if (entry == null) {
+                                if (diary.loaded) LaunchedEffect(Unit) { page = Page.DIARY_DAY }
+                            } else {
+                                DiaryEntryScreen(
+                                    entry = entry,
+                                    page = diary.page,
+                                    onShare = {
+                                        model.diary.share(entry)
+                                        page = Page.DIARY_SHARE
+                                    },
+                                    onEdit = {
+                                        model.diary.edit(entry)
+                                        writeFrom = Page.DIARY_ENTRY
+                                        page = Page.DIARY_WRITE
+                                    },
+                                    onBack = ::back,
+                                )
+                            }
+                        }
+                        page == Page.DIARY_WRITE -> DiaryWriteScreen(
                             draft = draft,
-                            lookup = lookup,
-                            onTap = { model.lineLookup.select(0, it) },
-                            onLineBefore = model::noteOnLineBefore,
-                            onRemovePicture = model::removeNotePicture,
-                            onClearWord = model.lineLookup::clear,
-                            onSave = { title, text, inLookups ->
-                                model.saveNote(title, text, inLookups)
-                                if (noteFromGame) finish() else page = Page.NOTES
+                            onPicture = model.diary::picture,
+                            onSave = { title, text ->
+                                // Once it is kept: the entry's page has nothing to show before, and leaving ends the saving.
+                                model.diary.save(title, text) { if (noteFromGame) finish() else page = Page.DIARY_ENTRY }
+                            },
+                            onShare = { title, text ->
+                                // Saved first, then shared: there is one entry, not a saved one and a shared one.
+                                model.diary.save(title, text) {
+                                    model.diary.state.value.entry?.let(model.diary::share)
+                                    page = Page.DIARY_SHARE
+                                }
                             },
                             onCancel = { if (noteFromGame) finish() else back() },
                         )
+                        page == Page.DIARY_SHARE -> diary.entry?.let { entry ->
+                            DiaryShareScreen(
+                                entry = entry,
+                                picture = entry.picturePath ?: diary.page?.picture,
+                                sharing = sharing,
+                                prefs = prefs,
+                                onTranslate = model.diary::translate,
+                                onShare = { choice -> shareEntry(entry, entry.picturePath ?: diary.page?.picture, shareWords(entry, sharing, choice)) },
+                                onBack = ::back,
+                            )
+                        }
+                        page == Page.DIARY_SETTINGS -> DiarySettingsScreen(prefs, model::updatePrefs, ::back)
                         page == Page.LINE -> LineLookupScreen(
                             state = lookup,
                             styles = styles,
@@ -316,10 +403,8 @@ class MainActivity : ComponentActivity() {
                                 when (link) {
                                     EntryLink.CARD -> model.lineLookup.addCard(index)
                                     EntryLink.AUDIO -> model.lineLookup.playAudio(index)
-                                    EntryLink.NOTE -> {
-                                        model.noteFromLine(index)
-                                        page = Page.NOTE_NEW
-                                    }
+                                    // Notes on words are put away for now (data/Notes.kt).
+                                    EntryLink.NOTE -> Unit
                                     EntryLink.VN_YES -> model.lineLookup.answerVn(true)
                                     EntryLink.VN_NO -> model.lineLookup.answerVn(false)
                                     EntryLink.KANJI -> model.lineLookup.lookUpKanji(index)
@@ -340,12 +425,7 @@ class MainActivity : ComponentActivity() {
                                 onStep = { forward -> model.lineLookup.move(if (forward) Move.RIGHT else Move.LEFT) },
                                 onCard = { model.lineLookup.addCard() },
                                 onAudio = { model.lineLookup.playAudio() },
-                                onNote = {
-                                    if (lookup.selected) {
-                                        model.noteFromLine(lookup.entryIndex)
-                                        page = Page.NOTE_NEW
-                                    }
-                                },
+                                onNote = {},
                                 onEntry = { next -> if (next) model.lineLookup.nextEntry() else model.lineLookup.previousEntry() },
                             ),
                         )
@@ -552,8 +632,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** The note page was opened from over a game: saving or leaving it goes back to the game's lines. */
+    /** The diary entry's page was opened from over a game: saving or leaving it goes back to the game's lines. */
     private var noteFromGame = false
+
+    private fun diaryToday(): java.time.LocalDate =
+        io.github.beesan.lfg.core.ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, java.time.ZoneId.systemDefault())
+
+    /** The entry's picture, with [words] written on it, handed to whatever app is picked to share it with. */
+    private fun shareEntry(entry: io.github.beesan.lfg.data.Note, picture: String?, words: Postcard.Words) {
+        lifecycleScope.launch {
+            val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val dir = java.io.File(cacheDir, "share").apply { mkdirs() }
+                // One at a time: the last one shared is all that is kept.
+                dir.listFiles()?.forEach { it.delete() }
+                val out = java.io.File(dir, "lfg-diary-${entry.id}-${System.currentTimeMillis()}.jpg")
+                val card = Postcard.render(Postcard.decode(picture), words)
+                out.outputStream().use { card.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, it) }
+                out
+            }
+            val uri = androidx.core.content.FileProvider.getUriForFile(this@MainActivity, "$packageName.files", file)
+            val send = Intent(Intent.ACTION_SEND).setType("image/jpeg").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            send.clipData = android.content.ClipData.newRawUri("", uri)
+            open(Intent.createChooser(send, "Share the entry"))
+        }
+    }
 
     /** A line's page was opened from over a game to write a question on: leaving it goes back to the game's lines. */
     private var askFromGame by mutableStateOf(false)
@@ -569,8 +671,14 @@ class MainActivity : ComponentActivity() {
         }
         noteFromGame = intent?.action == ACTION_NOTE
         if (noteFromGame) {
-            model.noteFromGame(intent?.getStringExtra(EXTRA_LINE), (intent?.getIntExtra(EXTRA_AT, -1) ?: -1))
-            requested.value = Page.NOTE_NEW
+            model.diary.writeOn(intent?.getStringExtra(EXTRA_LINE))
+            requested.value = Page.DIARY_WRITE
+        }
+        if (intent?.action == ACTION_DIARY_DAY) {
+            // The widget's day; a day that is gone opens the shelf instead.
+            model.diary.openWidgetDay(intent.getStringExtra(EXTRA_GAME).orEmpty(), intent.getLongExtra(EXTRA_DAY, 0)) { found ->
+                requested.value = if (found) Page.DIARY_DAY else Page.DIARY
+            }
         }
     }
 
@@ -635,12 +743,15 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_STATS = "io.github.beesan.lfg.action.STATS"
 
-        /** A note written from over a game: [EXTRA_LINE] is the line's id, [EXTRA_AT] where its word starts in it. */
+        /** A diary entry written from over a game: [EXTRA_LINE] is the line's id. */
         const val ACTION_NOTE = "io.github.beesan.lfg.action.NOTE"
+        /** A day of the diary, opened from its widget: [EXTRA_GAME] is the game's id, [EXTRA_DAY] the day, in days since 1970. */
+        const val ACTION_DIARY_DAY = "io.github.beesan.lfg.action.DIARY_DAY"
+        const val EXTRA_GAME = "game"
+        const val EXTRA_DAY = "day"
         /** A question to be written about an explained line, from over a game: [EXTRA_LINE] is the line's id. */
         const val ACTION_ASK_LINE = "io.github.beesan.lfg.action.ASK_LINE"
         const val EXTRA_LINE = "line"
-        const val EXTRA_AT = "at"
         private const val EXTRA_MOVED = "moved"
     }
 }

@@ -34,6 +34,20 @@ class Notes(private val db: LfgDatabase, private val dir: File) {
         db.notes().insert(note.copy(picturePath = kept))
     }
 
+    /**
+     * A diary entry written again: its title and text, and [picture] in place
+     * of the one it had when that is another file ([picture] null leaves it).
+     */
+    suspend fun update(note: Note, picture: String?) = withContext(Dispatchers.IO) {
+        val source = picture?.takeIf { it != note.picturePath }?.let(::File)?.takeIf { it.isFile }
+        val kept = source?.let {
+            dir.mkdirs()
+            it.copyTo(File(dir, "${UUID.randomUUID()}.${it.extension}")).path
+        }
+        if (kept != null) note.picturePath?.let { File(it).delete() }
+        db.notes().update(if (kept != null) note.copy(picturePath = kept) else note)
+    }
+
     /** [entries] with the notes on each one's word first, as the dictionary [Entry.MY_NOTES]. */
     suspend fun withNotes(entries: List<Entry>): List<Entry> {
         if (entries.isEmpty()) return entries
@@ -46,6 +60,13 @@ class Notes(private val db: LfgDatabase, private val dir: File) {
     }
 
     companion object {
+        /**
+         * Notes on words are put away for now: a note is a diary entry, on a
+         * line or a game. Those written before still show in their words'
+         * lookups; none can be started.
+         */
+        const val WORD_NOTES = false
+
         private val time = SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault())
 
         /** A note as a glossary: its title, its text, then when and in which game it was made. */

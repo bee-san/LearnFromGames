@@ -148,7 +148,7 @@ object EntryHtml {
             append("<a class=\"lfg-button lfg-audio\" href=\"").append(AUDIO_URL).append(if (index != null) "/$index" else "")
             append("\" aria-label=\"Listen\" title=\"Listen\">").append(SPEAKER).append("</a>")
         }
-        if (index != null && notes) {
+        if (index != null && notes && io.github.beesan.lfg.data.Notes.WORD_NOTES) {
             append("<a class=\"lfg-button lfg-note\" href=\"").append(NOTE_URL).append('/').append(index)
             append("\" aria-label=\"Note\" title=\"Note\">").append(PENCIL).append("</a>")
         }

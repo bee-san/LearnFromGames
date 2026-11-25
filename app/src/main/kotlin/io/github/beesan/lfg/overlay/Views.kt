@@ -99,7 +99,7 @@ internal fun keyHintsText(
     confirm: String, close: String, listen: Boolean = true, wholeWord: Boolean = true, stickWords: Boolean = false, box: Boolean = false,
 ): String =
     // Y says the word only with word audio installed (Settings › Dictionaries); without it, it is not offered.
-    "$confirm Add card    $close Close    X Note    " + (if (listen) "Y Listen    " else "") +
+    "$confirm Add card    $close Close    " + (if (io.github.beesan.lfg.data.Notes.WORD_NOTES) "X Note    " else "") + (if (listen) "Y Listen    " else "") +
         (if (stickWords) "Stick" else "◀ ▶") + (if (wholeWord) " Word" else " Character") + "    ▲ ▼ Row    L1 R1 Entry" +
         // Over a game, Select draws the box its dialogue is read in.
         (if (box) "    Select Box" else "")
@@ -149,7 +149,7 @@ internal class NoteEditor(context: Context, onSave: (text: String, keepPicture: 
         keep.buttonTintList = ColorStateList.valueOf(Ink.ACCENT)
         keep.minHeight = context.dp(44f)
         addView(keep, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6f) })
-        field.hint = "Note"
+        field.hint = "What do you want to remember about this?"
         field.setTextColor(Ink.TEXT)
         field.setHintTextColor(Ink.DIM)
         field.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
@@ -160,7 +160,7 @@ internal class NoteEditor(context: Context, onSave: (text: String, keepPicture: 
         field.setPadding(context.dp(12f), context.dp(10f), context.dp(12f), context.dp(10f))
         addView(field, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = context.dp(6f) })
         val buttons = LinearLayout(context).apply { orientation = HORIZONTAL }
-        buttons.addView(button(context, "Save note", primary = true) { onSave(field.text.toString(), keep.isChecked) }, wrap())
+        buttons.addView(button(context, "Save entry", primary = true) { onSave(field.text.toString(), keep.isChecked) }, wrap())
         buttons.addView(button(context, "Back", primary = false) { onBack() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
         addView(buttons, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10f) })
     }

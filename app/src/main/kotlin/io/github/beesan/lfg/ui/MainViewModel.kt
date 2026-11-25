@@ -645,71 +645,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    // ── notes ────────────────────────────────────────────────────────────────
+    // ── diary ────────────────────────────────────────────────────────────────
 
-    val notes: StateFlow<List<Note>> = app.notes.all.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** A note being written in the app: the line it is on, its place in [lines], and the picture it keeps. */
-    data class NoteDraft(val line: GameLine? = null, val lineIndex: Int = 0, val picture: String? = null)
-
-    private val _draft = MutableStateFlow(NoteDraft())
-    val draft: StateFlow<NoteDraft> = _draft
-
-    /** "New note…": on the newest line read, with its picture; tap a word in it to note that word. */
-    fun newNote() = noteOn(0)
-
-    /** "Use the line before". */
-    fun noteOnLineBefore() = noteOn(_draft.value.lineIndex + 1)
-
-    private fun noteOn(index: Int) {
-        val line = lines.value.getOrNull(index)
-        if (line == null) {
-            if (index == 0) _draft.value = NoteDraft()
-            return
-        }
-        _draft.value = NoteDraft(line, index, picture(line))
-        openLine(line)
-    }
-
-    /** The note button of an entry on the open line: a note on that word. */
-    fun noteFromLine(entryIndex: Int) {
-        val line = opened ?: return
-        lineLookup.selectEntry(entryIndex)
-        _draft.value = NoteDraft(line, lines.value.indexOfFirst { it.id == line.id }.coerceAtLeast(0), picture(line))
-    }
-
-    /**
-     * A note asked for from over a game: on the line with [lineId] (the newest
-     * line when it is null or gone), and on the word starting at [at] of it
-     * when that is not negative.
-     */
-    fun noteFromGame(lineId: String?, at: Int) {
-        viewModelScope.launch {
-            val line = lineId?.let { id -> withContext(Dispatchers.IO) { app.database.lines().byId(id) } } ?: lines.value.firstOrNull()
-            if (line == null) {
-                _draft.value = NoteDraft()
-                return@launch
-            }
-            _draft.value = NoteDraft(line, lines.value.indexOfFirst { it.id == line.id }.coerceAtLeast(0), picture(line))
-            openLine(line)
-            if (at >= 0) lineLookup.select(0, at)
-        }
-    }
-
-    fun removeNotePicture() = _draft.update { it.copy(picture = null) }
-
-    /** The note's word is the entry the line's lookup is on; empty when none is. */
-    fun saveNote(title: String, text: String, inLookups: Boolean) {
-        val draft = _draft.value
-        val line = draft.line
-        val entry = lineLookup.state.value.entry
-        val note = Note(
-            gameId = line?.gameId.orEmpty(), gameName = line?.gameName.orEmpty(), lineId = line?.id, lineText = line?.lineText.orEmpty(),
-            term = entry?.expression.orEmpty(), reading = entry?.reading.orEmpty(), gloss = entry?.senses()?.firstOrNull().orEmpty(),
-            title = title.trim(), text = text.trim(), inLookups = inLookups, createdAt = System.currentTimeMillis(),
-        )
-        viewModelScope.launch { app.notes.save(note, draft.picture) }
-    }
+    val diary = DiaryModel(app, viewModelScope) { lines.value.firstOrNull() }
 
     // ── dictionaries ─────────────────────────────────────────────────────────
 

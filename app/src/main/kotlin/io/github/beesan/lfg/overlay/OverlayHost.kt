@@ -1061,6 +1061,7 @@ class OverlayHost(
 
     /** The note button of an entry: the lines' screen, or the popup, becomes a note on its word. */
     private fun startNote(index: Int) {
+        if (!io.github.beesan.lfg.data.Notes.WORD_NOTES) return
         val entry = state.entries.getOrNull(index) ?: return
         val line = state.selectedLine ?: return
         beginNote(Noting(line, entry), "Note on ${entry.expression}")
@@ -1072,8 +1073,7 @@ class OverlayHost(
         if (panel?.shown == true) {
             openApp(
                 android.content.Intent(io.github.beesan.lfg.ui.MainActivity.ACTION_NOTE)
-                    .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_LINE, next.line?.lineId)
-                    .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_AT, if (next.entry != null && next.line === state.selectedLine) state.spanStart else -1),
+                    .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_LINE, next.line?.lineId),
             )
             return
         }
@@ -1350,8 +1350,8 @@ class OverlayHost(
             /** Note in the sheet: on the line it is about, or on the game from the recap. */
             override fun noteTab() {
                 val line = sheetLine()
-                if (sheetTab == SheetTab.RECAP || line == null) beginNote(Noting(newestOnScreen(), null), "Note on " + title())
-                else beginNote(Noting(lookupLine(line), null), "Note on this line")
+                if (sheetTab == SheetTab.RECAP || line == null) beginNote(Noting(newestOnScreen(), null), "Diary entry on " + title())
+                else beginNote(Noting(lookupLine(line), null), "Diary entry on this line")
             }
 
             override fun closeSheet() {
@@ -1394,7 +1394,7 @@ class OverlayHost(
 
             override fun recapButton() = openSheet(if (sheetTab == SheetTab.RECAP) null else SheetTab.RECAP)
 
-            override fun note() = beginNote(Noting(newestOnScreen(), null), "Note on " + title())
+            override fun note() = beginNote(Noting(newestOnScreen(), null), "Diary entry on " + title())
 
             override fun openApp() = this@OverlayHost.openApp()
 
@@ -1718,7 +1718,7 @@ class OverlayHost(
             WheelAction.NEW_BOX -> drawBox(gameBoxes().size + 1)
             WheelAction.NOTE -> {
                 val kept = line?.takeIf { it.lineId != null }
-                beginNote(Noting(kept, null), if (kept != null) "Note on this line" else "Note on " + (line?.gameName?.ifBlank { null } ?: "this game"))
+                beginNote(Noting(kept, null), if (kept != null) "Diary entry on this line" else "Diary entry on " + (line?.gameName?.ifBlank { null } ?: "this game"))
             }
             else -> openCard(slice.action)
         }

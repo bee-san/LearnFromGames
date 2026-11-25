@@ -16,7 +16,7 @@ class WheelTest {
     private fun at(level: List<WheelSlice>, x: Float, y: Float) = WheelAim.slice(x, y, level.size)?.let { level[it].action }
 
     @Test
-    fun `the top level is AI, Note, Read once, Boxes and Lines, clockwise from the top`() {
+    fun `the top level is AI, Entry, Read once, Boxes and Lines, clockwise from the top`() {
         val top = WheelLevels.TOP
         assertEquals(WheelAction.AI, at(top, 0f, -1f))
         assertEquals(WheelAction.NOTE, at(top, 0.95f, -0.31f))

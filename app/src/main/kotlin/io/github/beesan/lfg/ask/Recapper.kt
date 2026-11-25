@@ -4,6 +4,7 @@ package io.github.beesan.lfg.ask
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.ask.OpenRouter.text
 import io.github.beesan.lfg.core.ReadingStats
+import io.github.beesan.lfg.data.Diary
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LfgDatabase
 import io.github.beesan.lfg.data.RecapRow
@@ -38,7 +39,13 @@ data class Recap(val arcs: List<Arc> = emptyList(), val last: String = "", val m
  * lines read since are sent; a long history goes in pieces of [CHUNK] lines,
  * oldest first, each carrying on from the last, so no line is left out.
  */
-class Recapper(private val db: LfgDatabase, private val prefs: () -> Prefs, private val zone: ZoneId = ZoneId.systemDefault()) {
+class Recapper(
+    private val db: LfgDatabase,
+    private val prefs: () -> Prefs,
+    private val zone: ZoneId = ZoneId.systemDefault(),
+    /** Where each day's title and sentences go: the same answer tells them, so the diary costs no request of its own. */
+    private val diary: Diary? = null,
+) {
 
     /** The recap of [gameId] up to its newest line: the kept one when nothing has been read since. */
     suspend fun write(gameId: String, gameName: String): RecapRow {
@@ -57,6 +64,7 @@ class Recapper(private val db: LfgDatabase, private val prefs: () -> Prefs, priv
                 lineCount = (row?.lineCount ?: 0) + piece.size, model = p.model, createdAt = System.currentTimeMillis(),
             )
             db.recaps().insert(row)
+            for (day in days(answer, piece, zone)) diary?.write(gameId, day.day, day.title, day.summary, p.model)
         }
         return row!!
     }
@@ -117,7 +125,9 @@ class Recapper(private val db: LfgDatabase, private val prefs: () -> Prefs, priv
             append("{\"arcs\": [{\"title\": \"a few words\", \"from\": \"the first day's date\", \"to\": \"the last day's date\", ")
             append("\"summary\": \"two or three sentences\"}], ")
             append("\"last\": \"what happened on the last day above, three or four sentences, ending where I stopped\", ")
-            append("\"moments\": [{\"line\": the number of a line above, \"caption\": \"what is happening at it, a few words\"}]}\n")
+            append("\"moments\": [{\"line\": the number of a line above, \"caption\": \"what is happening at it, a few words\"}], ")
+            append("\"days\": [{\"date\": \"a day's date, as above\", \"title\": \"a few words\", \"summary\": \"what happened that day, two or three sentences\"}]}\n")
+            append("Give one of \"days\" for each day above, as a diary would tell it. ")
             append("Arcs are the whole story so far, oldest first, at most five. Choose three or four moments that matter to the story")
             if (earlier != null) append(": from the lines above, or keep an earlier one by giving its place in the earlier list as \"earlier\" instead of \"line\"")
             append(", with the last one near where I stopped.")
@@ -142,6 +152,27 @@ class Recapper(private val db: LfgDatabase, private val prefs: () -> Prefs, priv
             if (arcs.isEmpty() && json.text("last").isBlank()) throw OpenRouter.Failure("The answer wasn’t in the expected form. Try again.")
             return Recap(arcs, json.text("last"), moments)
         }
+
+        /** What the model wrote of one day. */
+        data class DayText(val day: java.time.LocalDate, val title: String, val summary: String)
+
+        /**
+         * The days told in [answer], of those [lines] were read on. A day of
+         * fewer than [DAY_LINES] of them is left out: too little happened, or
+         * the rest of it went with an earlier answer.
+         */
+        fun days(answer: String, lines: List<GameLine>, zone: ZoneId): List<DayText> {
+            val read = lines.groupingBy { ReadingStats.dayOf(it.timestamp, zone) }.eachCount()
+            val json = runCatching { OpenRouter.jsonIn(answer) }.getOrNull() ?: return emptyList()
+            return (json["days"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.mapNotNull { d ->
+                val day = runCatching { java.time.LocalDate.parse(d.text("date").trim(), DAY) }.getOrNull() ?: return@mapNotNull null
+                if ((read[day] ?: 0) < DAY_LINES || (d.text("title").isBlank() && d.text("summary").isBlank())) return@mapNotNull null
+                DayText(day, d.text("title").trim(), d.text("summary").trim())
+            }
+        }
+
+        /** Lines a day needs before the diary tells it. */
+        const val DAY_LINES = 20
 
         /**
          * The screen while it is kept, which then stays for good (data/PictureKeeper.kt), so a
