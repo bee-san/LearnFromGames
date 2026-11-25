@@ -29,6 +29,8 @@ data class Prefs(
     val wifiOnly: Boolean = false,
     /** Dictionaries that name where their next release is are brought up to date once a day. */
     val updateDictionaries: Boolean = true,
+    /** The title of the dictionary a tapped kanji is looked up in; empty for Bee's Ultimate Kanji Dictionary. */
+    val kanjiDictionary: String = "",
     /** On a two-screen handheld, the screen the game is not on shows the game's lines as they are read. */
     val secondScreenPanel: Boolean = true,
     /** On a two-screen handheld, the app's own pages open on the second screen, wherever they were started from. */
@@ -183,6 +185,7 @@ class Settings(context: Context) {
             keepScreensDays = store.getInt("keepScreensDays", d.keepScreensDays),
             wifiOnly = store.getBoolean("wifiOnly", d.wifiOnly),
             updateDictionaries = store.getBoolean("updateDictionaries", d.updateDictionaries),
+            kanjiDictionary = store.getString("kanjiDictionary", d.kanjiDictionary) ?: d.kanjiDictionary,
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
             appOnSecondScreen = store.getBoolean("appOnSecondScreen", d.appOnSecondScreen),
             entryPlace = store.getString("entryPlace", d.entryPlace) ?: d.entryPlace,
@@ -239,6 +242,7 @@ class Settings(context: Context) {
             .putInt("keepScreensDays", next.keepScreensDays)
             .putBoolean("wifiOnly", next.wifiOnly)
             .putBoolean("updateDictionaries", next.updateDictionaries)
+            .putString("kanjiDictionary", next.kanjiDictionary)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)
             .putBoolean("appOnSecondScreen", next.appOnSecondScreen)
             .putString("entryPlace", next.entryPlace)

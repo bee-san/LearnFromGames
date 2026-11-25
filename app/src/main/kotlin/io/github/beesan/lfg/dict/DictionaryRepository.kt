@@ -106,6 +106,21 @@ class DictionaryRepository(private val context: Context) {
         io.github.beesan.lfg.core.Perf.measure("lookup.decode") { DictJson.decodeFromString<LookupResponse>(json).results }
     }
 
+    /**
+     * The entries for the one kanji [kanji] in the kanji dictionary: the one titled [title],
+     * else Bee's Ultimate Kanji Dictionary. With neither installed, the entries headed by
+     * [kanji] alone in every dictionary.
+     */
+    suspend fun lookupKanji(kanji: String, title: String = ""): List<Entry> = withContext(native) {
+        if (kanji.isEmpty()) return@withContext emptyList()
+        val dictionaries = listed ?: installed().also { listed = it }
+        val chosen = kanjiDictionary(dictionaries, title)
+        val handle = if (chosen != null) openSession(only = chosen) else openSession()
+        if (handle == 0L) return@withContext emptyList()
+        val json = Hoshidicts.lookup(handle, kanji, 16, SCAN_LENGTH)
+        DictJson.decodeFromString<LookupResponse>(json).results.filter { it.expression == kanji }
+    }
+
     /** How many characters of [text] its best match covers; 0 when none. For stepping word by word. */
     suspend fun matchLength(text: String, vndb: String? = null): Int = withContext(native) {
         if (text.isEmpty()) return@withContext 0
@@ -117,12 +132,12 @@ class DictionaryRepository(private val context: Context) {
      * The session for [vndb]'s names and the ordinary dictionaries, or the
      * ordinary ones alone when [vndb] is null or its names are not installed.
      */
-    private fun openSession(vndb: String? = null): Long {
+    private fun openSession(vndb: String? = null, only: InstalledDictionary? = null): Long {
         val dictionaries = listed ?: installed().also { listed = it }
         val names = vndb?.let { id -> dictionaries.firstOrNull { it.vndb == id } }
-        val key = names?.vndb ?: ""
+        val key = only?.let { "only:" + it.title } ?: names?.vndb ?: ""
         sessions[key]?.let { return it }
-        val chosen = listOfNotNull(names) + dictionaries.filter { it.vndb == null }
+        val chosen = if (only != null) listOf(only) else listOfNotNull(names) + dictionaries.filter { it.vndb == null }
         if (chosen.isEmpty()) return 0L
         val handle = Hoshidicts.open()
         if (handle == 0L) return 0L
@@ -520,6 +535,15 @@ class DictionaryRepository(private val context: Context) {
         private const val KEY_UPDATE_SKIPPED = "update_skipped:"
         private const val TAG = "LfgDictionaries"
         private const val SCAN_LENGTH = 16
-        private const val MAX_SESSIONS = 3
+        private const val MAX_SESSIONS = 4
+
+        /** Bee's Ultimate Kanji Dictionary, which a tapped kanji is looked up in unless another is chosen. */
+        val DEFAULT_KANJI = DefaultDictionaries.byId("bees-ultimate-kanji-dictionary")!!
+
+        /** The dictionary a tapped kanji is looked up in: the one titled [title], else [DEFAULT_KANJI]; null with neither installed. */
+        fun kanjiDictionary(dictionaries: List<InstalledDictionary>, title: String): InstalledDictionary? {
+            val ordinary = dictionaries.filter { it.vndb == null && it.terms > 0 }
+            return ordinary.firstOrNull { title.isNotEmpty() && it.title == title } ?: ordinary.firstOrNull { DEFAULT_KANJI.matches(it) }
+        }
     }
 }

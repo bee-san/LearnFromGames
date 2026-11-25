@@ -95,7 +95,10 @@ class ControllerInput(
         val close = if (swapConfirm()) KeyEvent.KEYCODE_BUTTON_A else KeyEvent.KEYCODE_BUTTON_B
         when (event.keyCode) {
             confirm, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (down && event.repeatCount == 0) controller.addCard()
-            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) onClose()
+            // From a kanji's entry, back to the word's first.
+            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) {
+                if (controller.state.value.kanjiFrom != null) controller.backToWord() else onClose()
+            }
             // On release, and not when the two were the shortcut being pressed.
             KeyEvent.KEYCODE_BUTTON_Y -> if (down && event.repeatCount == 0) controller.playAudio()
             // On release: the note's field then takes the controller's keys, and must not get this one's up.

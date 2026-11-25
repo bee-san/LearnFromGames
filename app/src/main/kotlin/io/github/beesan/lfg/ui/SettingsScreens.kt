@@ -75,6 +75,7 @@ import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.PictureKeeper
 import io.github.beesan.lfg.dict.DictState
+import io.github.beesan.lfg.dict.DictionaryRepository
 import io.github.beesan.lfg.dict.DictionarySource
 import io.github.beesan.lfg.dict.InstalledDictionary
 import io.github.beesan.lfg.dict.WordAudio
@@ -208,6 +209,9 @@ fun DictionariesScreen(
     onUpdates: (Boolean) -> Unit,
     updatesCheckedAt: Long,
     onCheckUpdates: () -> Unit,
+    /** The title of the dictionary a tapped kanji is looked up in, as Settings holds it (empty for Bee's), and the choice of another. */
+    kanjiDictionary: String,
+    onKanjiDictionary: (String) -> Unit,
     onBack: () -> Unit,
 ) = Page("Dictionaries", onBack, actions = { LfgButton(if (busy.busy) "Adding…" else "Add dictionary…", onAdd, primary = true, enabled = !busy.busy) }) {
     val date = remember { SimpleDateFormat("d MMMM yyyy", Locale.getDefault()) }
@@ -236,6 +240,19 @@ fun DictionariesScreen(
             if (i > 0) LfgButton("Move up", { onMove(d.title, true) })
             if (i < list.size - 1) LfgButton("Move down", { onMove(d.title, false) })
             LfgButton("Remove", { onRemove(d.title) })
+        }
+    }
+    val kanjiChoices = list.filter { it.terms > 0 }
+    if (kanjiChoices.isNotEmpty()) {
+        val kanji = DictionaryRepository.kanjiDictionary(kanjiChoices, kanjiDictionary)
+        Card(
+            "Kanji",
+            "Tap a kanji in a word's headword for its entry in this dictionary, and mine it with the card button. " +
+                if (kanji == null) "Bee's Ultimate Kanji Dictionary is not installed: until it is, a kanji is looked up in every dictionary." else "",
+        ) {
+            Choice(kanjiChoices.map { it.title to it.title }, kanji?.title ?: "") { title ->
+                onKanjiDictionary(if (DictionaryRepository.DEFAULT_KANJI.title.matches(title)) "" else title)
+            }
         }
     }
     Row {

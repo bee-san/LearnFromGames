@@ -26,6 +26,8 @@ data class CardContent(
     val frequencyRank: Int? = null,
     /** Read from an ordinary app, not a game: no sentence audio and no moving picture. */
     val fromApp: Boolean = false,
+    /** A kanji mined from a word's headword rather than the word: tagged Kanji, and with no word audio. */
+    val kanji: Boolean = false,
 )
 
 enum class Family { SENREN, LAPIS, KIKU, OWN }

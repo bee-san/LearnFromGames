@@ -109,7 +109,7 @@ class CardMaker(
         moving?.delete()
         // The word said by a person, from the word audio, when the note type has a field for it.
         val soundName = "lfg_word_${card.createdAt}"
-        val sound = if (wordAudio != null && NoteTypes.hasWordAudioField(target.family, target.fields)) {
+        val sound = if (wordAudio != null && !content.kanji && NoteTypes.hasWordAudioField(target.family, target.fields)) {
             wordAudio.export(content.expression, content.reading, mediaDir, soundName)
         } else {
             null
@@ -117,7 +117,7 @@ class CardMaker(
         val soundTag = sound?.let { anki.addSound(it, soundName) } ?: ""
         sound?.delete()
         val fields = NoteTypes.fill(target.family, target.fields, content, pictureHtml, soundTag)
-        val noteId = anki.addNote(target, fields, setOf("LFG", NoteTypes.gameTag(content.gameName)))
+        val noteId = anki.addNote(target, fields, setOfNotNull("LFG", NoteTypes.gameTag(content.gameName), "Kanji".takeIf { content.kanji }))
         if (noteId == null) {
             db.cards().update(card.copy(state = Card.STATE_FAILED))
             return CardResult.Failed("AnkiDroid refused the card.")

@@ -28,6 +28,12 @@ object EntryHtml {
     /** The link of an entry's note button in a list, with `/<index>` after it: starts a note on the word. */
     const val NOTE_URL = "$MEDIA_SCHEME://note"
 
+    /** A kanji of a headword in a list, with `/<code point>` after it: looks the kanji up in the kanji dictionary. */
+    const val KANJI_URL = "$MEDIA_SCHEME://kanji"
+
+    /** Above a kanji's entry, with `/0` after it: back to the word's entries. */
+    const val BACK_URL = "$MEDIA_SCHEME://back"
+
     /** The answers to "Is this the visual novel…?" under a list, each with `/0` after it. */
     const val VN_YES_URL = "$MEDIA_SCHEME://vn-yes"
     const val VN_NO_URL = "$MEDIA_SCHEME://vn-no"
@@ -93,9 +99,14 @@ object EntryHtml {
     /**
      * The entries of a lookup, the inside of the list's body. [askVn] is a visual
      * novel's title to ask about once, above them: under a long list it would
-     * go unseen, and it is asked only once.
+     * go unseen, and it is asked only once. [back] is the word whose kanji the
+     * entries are, to go back to.
      */
-    fun listBody(entries: List<Entry>, notes: Boolean = true, askVn: String? = null, audio: (Entry) -> Boolean): String = buildString {
+    fun listBody(entries: List<Entry>, notes: Boolean = true, askVn: String? = null, back: String? = null, audio: (Entry) -> Boolean): String = buildString {
+        if (back != null) {
+            append("<a class=\"lfg-back\" href=\"").append(BACK_URL).append("/0\"><span aria-hidden=\"true\">‹</span> <span lang=\"ja\">")
+            append(escape(back)).append("</span></a>")
+        }
         if (askVn != null) {
             append("<div class=\"lfg-ask\"><span>Is this the visual novel <b lang=\"ja\">").append(escape(askVn))
             append("</b>? <span class=\"lfg-ask-why\">Then its characters' names get their own cards.</span></span>")
@@ -129,7 +140,8 @@ object EntryHtml {
      */
     fun body(entry: Entry, audio: Boolean = false, index: Int? = null, notes: Boolean = true): String = buildString {
         val accents = Pronunciation.accents(entry)
-        append("<div class=\"lfg-head\"><span class=\"lfg-term\" lang=\"ja\">").append(furigana(entry.expression, entry.reading)).append("</span>")
+        val term = furigana(entry.expression, entry.reading)
+        append("<div class=\"lfg-head\"><span class=\"lfg-term\" lang=\"ja\">").append(if (index != null) kanjiLinks(term) else term).append("</span>")
         accents.firstOrNull()?.let { append(graph(it)) }
         append("<span class=\"lfg-actions\">")
         if (audio) {
@@ -298,6 +310,24 @@ object EntryHtml {
             escape(expression.substring(expression.length - tail))
     }
 
+    /**
+     * Each kanji of a headword's HTML as a link to its entry in the kanji
+     * dictionary ([KANJI_URL]). The markup is ASCII and furigana is kana, so
+     * every ideograph in it is the headword's own.
+     */
+    fun kanjiLinks(html: String): String = buildString {
+        var i = 0
+        while (i < html.length) {
+            val cp = html.codePointAt(i)
+            if (Character.isIdeographic(cp)) {
+                append("<a class=\"lfg-kanji\" href=\"").append(KANJI_URL).append('/').append(cp).append("\">").appendCodePoint(cp).append("</a>")
+            } else {
+                appendCodePoint(cp)
+            }
+            i += Character.charCount(cp)
+        }
+    }
+
     private fun isKana(c: Char) = c in 'ぁ'..'ゖ' || c in 'ァ'..'ヶ' || c == 'ー'
     private fun hiragana(c: Char) = if (c in 'ァ'..'ヶ') c - 0x60 else c
     private fun same(a: String, b: String) = a.length == b.length && a.indices.all { hiragana(a[it]) == hiragana(b[it]) }
@@ -434,6 +464,10 @@ body{margin:0;padding:10px 12px 14px;overflow-wrap:anywhere}
 .lfg-head{display:flex;align-items:flex-end;column-gap:.7em;padding:0 2px}
 .lfg-term{font-size:1.75em;font-weight:650;line-height:1.2}
 .lfg-term rt{font-size:.5em;font-weight:400;color:var(--dim)}
+.lfg-kanji{color:inherit;text-decoration:underline dotted var(--dim);text-decoration-thickness:1px;text-underline-offset:.18em;border-radius:4px;-webkit-tap-highlight-color:transparent}
+.lfg-kanji:active{background:var(--soft)}
+.lfg-back{display:inline-flex;align-items:center;gap:.35em;min-height:42px;margin:-4px 0 8px;padding:0 14px;box-sizing:border-box;border-radius:8px;border:1px solid var(--border-strong);color:var(--text);text-decoration:none;font-weight:600;-webkit-tap-highlight-color:transparent}
+.lfg-back:active{background:var(--soft)}
 .lfg-graph{flex:none;margin-bottom:.3em;color:#59b2ff}
 .lfg-graph[data-pitch="atamadaka"]{color:#ff8686}
 .lfg-graph[data-pitch="nakadaka"]{color:#ff9b54}

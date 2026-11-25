@@ -126,6 +126,7 @@ class LfgAccessibilityService : AccessibilityService() {
             selection = { app.settings.prefs.value.picking },
             vnQuestion = { app.characterNames.question(it) },
             vnAnswer = { question, yes -> app.characterNames.answer(question, yes) },
+            lookupKanji = { app.dictionaries.lookupKanji(it, app.settings.prefs.value.kanjiDictionary) },
         )
         overlays = OverlayHost(
             service = this,

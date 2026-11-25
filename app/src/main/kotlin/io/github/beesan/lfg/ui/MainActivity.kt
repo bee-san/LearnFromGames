@@ -319,6 +319,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                     EntryLink.VN_YES -> model.lineLookup.answerVn(true)
                                     EntryLink.VN_NO -> model.lineLookup.answerVn(false)
+                                    EntryLink.KANJI -> model.lineLookup.lookUpKanji(index)
+                                    EntryLink.BACK -> model.lineLookup.backToWord()
                                 }
                             },
                             translation = translation,
@@ -374,6 +376,8 @@ class MainActivity : ComponentActivity() {
                             onUpdates = { on -> model.updatePrefs { it.copy(updateDictionaries = on) } },
                             updatesCheckedAt = remember(dictionary, fetchingDictionary) { model.dictionaryUpdatesCheckedAt() },
                             onCheckUpdates = model::checkDictionaryUpdates,
+                            kanjiDictionary = prefs.kanjiDictionary,
+                            onKanjiDictionary = { title -> model.updatePrefs { it.copy(kanjiDictionary = title) } },
                             onBack = ::back,
                         )
                         page == Page.SOURCES -> SourcesScreen(sources, ::back)

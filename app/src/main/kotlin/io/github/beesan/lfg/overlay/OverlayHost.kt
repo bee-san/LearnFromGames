@@ -1048,6 +1048,8 @@ class OverlayHost(
             EntryLink.NOTE -> startNote(index)
             EntryLink.VN_YES -> controller.answerVn(true)
             EntryLink.VN_NO -> controller.answerVn(false)
+            EntryLink.KANJI -> controller.lookUpKanji(index)
+            EntryLink.BACK -> controller.backToWord()
         }
     }
 
@@ -1104,7 +1106,7 @@ class OverlayHost(
     }
 
     private fun showEntries(view: EntryWebView, state: LookupState) =
-        view.showList(state.entries, styles(), state.buttons.map { it.htmlState() }, state.entryIndex, state.message, Ink.palette, askVn = state.vnQuestion?.title)
+        view.showList(state.entries, styles(), state.buttons.map { it.htmlState() }, state.entryIndex, state.message, Ink.palette, askVn = state.vnQuestion?.title, back = state.kanjiFrom)
 
     /** A row of the lines' screen: a kept line, text on screen that is not kept, or a note. */
     private class Row(

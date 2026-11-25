@@ -69,6 +69,7 @@ class SelectionActivity : ComponentActivity() {
             lifecycleScope, { text, _ -> app.dictionaries.lookup(text) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) },
             prepare = ::saveLine,
             selection = { app.settings.prefs.value.picking },
+            lookupKanji = { app.dictionaries.lookupKanji(it, app.settings.prefs.value.kanjiDictionary) },
         )
         val title = titleOf(source)
         controller.setLines(listOf(LookupLine(text, null, null, title, fromApp = true, source = LineStore.SOURCE_SELECTION)))
@@ -142,6 +143,8 @@ class SelectionActivity : ComponentActivity() {
                         when (link) {
                             EntryLink.CARD -> controller.addCard(index)
                             EntryLink.AUDIO -> controller.playAudio(index)
+                            EntryLink.KANJI -> controller.lookUpKanji(index)
+                            EntryLink.BACK -> controller.backToWord()
                             // Not shown here: a note belongs to a game's line.
                             EntryLink.NOTE, EntryLink.VN_YES, EntryLink.VN_NO -> Unit
                         }

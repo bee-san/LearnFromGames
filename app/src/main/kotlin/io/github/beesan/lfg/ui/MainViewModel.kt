@@ -150,6 +150,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Lookup in a stored line, for a card made after the session. */
     val lineLookup = LookupController(viewModelScope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) }, selection = { app.settings.prefs.value.picking },
         vnQuestion = { app.characterNames.question(it) }, vnAnswer = { question, yes -> app.characterNames.answer(question, yes) },
+        lookupKanji = { app.dictionaries.lookupKanji(it, app.settings.prefs.value.kanjiDictionary) },
     )
 
     private val _styles = MutableStateFlow<List<EntryHtml.Style>>(emptyList())

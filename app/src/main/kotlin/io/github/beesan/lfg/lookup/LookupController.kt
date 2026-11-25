@@ -13,6 +13,7 @@ import io.github.beesan.lfg.core.TextCursor
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.data.LineStore
 import io.github.beesan.lfg.dict.Entry
+import io.github.beesan.lfg.dict.KanjiEntry
 import io.github.beesan.lfg.dict.Pronunciation
 import io.github.beesan.lfg.dict.WordAudio
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +69,8 @@ data class LookupState(
     val controllerMode: Boolean = false,
     /** Asked once under the entries: whether the game is this visual novel. */
     val vnQuestion: VnQuestion? = null,
+    /** The headword whose kanji the [entries] are, tapped there; null while they are the word's own. */
+    val kanjiFrom: String? = null,
 ) {
     val entry: Entry? get() = entries.getOrNull(entryIndex)
     val button: CardButton get() = buttons.getOrNull(entryIndex) ?: CardButton.ADD
@@ -110,6 +113,8 @@ class LookupController(
     private val vnQuestion: suspend (String) -> VnQuestion? = { null },
     /** The answer to a [VnQuestion]. */
     private val vnAnswer: suspend (VnQuestion, Boolean) -> Unit = { _, _ -> },
+    /** The entries for one kanji in the kanji dictionary (Settings › Dictionaries). */
+    private val lookupKanji: suspend (String) -> List<Entry> = { emptyList() },
 ) {
     private val _state = MutableStateFlow(LookupState())
     val state: StateFlow<LookupState> = _state
@@ -126,6 +131,9 @@ class LookupController(
      * screen; the lines on screen keep theirs, and their tap strips.
      */
     private var away: LookupLine? = null
+
+    /** The word's lookup as it was when one of its kanji was tapped, to go back to. */
+    private var word: LookupState? = null
 
     private fun onScreen(state: LookupState) = if (away != null) state.lines.dropLast(1) else state.lines
 
@@ -161,6 +169,7 @@ class LookupController(
         resting?.cancel()
         cursor = null
         away = null
+        word = null
         _state.value = LookupState(lines = lines, controllerMode = before.controllerMode)
         if (before.controllerMode) enterControllerMode()
         // A word chosen by touch is followed by the new text's first word too: the entry was up, and stays up.
@@ -203,6 +212,7 @@ class LookupController(
         val target = _state.value.lines.getOrNull(line) ?: return
         if (index !in target.text.indices) return
         selecting?.cancel()
+        word = null
         selecting = scope.launch {
             val entries = decorate(io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index), target.gameId) })
             val first = entries.firstOrNull()
@@ -215,7 +225,7 @@ class LookupController(
                     entries = entries, entryIndex = 0,
                     buttons = entries.map { e -> done[target.lineId to e.expression] ?: CardButton.ADD },
                     message = if (first == null) "No entry" else null,
-                    vnQuestion = null,
+                    vnQuestion = null, kanjiFrom = null,
                 )
             }
             if (first == null) return@launch
@@ -226,6 +236,53 @@ class LookupController(
             target.lineId?.let { store.recordLookup(it, first.expression, first.reading) }
             // Every entry shows its own button, so each is checked; the first is looked at first.
             for (entry in entries.distinctBy { it.expression }) checkDuplicate(target, entry)
+        }
+    }
+
+    /**
+     * A kanji of a headword was tapped: its entry in the kanji dictionary
+     * takes the word's place, with a way back ([backToWord]). Its card button
+     * mines the kanji.
+     */
+    fun lookUpKanji(codePoint: Int) {
+        if (!Character.isValidCodePoint(codePoint)) return
+        val kanji = String(Character.toChars(codePoint))
+        val before = _state.value
+        val line = before.selectedLine ?: return
+        selecting?.cancel()
+        selecting = scope.launch {
+            val entries = lookupKanji(kanji)
+            val shown = _state.value
+            if (shown.line != before.line || shown.spanStart != before.spanStart || shown.selectedLine?.text != line.text) return@launch
+            if (entries.isEmpty()) {
+                _state.update { it.copy(message = "$kanji is not in the kanji dictionary.") }
+                return@launch
+            }
+            val from = word ?: shown.also { word = it }
+            _state.update {
+                it.copy(
+                    entries = entries, entryIndex = 0,
+                    buttons = entries.map { e -> done[line.lineId to e.expression] ?: CardButton.ADD },
+                    message = null, vnQuestion = null,
+                    kanjiFrom = from.entries.firstOrNull { kanji in it.expression }?.expression ?: from.entry?.expression ?: kanji,
+                )
+            }
+            for (entry in entries.distinctBy { it.expression }) checkDuplicate(line, entry)
+        }
+    }
+
+    /** Back from a kanji's entry to the word's. */
+    fun backToWord() {
+        val back = word ?: return
+        word = null
+        selecting?.cancel()
+        val lineId = _state.value.selectedLine?.lineId
+        _state.update {
+            it.copy(
+                entries = back.entries, entryIndex = back.entryIndex,
+                buttons = back.entries.mapIndexed { i, e -> done[lineId to e.expression] ?: back.buttons.getOrElse(i) { CardButton.ADD } },
+                message = null, vnQuestion = null, kanjiFrom = null,
+            )
         }
     }
 
@@ -311,13 +368,17 @@ class LookupController(
                 setButtons(entry.expression, CardButton.ADD, message = "The line could not be saved.")
                 return@launch
             }
+            val kanji = state.kanjiFrom != null
             val content = CardContent(
-                expression = entry.expression, reading = entry.reading, sentence = line.text,
-                spanStart = state.spanStart, spanEnd = state.spanEnd, senses = entry.senses(),
+                expression = entry.expression,
+                reading = if (kanji) KanjiEntry.reading(entry) else entry.reading,
+                sentence = line.text,
+                spanStart = state.spanStart, spanEnd = state.spanEnd,
+                senses = if (kanji) KanjiEntry.senses(entry) else entry.senses(),
                 pitchPositions = Pronunciation.accents(entry).map { it.position },
                 frequencyRank = Pronunciation.frequencyRank(entry),
                 gameName = line.gameName, picturePath = line.framePath, lineStartMs = line.appearedAtMs.takeUnless { line.fromApp },
-                fromApp = line.fromApp,
+                fromApp = line.fromApp, kanji = kanji,
             )
             val result = cards.add(lineId, content)
             val key = lineId to entry.expression
@@ -341,11 +402,12 @@ class LookupController(
     fun clear() {
         selecting?.cancel()
         resting?.cancel()
+        word = null
         _state.update {
             // The earlier line looked into goes with its word: the lines are the screen's again.
             it.copy(
                 lines = onScreen(it), line = -1, spanStart = 0, spanEnd = 0, markEnd = 0,
-                entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList(),
+                entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList(), kanjiFrom = null,
             )
         }
         if (away != null) {
@@ -421,10 +483,11 @@ class LookupController(
         val text = state.lines[to.line].text
         val character = to.index + Character.charCount(text.codePointAt(to.index))
         selecting?.cancel()
+        word = null
         _state.update {
             it.copy(
                 line = to.line, spanStart = to.index, spanEnd = character, markEnd = character,
-                entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList(),
+                entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList(), kanjiFrom = null,
             )
         }
         resting = scope.launch {
