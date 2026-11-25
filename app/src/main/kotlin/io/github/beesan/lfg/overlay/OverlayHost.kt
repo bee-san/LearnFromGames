@@ -549,7 +549,6 @@ class OverlayHost(
             if (wheelOpen) {
                 wheel.holes = wheelLine?.geometry?.rows.orEmpty()
                 wheel.boxes = gameBoxes()
-                wheel.hint = wheelHint()
             }
         }
         renderCard(other)
@@ -1558,10 +1557,7 @@ class OverlayHost(
         wheelLevel = level
         padHeld.clear()
         aimAfresh = true
-        focusView()?.wheel?.let { wheel ->
-            wheel.slices = level
-            wheel.hint = wheelHint()
-        }
+        focusView()?.wheel?.slices = level
     }
 
     /** The wheel and its card go, with nothing more done. */
@@ -1584,17 +1580,6 @@ class OverlayHost(
         handler.removeCallbacks(cardScroller)
         card?.setFocusable(false)
         card?.hide()
-    }
-
-    private fun wheelHint(): String {
-        val swap = prefs().swapConfirm
-        val close = if (swap) "A" else "B"
-        // A box drawn can be drawn again; one not drawn yet is drawn when it is picked.
-        val slice = hovered()
-        val redraw = if (slice?.action == WheelAction.BOX && gameBoxes().getOrNull(slice.box - 1) != null) "    X Redraw" else ""
-        val leave = if (wheelLevel === WheelLevels.TOP) "Put away" else "Back"
-        return if (wheelHeld) "Point with a stick or the D-pad, then let go$redraw    $close $leave"
-        else "Point with a stick or the D-pad    ${if (swap) "B" else "A"} Choose$redraw    $close $leave"
     }
 
     private fun pickWheel(slice: WheelSlice) {
@@ -1872,7 +1857,6 @@ class OverlayHost(
         val wheel = focusView()?.wheel ?: return
         if (slice == null || slice == wheel.hover) return
         wheel.hover = slice
-        wheel.hint = wheelHint()
     }
 
     private fun wheelOpenKey(event: KeyEvent): Boolean {

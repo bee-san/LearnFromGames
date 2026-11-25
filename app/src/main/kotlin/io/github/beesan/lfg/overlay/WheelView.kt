@@ -70,14 +70,6 @@ internal class WheelView(
             invalidate()
         }
 
-    /** What the buttons do now, at the top of the screen. */
-    var hint: String = ""
-        set(value) {
-            if (field == value) return
-            field = value
-            invalidate()
-        }
-
     /** The level of the wheel showing, clockwise from the top. A new one points at nothing. */
     var slices: List<WheelSlice> = WheelLevels.TOP
         set(value) {
@@ -113,7 +105,6 @@ internal class WheelView(
     private val label = text(13.5f, bold = true).apply { textAlign = Paint.Align.CENTER }
     private val title = text(18f, bold = true)
     private val about = text(12f)
-    private val hintText = text(13.5f)
     private val number = text(11f, bold = true).apply { textAlign = Paint.Align.CENTER }
     private val tagText = text(12f, bold = true).apply { textAlign = Paint.Align.CENTER }
     private val dashed = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -152,11 +143,11 @@ internal class WheelView(
     /** Where the ring goes: the middle of the screen, or of the room above or below the line when it would cover it. */
     private fun layOut() {
         if (width <= 0 || height <= 0) return
-        val top = hintBottom() + context.dp(12f)
-        outer = minOf(context.dp(155f).toFloat(), (height - top) * 0.44f, width * 0.34f)
+        val top = 0f
+        outer = minOf(context.dp(155f).toFloat(), height * 0.44f, width * 0.34f)
         inner = outer * 0.44f
         cx = width / 2f
-        cy = top + (height - top) / 2f
+        cy = height / 2f
         val line = holes.reduceOrNull { a, b -> a.union(b) }
         if (line != null) {
             val room = 2 * outer + context.dp(24f)
@@ -198,8 +189,6 @@ internal class WheelView(
         }
     }
 
-    private fun hintBottom(): Float = context.dp(18f) + hintText.textSize + 2 * context.dp(11f)
-
     override fun onDraw(canvas: Canvas) {
         // The game dimmed round the line, which is outlined; or, with a box pointed at, round that box.
         val pad = context.dp(5f).toFloat()
@@ -213,8 +202,6 @@ internal class WheelView(
         hole.color = Ink.ACCENT
         for (b in lit) canvas.drawRoundRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad, corner, corner, hole)
         boxes.forEachIndexed { i, b -> if (b != null) drawBoxTag(canvas, b, i + 1, on = pointed == i + 1, pad, corner) }
-
-        drawHint(canvas)
 
         val step = 360f / actions.size
         val middle = (outer + inner) / 2
@@ -269,26 +256,6 @@ internal class WheelView(
         canvas.drawRoundRect(left, top, left + size, top + size, r, r, edge)
         tagText.color = if (on) Ink.ON_FILL else Ink.DIM
         canvas.drawText(slot.toString(), left + size / 2, top + size / 2 - (tagText.ascent() + tagText.descent()) / 2, tagText)
-    }
-
-    /** What the buttons do, in a pill at the top. */
-    private fun drawHint(canvas: Canvas) {
-        if (hint.isEmpty()) return
-        val padX = context.dp(18f).toFloat()
-        val padY = context.dp(11f).toFloat()
-        val textWidth = minOf(hintText.measureText(hint), width - 2 * padX - context.dp(32f))
-        val shown = TextUtils.ellipsize(hint, hintText, textWidth, TextUtils.TruncateAt.END).toString()
-        val w = textWidth + 2 * padX
-        val top = context.dp(18f).toFloat()
-        val left = (width - w) / 2
-        val bottom = top + hintText.textSize + 2 * padY
-        fill.color = Ink.SURFACE
-        edge.color = Ink.BORDER_STRONG
-        val r = (bottom - top) / 2
-        canvas.drawRoundRect(left, top, left + w, bottom, r, r, fill)
-        canvas.drawRoundRect(left, top, left + w, bottom, r, r, edge)
-        hintText.color = Ink.TEXT
-        canvas.drawText(shown, left + padX, bottom - padY - hintText.descent() * 0.6f, hintText)
     }
 
     /** The middle: which way is pointed, the slice's name and what it does. */
