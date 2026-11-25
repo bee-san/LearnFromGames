@@ -91,6 +91,11 @@ class MainActivity : ComponentActivity() {
             val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { model.askRestore(it) }
             val saveLines = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { model.exportLinesTo(it) }
             val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { model.chooseBackupFolder(it) }
+            val wheels by model.wheels.collectAsStateWithLifecycle()
+            val wheelGame by model.wheelGame.collectAsStateWithLifecycle()
+            val wheelMessage by model.wheelMessage.collectAsStateWithLifecycle()
+            val saveWheel = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { model.saveWheelTo(it) }
+            val openWheel = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { model.loadWheelFrom(it) }
             val gameNameStatus by model.gameNameStatus.collectAsStateWithLifecycle()
             val steamTest by model.steamTest.collectAsStateWithLifecycle()
             // Which source the folder being picked is for; kept across the picker in case Android recreates this activity.
@@ -167,7 +172,8 @@ class MainActivity : ComponentActivity() {
                 if (page == Page.STATS) saved.removeState(Page.STATS)
                 page = when (page) {
                     Page.LINE -> lineFrom
-                    Page.LINES, Page.DIARY, Page.RECAP, Page.ASK, Page.STATS, Page.SETTINGS -> Page.HOME
+                    Page.LINES, Page.DIARY, Page.RECAP, Page.ASK, Page.STATS, Page.SETTINGS, Page.SEARCH -> Page.HOME
+                    Page.WHEEL_EDIT -> Page.WHEEL
                     Page.DIARY_MONTH -> Page.DIARY
                     Page.DIARY_DAY -> Page.DIARY_MONTH
                     Page.DIARY_ENTRY -> Page.DIARY_DAY
@@ -486,6 +492,44 @@ class MainActivity : ComponentActivity() {
                         )
                         page == Page.TRANSLATION -> TranslationScreen(prefs, model::updatePrefs, keyTest, model::testKey, ::back)
                         page == Page.CONTROLS -> ControlsScreen(prefs, model::updatePrefs, ::back)
+                        page == Page.WHEEL -> {
+                            // Games a wheel can be given to: the one read last first, then the rest by name.
+                            val played = lines.map { it.gameId }.distinct()
+                            val wheelGames = games.filter { !it.app }.sortedBy { g -> played.indexOf(g.id).let { if (it < 0) Int.MAX_VALUE else it } }
+                            WheelSettingsScreen(
+                                prefs, model::updatePrefs, wheels, wheelGames, wheelGame, model::chooseWheel, wheelMessage,
+                                onEdit = { page = Page.WHEEL_EDIT },
+                                onSave = { saveWheel.launch("lfg-wheel.json") },
+                                onLoad = { openWheel.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
+                                onReset = model::resetWheel,
+                                onControls = { page = Page.CONTROLS },
+                                onBack = ::back,
+                            )
+                        }
+                        page == Page.WHEEL_EDIT -> {
+                            val game = games.firstOrNull { it.id == wheelGame }?.takeIf { prefs.wheelPerGame }
+                            WheelEditScreen(
+                                set = game?.let { wheels[it.id] } ?: wheels[io.github.beesan.lfg.Wheels.SHARED] ?: io.github.beesan.lfg.core.WheelSet.DEFAULT,
+                                whose = game?.title.orEmpty(),
+                                onChange = model::setWheel,
+                                onReset = model::resetWheel,
+                                onBack = ::back,
+                            )
+                        }
+                        page == Page.SEARCH -> SearchScreen(
+                            lookup, styles, model::mediaBlocking, model::search,
+                            onTap = { model.lineLookup.select(0, it) },
+                            onLink = { link, index ->
+                                when (link) {
+                                    EntryLink.CARD -> model.lineLookup.addCard(index)
+                                    EntryLink.AUDIO -> model.lineLookup.playAudio(index)
+                                    EntryLink.KANJI -> model.lineLookup.lookUpKanji(index)
+                                    EntryLink.BACK -> model.lineLookup.backToWord()
+                                    else -> Unit
+                                }
+                            },
+                            onBack = ::back,
+                        )
                         page == Page.RECOGNITION -> RecognitionScreen(
                             reader, ScreenAi.available(), { model.downloadScreenAi() }, prefs.interfaceApart, model::setInterfaceApart, ::back,
                         )
@@ -665,6 +709,24 @@ class MainActivity : ComponentActivity() {
 
     private fun take(intent: Intent?) {
         if (intent?.action == ACTION_STATS) requested.value = Page.STATS
+        // A page picked on the wheel over a game.
+        if (intent?.action == ACTION_OPEN) {
+            val game = intent.getStringExtra(EXTRA_GAME).orEmpty()
+            when (intent.getStringExtra(EXTRA_PAGE)) {
+                PAGE_STATS -> requested.value = Page.STATS
+                PAGE_SETTINGS -> requested.value = Page.SETTINGS
+                // A game's characters are on its row of Games and apps: the visual novel it is, and its names.
+                PAGE_NAMES -> requested.value = Page.GAMES
+                PAGE_SEARCH -> {
+                    model.search("")
+                    requested.value = Page.SEARCH
+                }
+                // Today's page of the game; with nothing kept of it today, the shelf.
+                PAGE_DIARY -> model.diary.openWidgetDay(game, diaryToday().toEpochDay()) { found ->
+                    requested.value = if (found) Page.DIARY_DAY else Page.DIARY
+                }
+            }
+        }
         askFromGame = false
         if (intent?.action == ACTION_ASK_LINE) {
             model.askFromGame(intent.getStringExtra(EXTRA_LINE)) { found ->
@@ -755,6 +817,17 @@ class MainActivity : ComponentActivity() {
         /** A question to be written about an explained line, from over a game: [EXTRA_LINE] is the line's id. */
         const val ACTION_ASK_LINE = "io.github.beesan.lfg.action.ASK_LINE"
         const val EXTRA_LINE = "line"
+        /**
+         * One of the app's pages, opened from the wheel over a game: [EXTRA_PAGE] is one of the PAGE_ names,
+         * and [EXTRA_GAME] the id of the game in front, for the pages that are about one game.
+         */
+        const val ACTION_OPEN = "io.github.beesan.lfg.action.OPEN"
+        const val EXTRA_PAGE = "page"
+        const val PAGE_STATS = "stats"
+        const val PAGE_NAMES = "names"
+        const val PAGE_SEARCH = "search"
+        const val PAGE_SETTINGS = "settings"
+        const val PAGE_DIARY = "diary"
         private const val EXTRA_MOVED = "moved"
     }
 }

@@ -433,6 +433,77 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ── the wheel ────────────────────────────────────────────────────────────
+
+    /** Every wheel kept: the shared one under [io.github.beesan.lfg.Wheels.SHARED], and each game's own under its id. */
+    val wheels = app.wheels.sets
+
+    /** Whose wheel Settings › Wheel is about: a game's id, or [io.github.beesan.lfg.Wheels.SHARED]. */
+    private val _wheelGame = MutableStateFlow(io.github.beesan.lfg.Wheels.SHARED)
+    val wheelGame: StateFlow<String> = _wheelGame
+
+    /** What saving or loading a wheel's file did, or what went wrong. */
+    private val _wheelMessage = MutableStateFlow<String?>(null)
+    val wheelMessage: StateFlow<String?> = _wheelMessage
+
+    fun chooseWheel(gameId: String) {
+        _wheelGame.value = gameId
+        _wheelMessage.value = null
+    }
+
+    /** The game whose own wheel is chosen, or the shared one's place while every game has the same wheel. */
+    private fun wheelOwner() = _wheelGame.value.takeIf { app.settings.prefs.value.wheelPerGame }.orEmpty()
+
+    /** The wheel chosen as it is now: the game's own, or the shared one it uses until its own is changed. */
+    private fun wheelNow() = app.wheels.of(wheelOwner(), perGame = true)
+
+    /** The wheel chosen is [set] from now on; a game that used the shared one has its own. */
+    fun setWheel(set: io.github.beesan.lfg.core.WheelSet) = app.wheels.set(wheelOwner(), set)
+
+    /** A game's wheel goes back to the shared one, and the shared one to the wheel LFG starts with. */
+    fun resetWheel() {
+        app.wheels.set(wheelOwner(), null)
+        _wheelMessage.value = null
+    }
+
+    fun saveWheelTo(uri: Uri?) {
+        uri ?: return
+        val text = wheelNow().encode()
+        viewModelScope.launch(Dispatchers.IO) {
+            _wheelMessage.value = try {
+                app.contentResolver.openOutputStream(uri, "wt")?.bufferedWriter()?.use { it.write(text) } ?: throw java.io.IOException()
+                "Saved."
+            } catch (_: Exception) {
+                "The wheel couldn’t be written there. Try another folder."
+            }
+        }
+    }
+
+    fun loadWheelFrom(uri: Uri?) {
+        uri ?: return
+        val owner = wheelOwner()
+        viewModelScope.launch(Dispatchers.IO) {
+            val set = try {
+                // A wheel's file is a few kilobytes: anything much bigger is not one.
+                app.contentResolver.openInputStream(uri)?.use { it.readNBytes(WHEEL_FILE_BYTES).decodeToString() }?.let(io.github.beesan.lfg.core.WheelSet::decode)
+            } catch (_: Exception) {
+                null
+            }
+            if (set != null) app.wheels.set(owner, set)
+            _wheelMessage.value = if (set != null) "Loaded." else "That file is not a wheel."
+        }
+    }
+
+    // ── search ───────────────────────────────────────────────────────────────
+
+    /** Looks [text] up from its first character, in [lineLookup], as a word typed on the Search page. */
+    fun search(text: String) {
+        opened = null
+        val word = text.trim()
+        lineLookup.setLines(if (word.isEmpty()) emptyList() else listOf(LookupLine(word, null, null, "")))
+        if (word.isNotEmpty()) lineLookup.select(0, 0)
+    }
+
     // ── backup ───────────────────────────────────────────────────────────────
 
     /** What the last backup, export or restore did, or what went wrong. */
@@ -874,6 +945,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val TEST_LINE = "新しい剣を手に入れた！"
+
+        /** The most of a file that is read as a wheel. */
+        private const val WHEEL_FILE_BYTES = 262_144
         const val PRACTICE_GAME = "LFG practice"
 
         fun dayLabel(day: LocalDate, today: LocalDate): String = when (day) {

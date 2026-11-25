@@ -68,7 +68,10 @@ class App : Application() {
     val settings by lazy { Settings(this) }
     val dialogueBoxes by lazy { DialogueBoxes(this) }
     val extraBoxes by lazy { ExtraBoxes(this) }
-    val media by lazy { MediaAttacher(this, scope, anki, database, { settings.prefs.value }, Speech(this)) }
+    val wheels by lazy { Wheels(this) }
+    val speech by lazy { Speech(this) }
+    val media by lazy { MediaAttacher(this, scope, anki, database, { settings.prefs.value }, speech) }
+    val lineAsker by lazy { io.github.beesan.lfg.ask.LineAsker(database) { settings.prefs.value } }
     val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media"), wordAudio) { StatsWidgets.requestUpdate(this) } }
     val models by lazy { ModelStore(this) }
     val pictures by lazy { PictureKeeper(database, filesDir, diary) }

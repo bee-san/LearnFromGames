@@ -32,6 +32,15 @@ import io.github.beesan.lfg.core.GameStats
 import io.github.beesan.lfg.core.Perf
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.ShortcutHold
+import io.github.beesan.lfg.core.Furigana
+import io.github.beesan.lfg.core.LineMarks
+import io.github.beesan.lfg.core.Ruby
+import io.github.beesan.lfg.core.WheelAction
+import io.github.beesan.lfg.core.WheelSlice
+import io.github.beesan.lfg.core.WordMark
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.Note
@@ -196,7 +205,30 @@ class LfgAccessibilityService : AccessibilityService() {
                     app.notes.save(note, if (keepPicture) picture else null)
                 }
             },
+            wheels = { app.wheels.of(front?.game?.id, app.settings.prefs.value.wheelPerGame) },
+            onTile = ::wheelTile,
+            tileWhyNot = ::tileWhyNot,
+            tileNote = ::tileNote,
+            onAskLine = { id, slice ->
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching {
+                            app.lineAsker.ask(app.database.lines().byId(id) ?: error("That line is not saved."), slice.action, slice.prompt)
+                        }
+                    }
+                    overlays.onLineAnswer(id, slice, result.getOrNull(), result.exceptionOrNull()?.let { it.message ?: "That did not work. Try again." })
+                }
+            },
         )
+        // Furigana and Known words: worked out again for each new text on screen, and when either is switched.
+        scope.launch {
+            combine(
+                controller.state.map { it.lines }.distinctUntilChanged(),
+                app.settings.prefs.map { it.furigana to it.knownWords }.distinctUntilChanged(),
+            ) { lines, (furigana, known) -> Triple(lines, furigana, known) }.collectLatest { (lines, furigana, known) ->
+                overlays.onTextMarks(if (furigana || known) textMarks(lines, furigana, known) else emptyList())
+            }
+        }
         scope.launch { app.dictionaries.state.collect { styles = app.dictionaries.styles() } }
         // Conversations read in as the app starts, or added to on the app's own page, show over the game too.
         scope.launch { app.explainer.conversations.collect { overlays.onExplained() } }
@@ -400,7 +432,7 @@ class LfgAccessibilityService : AccessibilityService() {
     /** One of the pair of the shortcut has been let go since the pair was pressed. */
     private var chordLetGo = false
 
-    private val shortcutHold = ShortcutHold()
+    private val shortcutHold = ShortcutHold { app.settings.prefs.value.wheelHoldMs.toLong() }
     private var holdJob: Job? = null
 
     /**
@@ -426,6 +458,8 @@ class LfgAccessibilityService : AccessibilityService() {
      */
     private fun shortcutDown(anyApp: Boolean) {
         holdJob?.cancel()
+        // Hide LFG, from the wheel, lasts until the shortcut: this press brings everything back, and is then what it always is.
+        overlays.hidden = false
         when {
             // A box being drawn, or the wheel waiting to be pointed at: the shortcut puts it away.
             overlays.picking -> overlays.closePicker()
@@ -433,7 +467,7 @@ class LfgAccessibilityService : AccessibilityService() {
             overlays.canOpenWheel -> {
                 shortcutHold.press(SystemClock.uptimeMillis())
                 holdJob = scope.launch {
-                    delay(ShortcutHold.HOLD_MS)
+                    delay(app.settings.prefs.value.wheelHoldMs.toLong())
                     if (shortcutHold.holdReached(SystemClock.uptimeMillis()) && !overlays.openWheel()) shortcutHold.cancelHold()
                 }
             }
@@ -457,6 +491,241 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun closeOverlay() {
         overlays.putAwayWheel()
         if (controller.state.value.controllerMode) controller.exitControllerMode()
+    }
+
+    // ── the wheel's tiles ────────────────────────────────────────────────────
+
+    /** Games whose reading is paused from the wheel, until the tile is picked again or the service starts anew. */
+    private val paused = HashSet<String>()
+
+    /** Whether AnkiDroid is there to ask, looked up at most every few seconds: the wheel asks as it is drawn. */
+    private var ankiReady = false
+    private var ankiAskedAt = 0L
+
+    private fun ankiConnected(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (ankiAskedAt == 0L || now - ankiAskedAt > 3_000) {
+            ankiAskedAt = now
+            ankiReady = runCatching { app.anki.status() == io.github.beesan.lfg.anki.AnkiStatus.READY }.getOrDefault(false)
+        }
+        return ankiReady
+    }
+
+    /** Why a tile done here cannot act now, said in the wheel's middle; null when it can. */
+    private fun tileWhyNot(slice: WheelSlice, line: LookupLine?): String? = when (slice.action) {
+        WheelAction.CARD, WheelAction.HEAR, WheelAction.ALOUD, WheelAction.COPY, WheelAction.LOOKUP ->
+            "Nothing read on this screen yet".takeIf { line == null }
+        WheelAction.KNOWN -> "Connect AnkiDroid in Settings › Anki".takeIf { !app.settings.prefs.value.knownWords && !ankiConnected() }
+        else -> null
+    }
+
+    /** What a switch says of itself in the wheel's middle. */
+    private fun tileNote(slice: WheelSlice): String? {
+        fun said(on: Boolean) = if (on) "On. Pick to turn off" else "Off. Pick to turn on"
+        return when (slice.action) {
+            WheelAction.FURIGANA -> said(app.settings.prefs.value.furigana)
+            WheelAction.KNOWN -> said(app.settings.prefs.value.knownWords)
+            WheelAction.PAUSE -> if (front?.game?.id in paused) "Paused. Pick to read again" else null
+            else -> null
+        }
+    }
+
+    /** A tile picked on the wheel, with the line the wheel acts on. */
+    private fun wheelTile(slice: WheelSlice, line: LookupLine?) {
+        val playing = front
+        val prefs = app.settings.prefs.value
+        when (slice.action) {
+            WheelAction.READ_SCREEN -> {
+                // A game read in a box is read on its whole screen this once; one read whole is read again now.
+                val screen = playing?.let { overlays.screen(it.displayId) }
+                if (playing != null && screen != null && dialogueBox(playing.game, playing.displayId) != null) {
+                    ask(screen, thenController = controller.state.value.controllerMode)
+                } else {
+                    controller.setLines(emptyList())
+                    pipeline.forget()
+                    pipeline.readNext()
+                }
+            }
+            WheelAction.READ_REGION -> pickRegion(pad = true, region = true)
+            WheelAction.LOOKUP -> if (!controller.state.value.controllerMode && controller.state.value.lines.isNotEmpty()) controller.enterControllerMode()
+            WheelAction.FURIGANA -> {
+                app.settings.update { it.copy(furigana = !it.furigana) }
+                overlays.say(if (prefs.furigana) "Furigana off" else "Furigana on")
+            }
+            WheelAction.KNOWN -> {
+                app.settings.update { it.copy(knownWords = !it.knownWords) }
+                overlays.say(if (prefs.knownWords) "Known words off" else "Known words on: grey is mature, amber is being learnt, the accent is not in Anki")
+            }
+            WheelAction.CARD -> line?.let(::lineCard)
+            WheelAction.LAST_CARD -> scope.launch {
+                val picture = (line?.framePath ?: pipeline.latest.value?.framePath)?.let(::File)
+                overlays.say(app.cards.pictureToLast(picture))
+            }
+            WheelAction.HEAR -> line?.let(::hear)
+            WheelAction.ALOUD -> line?.let { spoken ->
+                scope.launch { if (!app.speech.say(spoken.text)) overlays.say("This device has no Japanese voice to read with.") }
+            }
+            WheelAction.COPY -> line?.let { copied ->
+                getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("Line", copied.text))
+                // Android 13 and later show their own notice of what was copied.
+                if (Build.VERSION.SDK_INT < 33) overlays.say("Copied")
+            }
+            WheelAction.DIARY -> overlays.openPage(MainActivity.PAGE_DIARY, playing?.game?.id)
+            WheelAction.STATS -> overlays.openPage(MainActivity.PAGE_STATS, playing?.game?.id)
+            WheelAction.NAMES -> overlays.openPage(MainActivity.PAGE_NAMES, playing?.game?.id)
+            WheelAction.SEARCH -> overlays.openPage(MainActivity.PAGE_SEARCH, playing?.game?.id)
+            WheelAction.SETTINGS -> overlays.openPage(MainActivity.PAGE_SETTINGS, playing?.game?.id)
+            WheelAction.OTHER_SCREEN -> {
+                app.settings.update { it.copy(secondScreenPanel = !it.secondScreenPanel) }
+                overlays.say(if (prefs.secondScreenPanel) "Lines on the other screen off" else "Lines on the other screen on")
+                overlays.onScreen(playing?.displayId ?: Display.INVALID_DISPLAY, true, playing != null)
+            }
+            WheelAction.PAUSE -> playing?.game?.let { game ->
+                if (!paused.remove(game.id)) {
+                    paused += game.id
+                    if (controller.state.value.controllerMode) controller.exitControllerMode()
+                    controller.setLines(emptyList())
+                    overlays.say("${game.title} is not read until Pause reading is picked again")
+                } else {
+                    pipeline.forget()
+                    pipeline.readNext()
+                    overlays.say("${game.title} is read again")
+                }
+            }
+            else -> Unit
+        }
+    }
+
+    /** An Anki card of the whole line, with its picture and voice, and its translation if it has one. */
+    private fun lineCard(line: LookupLine) {
+        scope.launch {
+            val ready = if (line.lineId != null) line else prepareLine(line)
+            val id = ready.lineId ?: return@launch overlays.say("The line could not be saved.")
+            val translation = withContext(Dispatchers.IO) { app.database.lines().byId(id)?.translation }?.ifBlank { null }
+            val content = io.github.beesan.lfg.anki.CardContent(
+                expression = ready.text, reading = "", sentence = ready.text, spanStart = 0, spanEnd = 0,
+                senses = listOfNotNull(translation), gameName = ready.gameName, picturePath = ready.framePath,
+                lineStartMs = ready.appearedAtMs.takeUnless { ready.fromApp }, fromApp = ready.fromApp,
+            )
+            overlays.say(
+                when (val result = app.cards.add(id, content)) {
+                    is io.github.beesan.lfg.anki.CardResult.Added -> "Card added"
+                    io.github.beesan.lfg.anki.CardResult.Duplicate -> "This line is in Anki already"
+                    is io.github.beesan.lfg.anki.CardResult.Waiting -> result.reason + " The card is kept here until it is."
+                    is io.github.beesan.lfg.anki.CardResult.Failed -> result.reason
+                },
+            )
+        }
+    }
+
+    private var hearing: android.media.MediaPlayer? = null
+    private var hearingTrack: android.media.AudioTrack? = null
+
+    /** The line's voice again: the clip a card of it has, else the game's sound from when it appeared until the next line. */
+    private fun hear(line: LookupLine) {
+        scope.launch {
+            val row = line.lineId?.let { withContext(Dispatchers.IO) { app.database.lines().byId(it) } }
+            val kept = row?.audioPath?.let(::File)?.takeIf { it.isFile }
+            hearing?.release()
+            hearing = null
+            hearingTrack?.release()
+            hearingTrack = null
+            if (kept != null) {
+                hearing = runCatching {
+                    android.media.MediaPlayer().apply {
+                        setDataSource(kept.path)
+                        setOnCompletionListener { it.release(); if (hearing === it) hearing = null }
+                        prepare()
+                        start()
+                    }
+                }.getOrNull()
+                return@launch
+            }
+            val start = line.appearedAtMs ?: row?.createdAt
+            val samples = if (start == null) null else withContext(Dispatchers.IO) {
+                val next = row?.let { app.database.lines().nextAfter(it.gameId, it.createdAt) }?.createdAt
+                SoundCapture.clip(start - HEAR_LEAD_MS, minOf(next ?: System.currentTimeMillis(), start + HEAR_MOST_MS))
+            }
+            if (samples == null || samples.size < SoundCapture.SAMPLE_RATE / 4) {
+                overlays.say(
+                    if (!SoundCapture.running.value) "The game’s sound is not being kept. Read aloud speaks the line." else "That line’s sound is gone. Read aloud speaks it.",
+                )
+                return@launch
+            }
+            hearingTrack = runCatching {
+                android.media.AudioTrack.Builder()
+                    .setAudioAttributes(
+                        android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build(),
+                    )
+                    .setAudioFormat(
+                        android.media.AudioFormat.Builder().setSampleRate(SoundCapture.SAMPLE_RATE)
+                            .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT).setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO).build(),
+                    )
+                    .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+                    .setBufferSizeInBytes(samples.size * 2)
+                    .build().apply {
+                        write(samples, 0, samples.size)
+                        play()
+                    }
+            }.getOrNull()
+        }
+    }
+
+    /** The words of a line of text, by the line: looked up once, as the same line is on screen for many readings. */
+    private val wordsOf = object : LinkedHashMap<String, List<Word>>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Word>>?) = size > WORDS_KEPT
+    }
+
+    private class Word(val start: Int, val end: Int, val expression: String, val reading: String)
+
+    /** The line cut into the words the dictionaries know, the longest match at each place, as stepping by word does. */
+    private suspend fun words(line: LookupLine): List<Word> {
+        synchronized(wordsOf) { wordsOf[line.text] }?.let { return it }
+        val vn = app.characterNames.vnFor(line.gameId)
+        val text = line.text
+        val found = ArrayList<Word>()
+        var i = 0
+        while (i < text.length) {
+            if (!Furigana.japanese(text[i])) {
+                i++
+                continue
+            }
+            val entry = app.dictionaries.lookup(text.substring(i), vn, maxResults = 1).firstOrNull()
+            val length = entry?.matched?.length ?: 0
+            if (entry == null || length == 0 || !text.startsWith(entry.matched, i)) {
+                i++
+                continue
+            }
+            found += Word(i, i + length, entry.expression, entry.reading)
+            i += length
+        }
+        synchronized(wordsOf) { wordsOf[text] = found }
+        return found
+    }
+
+    /** What is drawn over each line on screen: readings for its kanji, and each word's Anki card. */
+    private suspend fun textMarks(lines: List<LookupLine>, furigana: Boolean, known: Boolean): List<LineMarks> = try {
+        val target = if (known && ankiConnected()) app.anki.target else null
+        lines.filter { it.geometry != null }.map { line ->
+            val words = words(line)
+            val rubies = if (!furigana) emptyList() else words.flatMap { word ->
+                Furigana.of(line.text.substring(word.start, word.end), word.expression, word.reading).map { Ruby(it.start + word.start, it.end + word.start, it.reading) }
+            }
+            val marked = if (target == null) emptyList() else {
+                val worth = words.filter { Furigana.worthKnowing(line.text.substring(it.start, it.end)) }
+                val knowing = withContext(Dispatchers.IO) { app.anki.knowing(target, worth.map { it.expression }.toSet()) }
+                worth.mapNotNull { word -> knowing[word.expression]?.let { WordMark(word.start, word.end, it) } }
+            }
+            LineMarks(line.text, rubies, marked)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        // AnkiDroid gone, or a dictionary being replaced: the text is left unmarked.
+        Log.w(TAG, "marking the text failed", e)
+        emptyList()
     }
 
     /** A question about the game in front, asked from the wheel. */
@@ -777,6 +1046,8 @@ class LfgAccessibilityService : AccessibilityService() {
         once: Boolean = false,
         slot: Int = 1,
         fresh: Boolean = false,
+        /** Over a game too, a region to read once or to keep reading, and none of the game's boxes: Read region on the wheel. */
+        region: Boolean = false,
     ) {
         scope.launch {
             endAsked()
@@ -794,7 +1065,7 @@ class LfgAccessibilityService : AccessibilityService() {
             pickingPad = pad
             overlays.pickRegion(
                 // A box read once is none of the game's boxes.
-                display, playing?.game?.takeIf { !once }?.let { PickFor(it.id, it.title, if (fresh) null else gameBox(it, display, slot), slot) },
+                display, playing?.game?.takeIf { !once && !region }?.let { PickFor(it.id, it.title, if (fresh) null else gameBox(it, display, slot), slot) },
                 lookup = pad, once = once,
             )
         }
@@ -983,6 +1254,9 @@ class LfgAccessibilityService : AccessibilityService() {
     /** When they last stood aside for nothing: the clean picture had the same text. Not tried again for a while. */
     private var asideForNothing = 0L
 
+    /** The reading the readings over the text were over when they last stood aside. */
+    private var marksAsideFrom: Reading? = null
+
     /** [read]: a clean picture was read and gave the lines now shown. */
     private fun endAside(read: Boolean = false) {
         if (asideSince == 0L) return
@@ -1038,6 +1312,8 @@ class LfgAccessibilityService : AccessibilityService() {
             }
             // No reader, no picture: nothing is captured until something can read it.
             if (now == null || Readers.reader == null) continue
+            // Pause reading, from the wheel.
+            if (now.game.id in paused) continue
             // A reading asked for is taking its own picture: Android allows only about three a second.
             if (shooting) continue
             // The game is read while a word is looked up too: text that changes behind the entry is the
@@ -1067,7 +1343,12 @@ class LfgAccessibilityService : AccessibilityService() {
                     }
                     // A game whose picture never matches its last clean one would have them blink for ever.
                     val lately = asideForNothing != 0L && android.os.SystemClock.uptimeMillis() - asideForNothing < ASIDE_AGAIN_MS
-                    if (changed && !lately) {
+                    if (changed && !lately && overlays.onlyTextMarks) {
+                        // Furigana and the known words' strokes alone: they go until the new text is read,
+                        // however long it takes to hold still, and are worked out again for it.
+                        marksAsideFrom = pipeline.latest.value
+                        overlays.textMarksAside = true
+                    } else if (changed && !lately) {
                         Log.i(TAG, "the text changed behind the entry: reading it")
                         asideSince = android.os.SystemClock.uptimeMillis()
                         overlays.aside = true
@@ -1099,6 +1380,13 @@ class LfgAccessibilityService : AccessibilityService() {
                 stillLooks = if (still) stillLooks + 1 else 0
                 // The clean picture showed nothing new to wait for: the mark and the entry come back as they were.
                 if (asideSince != 0L && !pipeline.settling) endAside()
+                // The same for the readings over the text, which wait as long as the text takes to hold still.
+                if (overlays.textMarksAside && !pipeline.settling) {
+                    // Nothing new was read after all: the picture differs for another reason, and is left alone a while.
+                    asideForNothing = if (pipeline.latest.value === marksAsideFrom) android.os.SystemClock.uptimeMillis() else 0L
+                    marksAsideFrom = null
+                    overlays.textMarksAside = false
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "reading a frame failed", e)
             } finally {
@@ -1474,6 +1762,13 @@ class LfgAccessibilityService : AccessibilityService() {
 
         /** How long after a dialogue box is drawn from lookup its first lines may bring lookup back: three looks. */
         private const val LOOKUP_AFTER_BOX_MS = 2000L
+
+        /** Hear, on the wheel: how long before the line appeared its sound starts, and the most of it played. */
+        private const val HEAR_LEAD_MS = 300L
+        private const val HEAR_MOST_MS = 20_000L
+
+        /** How many lines' words are remembered for Furigana and Known words. */
+        private const val WORDS_KEPT = 64
 
         /** How often, and how many times, the lookup window is looked for before its tap: a third of a second in all. */
         private const val TAP_RETRY_MS = 30L

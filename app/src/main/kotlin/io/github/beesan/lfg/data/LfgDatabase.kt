@@ -201,6 +201,10 @@ interface CardDao {
     @Query("SELECT * FROM cards WHERE state = 'pending' ORDER BY created_at")
     suspend fun pending(): List<Card>
 
+    /** The card made last that is in AnkiDroid. */
+    @Query("SELECT * FROM cards WHERE state = 'added' AND note_id IS NOT NULL ORDER BY created_at DESC LIMIT 1")
+    suspend fun newestAdded(): Card?
+
     @Query("SELECT * FROM cards WHERE line_id = :lineId AND state = 'added'")
     suspend fun addedFor(lineId: String): List<Card>
 

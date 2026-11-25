@@ -148,7 +148,7 @@ internal fun Choice(options: List<Pair<String, String>>, current: String, onPick
 }
 
 @Composable
-private fun OnOff(on: Boolean, onChange: (Boolean) -> Unit) = Choice(listOf("on" to "On", "off" to "Off"), if (on) "on" else "off") { onChange(it == "on") }
+internal fun OnOff(on: Boolean, onChange: (Boolean) -> Unit) = Choice(listOf("on" to "On", "off" to "Off"), if (on) "on" else "off") { onChange(it == "on") }
 
 /** The page last opened from Settings, where the pad's focus goes back to. */
 private var lastSetting: Page? = null
@@ -176,6 +176,7 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Item("Dictionaries", "Add, order and remove dictionaries", Page.DICTIONARIES)
     Item("Anki", "The note type and deck cards go to", Page.ANKI)
     Item("Controls", "The lookup shortcut, whole words or characters, and where the entry shows", Page.CONTROLS)
+    Item("Wheel", "Its tiles, the wheels inside it, and how it opens and is pointed at", Page.WHEEL)
     Item("Text recognition", "ScreenAI, which reads the screen", Page.RECOGNITION)
     Item("Games and apps", "Rename one, choose when it is read", Page.GAMES)
     Item("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", Page.GAME_NAMES)
@@ -810,7 +811,7 @@ fun GoalsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -
 
 /** − and + through [steps], the current value between them. Both stay enabled, so the pad never loses its place at an end. */
 @Composable
-private fun Stepper(label: String, value: Int, steps: List<Int>, onPick: (Int) -> Unit) {
+internal fun Stepper(label: String, value: Int, steps: List<Int>, onPick: (Int) -> Unit) {
     LfgButton("−", { onPick(ReadingGoals.step(steps, value, up = false)) })
     Text(
         label, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 1,
@@ -1091,7 +1092,7 @@ internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINES, LINE, DIARY, DIARY_MONTH, DIARY_DAY, DIARY_ENTRY, DIARY_WRITE, DIARY_SHARE, DIARY_SETTINGS, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE, BOX_DRAW }
+enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINES, LINE, DIARY, DIARY_MONTH, DIARY_DAY, DIARY_ENTRY, DIARY_WRITE, DIARY_SHARE, DIARY_SETTINGS, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE, BOX_DRAW, WHEEL, WHEEL_EDIT, SEARCH }
 
 @Composable
 fun StorageScreen(

@@ -64,6 +64,12 @@ class Speech(private val context: Context) {
         ok
     }
 
+    /** Says [text] aloud now, in place of anything it was saying. False when there is no voice. */
+    suspend fun say(text: String): Boolean = lock.withLock {
+        val tts = ready() ?: return false
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), "aloud") == TextToSpeech.SUCCESS
+    }
+
     private companion object {
         const val TAG = "LfgSpeech"
         const val TIMEOUT_MS = 30_000L

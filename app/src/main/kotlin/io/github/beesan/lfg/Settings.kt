@@ -142,6 +142,32 @@ data class Prefs(
      * empty until it is answered.
      */
     val language: String = "",
+    /** Readings are drawn over the kanji of a game's text: Furigana on the wheel. */
+    val furigana: Boolean = false,
+    /** Words of a game's text are marked by their Anki card: Known words on the wheel. */
+    val knownWords: Boolean = false,
+    /** A game can have a wheel of its own ([Wheels]); the others use the shared one. */
+    val wheelPerGame: Boolean = false,
+    /** How long the shortcut is held before the wheel opens, in milliseconds. */
+    val wheelHoldMs: Int = 350,
+    /** With the shortcut still held, pointing at a slice that opens a wheel opens it at once, so letting go picks inside it. */
+    val wheelOpenHeld: Boolean = true,
+    /** [WHEEL_POINT]: each way of the D-pad is a slice, up to 8. [WHEEL_STEP]: left and right go round a wheel of any size. */
+    val wheelDpad: String = WHEEL_POINT,
+    /** How far a stick is pushed before it points at a slice, as a percentage of all the way. */
+    val wheelReach: Int = 75,
+    /** A tick is felt for each slice pointed at. */
+    val wheelTick: Boolean = true,
+    /** Each wheel opens pointing at the slice picked in it last. */
+    val wheelStartLast: Boolean = false,
+    /** The wheel stays open after a pick that opens nothing over the game: Keep or Copy several times. */
+    val wheelStay: Boolean = false,
+    /** Slices show their icons without their names. */
+    val wheelIconsOnly: Boolean = false,
+    /** The whole wheel scaled, as a percentage. */
+    val wheelSize: Int = 100,
+    /** How dark the game is behind the wheel, as a percentage. */
+    val wheelDim: Int = 60,
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
@@ -180,6 +206,12 @@ data class Prefs(
         const val BACKUP_DAILY = "daily"
         const val BACKUP_WEEKLY = "weekly"
         val CONTEXT_STEPS = listOf(0, 3, 5, 10, 15, 20)
+        const val WHEEL_POINT = "point"
+        const val WHEEL_STEP = "step"
+        val WHEEL_HOLD_STEPS = listOf(250, 350, 500, 700)
+        val WHEEL_REACH_STEPS = listOf(50, 75, 90)
+        val WHEEL_SIZE_STEPS = listOf(80, 100, 120)
+        val WHEEL_DIM_STEPS = listOf(40, 60, 80)
     }
 }
 
@@ -248,6 +280,19 @@ class Settings(context: Context) {
             keepDialogueAsked = store.getBoolean("keepDialogueAsked", d.keepDialogueAsked),
             // Set up before the question existed, when there was only Japanese: not asked again.
             language = store.getString("language", null) ?: if (store.getBoolean("keepDialogueAsked", false)) Language.JAPANESE.tag else d.language,
+            furigana = store.getBoolean("furigana", d.furigana),
+            knownWords = store.getBoolean("knownWords", d.knownWords),
+            wheelPerGame = store.getBoolean("wheelPerGame", d.wheelPerGame),
+            wheelHoldMs = store.getInt("wheelHoldMs", d.wheelHoldMs),
+            wheelOpenHeld = store.getBoolean("wheelOpenHeld", d.wheelOpenHeld),
+            wheelDpad = store.getString("wheelDpad", d.wheelDpad) ?: d.wheelDpad,
+            wheelReach = store.getInt("wheelReach", d.wheelReach),
+            wheelTick = store.getBoolean("wheelTick", d.wheelTick),
+            wheelStartLast = store.getBoolean("wheelStartLast", d.wheelStartLast),
+            wheelStay = store.getBoolean("wheelStay", d.wheelStay),
+            wheelIconsOnly = store.getBoolean("wheelIconsOnly", d.wheelIconsOnly),
+            wheelSize = store.getInt("wheelSize", d.wheelSize),
+            wheelDim = store.getInt("wheelDim", d.wheelDim),
         )
     }
 
@@ -306,6 +351,19 @@ class Settings(context: Context) {
             .putBoolean("keepDialogue", next.keepDialogue)
             .putBoolean("keepDialogueAsked", next.keepDialogueAsked)
             .putString("language", next.language)
+            .putBoolean("furigana", next.furigana)
+            .putBoolean("knownWords", next.knownWords)
+            .putBoolean("wheelPerGame", next.wheelPerGame)
+            .putInt("wheelHoldMs", next.wheelHoldMs)
+            .putBoolean("wheelOpenHeld", next.wheelOpenHeld)
+            .putString("wheelDpad", next.wheelDpad)
+            .putInt("wheelReach", next.wheelReach)
+            .putBoolean("wheelTick", next.wheelTick)
+            .putBoolean("wheelStartLast", next.wheelStartLast)
+            .putBoolean("wheelStay", next.wheelStay)
+            .putBoolean("wheelIconsOnly", next.wheelIconsOnly)
+            .putInt("wheelSize", next.wheelSize)
+            .putInt("wheelDim", next.wheelDim)
             .apply()
         secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
         _prefs.value = next

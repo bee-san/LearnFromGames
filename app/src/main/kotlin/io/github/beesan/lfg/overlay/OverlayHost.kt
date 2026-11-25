@@ -30,6 +30,8 @@ import io.github.beesan.lfg.core.TapGate
 import io.github.beesan.lfg.core.WheelAction
 import io.github.beesan.lfg.core.WheelAim
 import io.github.beesan.lfg.core.WheelLevels
+import io.github.beesan.lfg.core.WheelSet
+import io.github.beesan.lfg.core.LineMarks
 import io.github.beesan.lfg.core.WheelSlice
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.Note
@@ -107,6 +109,16 @@ class OverlayHost(
      * to keep the picture.
      */
     private val onSaveNote: (LookupLine?, Entry?, String, Boolean) -> Unit,
+    /** The wheel of the game in front, as it was made in Settings › Wheel. */
+    private val wheels: () -> WheelSet,
+    /** A tile picked on the wheel that the service does, with the line the wheel acts on. */
+    private val onTile: (WheelSlice, LookupLine?) -> Unit,
+    /** Why a tile the service does cannot act now, or null when it can. */
+    private val tileWhyNot: (WheelSlice, LookupLine?) -> String?,
+    /** What a tile that is a switch says of itself in the wheel's middle: whether it is on. Null for other tiles. */
+    private val tileNote: (WheelSlice) -> String?,
+    /** A tile that asks the model about a line ([WheelAction.asksOfLine]); the answer comes back through [onLineAnswer]. */
+    private val onAskLine: (lineId: String, slice: WheelSlice) -> Unit,
 ) {
     /** What the lines' screen can ask the model about a line. */
     enum class Ask { TRANSLATE, EXPLAIN }
@@ -192,14 +204,15 @@ class OverlayHost(
      * True while something of ours is drawn on the game's screen, so a picture of that screen would include it.
      * A notice is not counted: it is cut out of the picture instead ([noticeOn]), so it never holds reading up.
      */
-    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || covering
+    val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || textLayer?.shown == true || covering
 
     /** True while the game's screen is covered by a box being drawn, the wheel or its card: a picture of the whole screen is no use. */
     val covering: Boolean get() = picker != null || wheelUp
 
     /** Where the mark and the entry are on the game's screen, in display pixels: what a picture of it shows of ours. */
     fun drawnOn(displayId: Int): List<Box> = if (displayId != gameDisplay) emptyList() else
-        (marks + listOfNotNull(shade, popup)).filter { it.shown }.map { Box(it.x, it.y, it.x + it.width, it.y + it.height) }
+        (marks + listOfNotNull(shade, popup)).filter { it.shown }.map { Box(it.x, it.y, it.x + it.width, it.y + it.height) } +
+            if (textLayer?.shown == true) textDrawn else emptyList()
 
     /**
      * The mark and the entry are off the game's screen while this is set, and the word stays chosen:
@@ -209,6 +222,18 @@ class OverlayHost(
         set(value) {
             if (field == value) return
             field = value
+            render()
+        }
+
+    /**
+     * Hide LFG, from the wheel: nothing of ours is over the game, not the words to tap, the entry or
+     * the marks on its text, until the shortcut is pressed. The lines on the other screen stay.
+     */
+    var hidden = false
+        set(value) {
+            if (field == value) return
+            field = value
+            if (value && state.selected) controller.clear()
             render()
         }
 
@@ -405,7 +430,8 @@ class OverlayHost(
     }
 
     private fun moveTo(displayId: Int) {
-        (strips + marks + listOfNotNull(popup, shade, focus)).forEach { it.remove() }
+        (strips + marks + listOfNotNull(popup, shade, focus, textLayer)).forEach { it.remove() }
+        textLayer = null
         strips.clear()
         marks.clear()
         popup = null
@@ -491,7 +517,7 @@ class OverlayHost(
         // Tap strips: one per row of text with a place on screen. Not under the wheel or its card, which a
         // strip made after them would lie over.
         var used = 0
-        if (stripsOn && !wheelUp && TapGate.open(prefs().tapLookup, hasController(), state.controllerMode, asking)) {
+        if (stripsOn && !wheelUp && !hidden && TapGate.open(prefs().tapLookup, hasController(), state.controllerMode, asking)) {
             lines.forEachIndexed { index, line ->
                 for (box in line.geometry?.rows ?: emptyList()) {
                     if (box.width <= 0 || box.height <= 0) continue
@@ -514,7 +540,7 @@ class OverlayHost(
         }
 
         // The mark around the looked-up word: one piece for each row it is on.
-        val spans = if (gameInFront && state.selected && !aside) state.selectedLine?.geometry?.spanBoxes(state.spanStart, state.markEnd) ?: emptyList() else emptyList()
+        val spans = if (gameInFront && state.selected && !aside && !hidden) state.selectedLine?.geometry?.spanBoxes(state.spanStart, state.markEnd) ?: emptyList() else emptyList()
         spans.forEachIndexed { i, piece ->
             val win = marks.getOrNull(i) ?: Win(
                 View(host.first).apply { background = rounded(Ink.WASH, Ink.ACCENT, host.first.dp(3f).toFloat(), host.first.dp(1.5f)) },
@@ -529,7 +555,8 @@ class OverlayHost(
         // unless the word was picked on the lines' screen or Settings puts every entry there.
         val other = otherDisplay()
         if (other != Display.INVALID_DISPLAY) renderPanel(other) else panel?.hide()
-        if (!aside && !wheelUp && entryOverGame(other) && !(pickedOnPanel && panel?.shown == true)) renderPopup(host, span) else hidePopup()
+        if (!aside && !wheelUp && !hidden && entryOverGame(other) && !(pickedOnPanel && panel?.shown == true)) renderPopup(host, span) else hidePopup()
+        renderTextMarks(host, lines)
 
         // Lookup mode: a window that can take focus, and so the controller. It is also up for a
         // moment whenever the controller has to be brought back to the game's screen. The wheel, its
@@ -553,12 +580,75 @@ class OverlayHost(
         (cover.view as FocusView).wheel.let { wheel ->
             wheel.visibility = if (wheelOpen) View.VISIBLE else View.GONE
             if (wheelOpen) {
+                val p = prefs()
+                wheel.tick = p.wheelTick
+                wheel.iconsOnly = p.wheelIconsOnly
+                wheel.scale = p.wheelSize / 100f
+                wheel.dimPercent = p.wheelDim
                 wheel.holes = wheelLine?.geometry?.rows.orEmpty()
+                wheel.caption = wheelLine?.takeIf { it.geometry == null }?.text?.replace('\n', ' ').orEmpty()
                 wheel.boxes = gameBoxes()
                 wheel.whyNot = ::wheelWhyNot
+                wheel.note = ::wheelNote
             }
         }
         renderCard(other)
+    }
+
+    // ── furigana and known words ─────────────────────────────────────────────
+
+    /** The readings and Anki marks of the lines on screen, from the service; empty while both are off. */
+    private var textMarks: List<LineMarks> = emptyList()
+    private var textLayer: Win? = null
+
+    /** Where the layer draws, in display pixels: what a picture of the screen shows of it. */
+    private var textDrawn: List<Box> = emptyList()
+
+    /**
+     * The readings and strokes are off the game's screen while this is set: the text under them has
+     * changed, and they would be over the new text and in the picture it is read from. Unlike [aside],
+     * which a word looked up is put back from after a moment, they stay off until the new text is read.
+     */
+    var textMarksAside = false
+        set(value) {
+            if (field == value) return
+            field = value
+            render()
+        }
+
+    /** Whether the readings and strokes are all of ours that a picture of the game's screen would show. */
+    val onlyTextMarks: Boolean get() = textLayer?.shown == true && marks.none { it.shown } && popup?.shown != true
+
+    /** The marks for the lines now on screen, by each line's text: readings over kanji, and a stroke under a word for its Anki card. */
+    fun onTextMarks(marks: List<LineMarks>) {
+        if (marks == textMarks) return
+        textMarks = marks
+        render()
+    }
+
+    /**
+     * Furigana and the known words' strokes, in one window no touch lands on.
+     * Gone while a clean picture is wanted ([aside]), under the wheel and
+     * while LFG is hidden.
+     */
+    private fun renderTextMarks(host: Pair<Context, WindowManager>, lines: List<LookupLine>) {
+        val drawn = if (textMarks.isEmpty() || aside || textMarksAside || wheelUp || hidden || picker != null) emptyList() else {
+            val byText = textMarks.associateBy { it.text }
+            lines.flatMap { line -> line.geometry?.let { g -> byText[line.text]?.let { TextMarksView.place(host.first, g, it) } }.orEmpty() }
+        }
+        if (drawn.isEmpty()) {
+            textLayer?.hide()
+            return
+        }
+        val screen = bounds(gameDisplay) ?: return
+        val win = textLayer ?: Win(TextMarksView(host.first), host.second, PASSIVE_FLAGS).also { textLayer = it }
+        (win.view as TextMarksView).show(drawn)
+        // A reading's outline runs a little past its box: the picture is told of that too, or it would look like text changing.
+        textDrawn = drawn.map { mark ->
+            val spill = if (mark.text == null) 2 else minOf(mark.box.width, mark.box.height) / 3 + 3
+            Box(mark.box.left - spill, mark.box.top - spill, mark.box.right + spill, mark.box.bottom + spill)
+        }
+        win.place(0, 0, screen.width, screen.height)
     }
 
     /** True for the moment [bringController] has the focus window up to be tapped. */
@@ -1639,7 +1729,10 @@ class OverlayHost(
             ?: state.lines.lastOrNull { it.geometry != null }
         wheelOpen = true
         wheelHeld = true
-        showLevel(WheelLevels.TOP)
+        hidden = false
+        wheelSet = wheels()
+        wheelPath.clear()
+        showLevel(WheelSet.TOP)
         aimAfresh = false
         // Lookup under the wheel stops where it is: nothing may keep stepping while the wheel has the controller.
         input.release()
@@ -1656,20 +1749,47 @@ class OverlayHost(
         if (slice != null) pickWheel(slice) else render()
     }
 
-    /** The level of the wheel showing: the top one, AI's or the boxes'. */
-    private var wheelLevel: List<WheelSlice> = WheelLevels.TOP
+    /** The player's wheels, as they were when the wheel opened. */
+    private var wheelSet = WheelSet.DEFAULT
+
+    /** The wheels gone into, the top one first: each one's id, or [BOXES_LEVEL] for the game's boxes. */
+    private val wheelPath = ArrayList<String>()
+
+    /** The wheel showing: the last of [wheelPath]. */
+    private var wheelLevel: List<WheelSlice> = emptyList()
+
+    /** The slice picked last in each wheel, for Settings › Wheel's "Start on the last pick". */
+    private val lastPick = HashMap<String, Int>()
+
+    /** The tile whose answer the card shows, for the tiles that ask the model about a line. */
+    private var cardSlice: WheelSlice? = null
+
+    /** What each of those tiles was told about each line, by the line's id and the tile's key. */
+    private val lineAnswers = HashMap<Pair<String, String>, Answer>()
+
+    /** In the Recent lines card, the line the controller is on, counted from the newest. */
+    private var recentCursor = 0
 
     /** A level was just opened: the stick must come back to the middle before it points, or it would point on at once. */
     private var aimAfresh = false
 
     private fun hovered(): WheelSlice? = focusView()?.wheel?.hover?.let { wheelLevel.getOrNull(it) }
 
-    /** The wheel shows [level], with nothing pointed at. */
-    private fun showLevel(level: List<WheelSlice>) {
-        wheelLevel = level
+    /** The wheel shows the wheel [id], gone into from the one showing, or with [back] come back to: nothing is pointed at. */
+    private fun showLevel(id: String, back: Boolean = false) {
+        if (!back) wheelPath += id
+        wheelLevel = if (id == BOXES_LEVEL) WheelLevels.boxes(gameBoxes().size) else wheelSet.level(id)
         padHeld.clear()
         aimAfresh = true
-        focusView()?.wheel?.slices = level
+        val wheel = focusView()?.wheel ?: return
+        wheel.slices = wheelLevel
+        wheel.heading = when {
+            wheelPath.size <= 1 -> ""
+            id == BOXES_LEVEL -> "Boxes"
+            else -> wheelSet[id]?.name.orEmpty()
+        }
+        // It opens pointing where it was picked last, when Settings says so.
+        if (prefs().wheelStartLast) lastPick[id]?.takeIf { it in wheelLevel.indices }?.let { wheel.hover = it }
     }
 
     /** The wheel and its card go, with nothing more done. */
@@ -1696,19 +1816,39 @@ class OverlayHost(
         card?.hide()
     }
 
-    /** The level [slice] opens in the wheel, or null for a slice that acts. */
-    private fun levelOf(slice: WheelSlice): List<WheelSlice>? = when (slice.action) {
-        WheelAction.AI -> WheelLevels.AI
-        WheelAction.BOXES -> WheelLevels.boxes(gameBoxes().size)
+    /** The wheel [slice] opens, by its id, or null for a slice that acts. */
+    private fun levelOf(slice: WheelSlice): String? = when (slice.action) {
+        WheelAction.WHEEL -> slice.wheel.takeIf { wheelSet[it] != null }
+        WheelAction.BOXES -> BOXES_LEVEL
         else -> null
     }
+
+    /** What a switch says in the wheel's middle: whether it is on. */
+    private fun wheelNote(slice: WheelSlice): String? = when (slice.action) {
+        WheelAction.OTHER_SCREEN -> if (prefs().secondScreenPanel) "On. Pick to turn off" else "Off. Pick to turn on"
+        else -> tileNote(slice)
+    }
+
+    private fun lineKey(slice: WheelSlice) = if (slice.action == WheelAction.PROMPT) "prompt:" + slice.prompt else slice.action.id
 
     /** Why [slice] cannot act now, said in the wheel's middle; null when it can. */
     private fun wheelWhyNot(slice: WheelSlice): String? {
         val p = prefs()
         val setUp = "Set up in Settings › Translation"
+        if (slice.action.asksOfLine) {
+            return when {
+                !p.aiReady -> setUp
+                slice.action == WheelAction.PROMPT && slice.prompt.isBlank() -> "Write its question in Settings › Wheel"
+                wheelLine == null -> "Nothing read on this screen yet"
+                wheelLine?.lineId == null -> "This text is not a kept line"
+                else -> null
+            }
+        }
         return when (slice.action) {
-            WheelAction.AI -> setUp.takeIf { !p.aiReady }
+            // A Box tile is for a box the game has; only box 1 is drawn from here when it is not there yet.
+            WheelAction.BOX -> "This game has no box ${slice.box}".takeIf { slice.box > maxOf(gameBoxes().size, 1) }
+            WheelAction.BACK -> null
+            WheelAction.RECENT -> "Nothing read in this game yet".takeIf { recentLines().isEmpty() }
             WheelAction.TRANSLATE, WheelAction.EXPLAIN -> when {
                 !p.aiReady -> setUp
                 wheelLine == null -> "Nothing read on this screen yet"
@@ -1725,22 +1865,41 @@ class OverlayHost(
                 !p.ask -> "Turn on Ask in Settings › Translation"
                 else -> null
             }
-            else -> null
+            WheelAction.WHEEL, WheelAction.BOXES, WheelAction.READ_ONCE, WheelAction.NEW_BOX, WheelAction.NOTE, WheelAction.KEEP,
+            WheelAction.LINES, WheelAction.OTHER_SCREEN, WheelAction.HIDE,
+            -> null
+            else -> tileWhyNot(slice, wheelLine)
         }
     }
 
-    /** B, or a tap in the middle: from AI's or the boxes' level back to the top one, else the wheel goes. */
+    /** B, the Back tile, or a tap in the middle: up to the wheel this one was opened from, or from the top one the wheel goes. */
     private fun backWheel() {
-        if (wheelLevel === WheelLevels.TOP) putAwayWheel() else showLevel(WheelLevels.TOP)
+        if (wheelPath.size <= 1) return putAwayWheel()
+        wheelPath.removeAt(wheelPath.size - 1)
+        showLevel(wheelPath.last(), back = true)
+        render()
+    }
+
+    /** The game's newest kept lines, newest first: what Recent lines offers. */
+    private fun recentLines(): List<GameLine> {
+        val game = gameLineNow() ?: return emptyList()
+        return history.filter { it.gameId == game.gameId }.take(RECENT_SHOWN)
     }
 
     private fun pickWheel(slice: WheelSlice) {
         wheelHeld = false
         // A slice that cannot act does nothing: the wheel says why, and stays.
         if (wheelWhyNot(slice) != null) return render()
-        // A level opens in the wheel, which stays up.
-        levelOf(slice)?.let { return showLevel(it) }
-        wheelOpen = false
+        wheelPath.lastOrNull()?.let { at -> wheelLevel.indexOf(slice).takeIf { it >= 0 }?.let { lastPick[at] = it } }
+        // A wheel opens in the wheel, which stays up.
+        levelOf(slice)?.let {
+            showLevel(it)
+            return render()
+        }
+        if (slice.action == WheelAction.BACK) return backWheel()
+        // Settings › Wheel can keep it open after a tile that opens nothing over the game: Keep or Copy several times.
+        val stay = prefs().wheelStay && slice.action.quick
+        wheelOpen = stay
         val line = wheelLine
         when (slice.action) {
             // As in Rubi: two corners, and the box is read at once, with nothing kept.
@@ -1763,8 +1922,48 @@ class OverlayHost(
                 val kept = line?.takeIf { it.lineId != null }
                 beginNote(Noting(kept, null), if (kept != null) "Diary entry on this line" else "Diary entry on " + (line?.gameName?.ifBlank { null } ?: "this game"))
             }
-            else -> openCard(slice.action)
+            WheelAction.TRANSLATE, WheelAction.EXPLAIN, WheelAction.RECAP, WheelAction.ASK, WheelAction.LINES -> openCard(slice.action)
+            WheelAction.RECENT -> {
+                recentCursor = 0
+                openCard(slice.action)
+            }
+            WheelAction.HIDE -> {
+                hidden = true
+                render()
+                notice(gameDisplay, "LFG is hidden until the shortcut is pressed")
+            }
+            else -> if (slice.action.asksOfLine) {
+                cardSlice = slice
+                openCard(slice.action)
+            } else {
+                // A region is drawn with the controller too, which stays LFG's until it is drawn.
+                if (slice.action == WheelAction.READ_REGION) pickerPad = true
+                render()
+                onTile(slice, line)
+            }
         }
+    }
+
+    /** Asks the model what [slice] asks of the line the wheel acts on, anew with [again]. */
+    private fun askLine(slice: WheelSlice, again: Boolean = false) {
+        val id = wheelLine?.lineId ?: return
+        val key = id to lineKey(slice)
+        val had = lineAnswers[key]
+        if (had?.busy == true || (!again && had?.text != null)) return
+        lineAnswers[key] = Answer(had?.text, busy = true)
+        onAskLine(id, slice)
+    }
+
+    /** What the model said for the tile with [key] about a line, from the service. */
+    fun onLineAnswer(lineId: String, slice: WheelSlice, text: String?, error: String?) {
+        val key = lineId to lineKey(slice)
+        lineAnswers[key] = Answer(text ?: lineAnswers[key]?.text, error = error)
+        if (cardFor?.asksOfLine == true) render()
+    }
+
+    /** A notice over the game, from the service: what a tile did. */
+    fun say(text: String) {
+        if (gameDisplay != Display.INVALID_DISPLAY) notice(gameDisplay, text, wheelLine?.geometry?.rows?.reduceOrNull { a, b -> a.union(b) })
     }
 
     /** The card for [action], asking for its answer if there is none yet. */
@@ -1781,7 +1980,7 @@ class OverlayHost(
             WheelAction.EXPLAIN -> if (ai && id != null && conversation(id) == null) ask(id, Ask.EXPLAIN)
             // A fresh question each time, unless one is still being answered.
             WheelAction.ASK -> if (gameAnswer?.busy != true) gameAnswer = null
-            else -> Unit
+            else -> if (action.asksOfLine && ai) cardSlice?.let(::askLine)
         }
         render()
     }
@@ -2066,8 +2265,61 @@ class OverlayHost(
                     hints = keys("$confirm Open LFG    $close Close    ▲ ▼ Scroll"),
                 )
             }
-            else -> CardContent(title = what.label)
+            WheelAction.RECENT -> {
+                val lines = recentLines()
+                recentCursor = recentCursor.coerceIn(0, (lines.size - 1).coerceAtLeast(0))
+                CardContent(
+                    title = "Recent lines",
+                    asks = lines.mapIndexed { i, recent ->
+                        CardChoice(recent.lineText.replace('\n', ' '), chosen = false, marked = pad && i == recentCursor, enabled = true) { useRecent(recent) }
+                    }.also {
+                        cardAsks = it
+                        cardCanType = false
+                    },
+                    body = if (lines.isEmpty()) "Nothing has been read in this game yet." else "The wheel opens again on the line you choose.",
+                    bodyColor = Ink.DIM,
+                    hints = keys("$confirm Choose    $close Close    ▲ ▼ Line"),
+                )
+            }
+            else -> {
+                val slice = cardSlice
+                val answer = if (slice != null && id != null) lineAnswers[id to lineKey(slice)] else null
+                val (text, color) = when {
+                    line == null -> "Nothing has been read on this screen yet." to Ink.DIM
+                    id == null -> "This text is not kept as one of the game's lines." to Ink.DIM
+                    !p.aiReady -> "${what.label} uses the model in Settings › Translation, with your OpenRouter key." to Ink.DIM
+                    answer?.error != null -> answer.error to Ink.ACCENT
+                    answer?.busy == true -> "Asking…" to Ink.DIM
+                    answer?.text != null -> answer.text to Ink.TEXT
+                    else -> "" to Ink.DIM
+                }
+                val usable = slice != null && id != null && p.aiReady
+                CardContent(
+                    title = if (what == WheelAction.PROMPT) slice?.prompt.orEmpty().ifBlank { what.label } else what.label,
+                    line = line?.text,
+                    body = text,
+                    bodyColor = color,
+                    pills = if (usable) listOf(CardPill(if (answer?.busy == true) "Asking…" else "Again", enabled = answer?.busy != true) { askLine(slice!!, again = true); render() }) else emptyList(),
+                    hints = keys(if (usable) "$confirm Again    $close Close    ▲ ▼ Scroll" else "$close Close"),
+                    key = "$what:$id:${slice?.prompt}",
+                )
+            }
         }
+    }
+
+    /** A line chosen in Recent lines: the wheel opens again, to act on it. */
+    private fun useRecent(line: GameLine) {
+        closeCard()
+        // On screen still: the line as it is there, so it is the one left undimmed.
+        wheelLine = state.lines.firstOrNull { it.lineId == line.id } ?: lookupLine(line)
+        wheelOpen = true
+        wheelHeld = false
+        wheelSet = wheels()
+        wheelPath.clear()
+        showLevel(WheelSet.TOP)
+        aimAfresh = false
+        render()
+        bringController()
     }
 
     /** A key while the wheel or its card holds the controller; null when neither does. */
@@ -2091,7 +2343,7 @@ class OverlayHost(
         // With the shortcut still held, AI's or the boxes' level opens as soon as it is pointed at,
         // so letting go picks in it: hold, point at AI, point at Translate, let go.
         val pointed = wheelLevel.getOrNull(slice) ?: return
-        if (wheelHeld && wheelWhyNot(pointed) == null) levelOf(pointed)?.let(::showLevel)
+        if (wheelHeld && prefs().wheelOpenHeld && wheelWhyNot(pointed) == null) levelOf(pointed)?.let { showLevel(it) }
     }
 
     private fun wheelOpenKey(event: KeyEvent): Boolean {
@@ -2102,8 +2354,16 @@ class OverlayHost(
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 if (down) padHeld += event.keyCode else padHeld -= event.keyCode
-                // Pointed when pressed; letting one of two go leaves the slant they pointed at. A press is meant, so it points at once.
-                if (down) {
+                // Step round: left and right go round a wheel of any size, a slice a press.
+                if (down && prefs().wheelDpad == Prefs.WHEEL_STEP) {
+                    aimAfresh = false
+                    val by = when (event.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP -> -1
+                        else -> 1
+                    }
+                    aim(WheelAim.step(focusView()?.wheel?.hover, by, wheelLevel.size))
+                } else if (down) {
+                    // Pointed when pressed; letting one of two go leaves the slant they pointed at. A press is meant, so it points at once.
                     aimAfresh = false
                     aim(
                         WheelAim.pad(
@@ -2130,6 +2390,9 @@ class OverlayHost(
         return true
     }
 
+    /** The D-pad's last way on the HAT axes while it steps round the wheel. */
+    private var wheelHat = 0
+
     /** The sticks and the D-pad on the HAT axes point at a slice; let go, the slice stays pointed at. */
     private fun pointWheel(event: MotionEvent): Boolean {
         if (event.source and InputDevice.SOURCE_CLASS_JOYSTICK == 0 || event.action != MotionEvent.ACTION_MOVE) return false
@@ -2145,9 +2408,20 @@ class OverlayHost(
             if (hx == 0f && hy == 0f && lx * lx + ly * ly < still && rx * rx + ry * ry < still) aimAfresh = false
             return true
         }
-        aim(WheelAim.slice(hx, hy, count))
-        // Whichever stick is pushed farther.
-        aim(if (lx * lx + ly * ly >= rx * rx + ry * ry) WheelAim.slice(lx, ly, count) else WheelAim.slice(rx, ry, count))
+        if (count == 0) return true
+        if (prefs().wheelDpad == Prefs.WHEEL_STEP) {
+            // Once a push, as a key press is.
+            val way = if (hx <= -0.5f || hy <= -0.5f) -1 else if (hx >= 0.5f || hy >= 0.5f) 1 else 0
+            if (way != wheelHat) {
+                wheelHat = way
+                if (way != 0) aim(WheelAim.step(focusView()?.wheel?.hover, way, count))
+            }
+        } else {
+            aim(WheelAim.slice(hx, hy, count, dead = 0.5f))
+        }
+        // Whichever stick is pushed farther, once it is pushed as far as Settings › Wheel asks.
+        val reach = prefs().wheelReach / 100f
+        aim(if (lx * lx + ly * ly >= rx * rx + ry * ry) WheelAim.slice(lx, ly, count, reach) else WheelAim.slice(rx, ry, count, reach))
         return true
     }
 
@@ -2193,11 +2467,12 @@ class OverlayHost(
     }
 
     /** Whether the Explain card is offering questions to ask, which the controller chooses among. */
-    private fun explainAsks() = cardFor == WheelAction.EXPLAIN && cardAsks.isNotEmpty()
+    private fun explainAsks() = (cardFor == WheelAction.EXPLAIN || cardFor == WheelAction.RECENT) && cardAsks.isNotEmpty()
 
     /** Moves the controller among the questions to ask next; false when the card has none, and it scrolls. */
     private fun moveAskCursor(by: Int): Boolean {
         if (!explainAsks()) return false
+        if (cardFor == WheelAction.RECENT) recentCursor = (recentCursor + by).coerceIn(0, cardAsks.size - 1)
         askCursor = (askCursor + by).coerceIn(0, cardAsks.size - 1)
         render()
         return true
@@ -2258,9 +2533,20 @@ class OverlayHost(
                 putAwayWheel()
                 openApp()
             }
-            else -> Unit
+            WheelAction.RECENT -> cardAsks.getOrNull(recentCursor)?.onPress?.invoke()
+            else -> if (cardFor?.asksOfLine == true && prefs().aiReady) cardSlice?.let {
+                askLine(it, again = true)
+                render()
+            }
         }
     }
+
+    /** One of the app's pages, on the screen the lines are on: Stats, Names, Search, Settings or the diary, from the wheel. */
+    fun openPage(page: String, gameId: String?) = openApp(
+        android.content.Intent(io.github.beesan.lfg.ui.MainActivity.ACTION_OPEN)
+            .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_PAGE, page)
+            .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_GAME, gameId),
+    )
 
     private companion object {
         const val TAG = "LfgOverlay"
@@ -2279,6 +2565,12 @@ class OverlayHost(
 
         /** How many of the game's lines the wheel's Lines card lists. */
         const val LINES_SHOWN = 15
+
+        /** How many of the game's lines Recent lines offers. */
+        const val RECENT_SHOWN = 8
+
+        /** The boxes' wheel among the wheels gone into: it fills itself, and is none of the player's. */
+        const val BOXES_LEVEL = "\u0000boxes"
 
         /** How long after LFG is pressed the lines' screen stays away, for the app's page to come to the front. */
         const val APP_OPENING_MS = 2000L

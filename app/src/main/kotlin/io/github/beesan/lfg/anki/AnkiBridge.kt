@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.beesan.lfg.anki
 
+import io.github.beesan.lfg.core.Knowing
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -206,6 +207,34 @@ class AnkiBridge(private val context: Context) {
         return api.updateNoteFields(noteId, fields)
     }
 
+    private val knowings = HashMap<String, Pair<Long, Knowing>>()
+
+    /**
+     * How well Anki knows each of [expressions], by the notes of the note type
+     * cards go to: mature once a card of it has an interval of three weeks,
+     * learning while it has a card that has not, new with none. Remembered for
+     * a few minutes, as a line is asked about again each time it is read.
+     */
+    fun knowing(target: AnkiTarget, expressions: Collection<String>): Map<String, Knowing> {
+        val now = android.os.SystemClock.uptimeMillis()
+        return expressions.associateWith { expression ->
+            synchronized(knowings) { knowings[expression]?.takeIf { now - it.first < KNOWING_MS }?.second } ?: run {
+                val note = api.findDuplicateNotes(target.modelId, expression)?.firstOrNull()?.id
+                val found = when {
+                    note == null -> Knowing.NEW
+                    hasNotes("nid:$note prop:ivl>=$MATURE_DAYS") -> Knowing.MATURE
+                    else -> Knowing.LEARNING
+                }
+                synchronized(knowings) { knowings[expression] = now to found }
+                found
+            }
+        }
+    }
+
+    private fun hasNotes(search: String): Boolean =
+        context.contentResolver.query(FlashCardsContract.Note.CONTENT_URI, arrayOf(FlashCardsContract.Note._ID), search, null, null)
+            ?.use { it.moveToFirst() } == true
+
     /** Adds the note and returns its id, or null when AnkiDroid refuses it. */
     fun addNote(target: AnkiTarget, fields: Array<String>, tags: Set<String>): Long? =
         api.addNote(target.modelId, target.deckId, fields, tags)
@@ -213,6 +242,8 @@ class AnkiBridge(private val context: Context) {
     companion object {
         private const val KEY_TARGET = "target"
         private const val DECK_SAMPLE = 60
+        private const val KNOWING_MS = 5 * 60_000L
+        private const val MATURE_DAYS = 21
         const val PERMISSION = AddContentApi.READ_WRITE_PERMISSION
         const val ANKIDROID_PACKAGE = "com.ichi2.anki"
     }

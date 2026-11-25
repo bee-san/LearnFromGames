@@ -138,6 +138,31 @@ class CardMaker(
         return CardResult.Added(noteId)
     }
 
+    /**
+     * Puts [picture] on the card made last, in place of the one it has: for when
+     * the right moment comes after the line. Says what was done, in a few words.
+     */
+    suspend fun pictureToLast(picture: File?): String = withContext(Dispatchers.IO) {
+        if (picture == null || !picture.isFile) return@withContext "There is no picture of this screen yet."
+        if (anki.status() != AnkiStatus.READY) return@withContext "AnkiDroid is not connected."
+        val card = db.cards().newestAdded() ?: return@withContext "No card has been made yet."
+        val noteId = card.noteId ?: return@withContext "No card has been made yet."
+        try {
+            val target = anki.target ?: return@withContext "AnkiDroid is not connected."
+            val index = NoteTypes.pictureField(target.family, target.fields) ?: return@withContext "The note type has no picture field."
+            val name = "lfg_${card.createdAt}_${System.currentTimeMillis()}"
+            val trimmed = picture.takeIf { prefs().trimBars }?.let { withoutBars(it, name) }
+            val html = anki.addPicture(trimmed ?: picture, name)
+            trimmed?.delete()
+            if (html == null || !anki.setField(noteId, index, html)) return@withContext "AnkiDroid refused the picture."
+            db.cards().update(card.copy(pictureName = name))
+            "This screen is on the card of ${card.term.take(12)}"
+        } catch (e: Exception) {
+            android.util.Log.w("LfgCards", "picture to the last card failed", e)
+            "AnkiDroid did not answer. Open AnkiDroid once, then try again."
+        }
+    }
+
     /** The line's explanation and what was asked about it, as the card's field has it; empty when there is none. */
     private suspend fun explained(lineId: String): String =
         db.explanations().of(lineId)?.let { Explainer.html(Explainer.conversation(it), Sentence::escapeHtml) }.orEmpty()

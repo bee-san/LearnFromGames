@@ -23,7 +23,7 @@ import androidx.core.graphics.PathParser
 import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.WheelAction
 import io.github.beesan.lfg.core.WheelAim
-import io.github.beesan.lfg.core.WheelLevels
+import io.github.beesan.lfg.core.WheelSize
 import io.github.beesan.lfg.core.WheelSlice
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -50,7 +50,7 @@ internal class WheelView(
             field = value
             contentDescription = "LFG wheel" + (value?.let { ": " + actions[it].label } ?: "")
             // A tick for each slice pointed at, to aim without looking away from the game.
-            if (value != null) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            if (value != null && tick) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             invalidate()
         }
 
@@ -74,16 +74,56 @@ internal class WheelView(
             invalidate()
         }
 
-    /** The level of the wheel showing, clockwise from the top. A new one points at nothing. */
-    var slices: List<WheelSlice> = WheelLevels.TOP
+    /** The wheel showing, clockwise from the top. A new one points at nothing. */
+    var slices: List<WheelSlice> = emptyList()
         set(value) {
             field = value
             hover = null
-            icons = value.map { PathParser.createPathFromPathData(ICONS.getValue(it.action)) }
+            icons = value.map(::iconOf)
             layOut()
             invalidate()
         }
     private val actions: List<WheelSlice> get() = slices
+
+    /** The name of the wheel showing, said in the middle while nothing is pointed at; empty for the top one. */
+    var heading: String = ""
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    /** Settings › Wheel: a tick for each slice pointed at, icons without their names, the whole wheel scaled, and how dark the game is. */
+    var tick = true
+    var iconsOnly = false
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+    var scale = 1f
+        set(value) {
+            if (field == value) return
+            field = value
+            layOut()
+            invalidate()
+        }
+    var dimPercent = 60
+        set(value) {
+            field = value
+            dim.color = Color.argb(value.coerceIn(0, 100) * 255 / 100, 0, 0, 0)
+            invalidate()
+        }
+
+    /** The line the wheel acts on when it is not on screen to be left undimmed (Recent lines): written over the ring. Empty for none. */
+    var caption: String = ""
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    /** What a slice says in the middle in place of what it does: whether a switch is on. Null for what it does. */
+    var note: (WheelSlice) -> String? = { null }
 
     /** Why a slice cannot act now, or null when it can. A slice that cannot is dimmed, and says why in the middle. */
     var whyNot: (WheelSlice) -> String? = { null }
@@ -91,9 +131,12 @@ internal class WheelView(
             field = value
             invalidate()
         }
-    private var icons = slices.map { PathParser.createPathFromPathData(ICONS.getValue(it.action)) }
+    private val parsed = HashMap<String, Path>()
+    private var icons = slices.map(::iconOf)
 
-    private val dim = Paint().apply { color = Color.argb(158, 0, 0, 0) }
+    private fun iconOf(slice: WheelSlice): Path = parsed.getOrPut(slice.iconPath) { PathParser.createPathFromPathData(slice.iconPath) }
+
+    private val dim = Paint().apply { color = Color.argb(153, 0, 0, 0) }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -114,6 +157,7 @@ internal class WheelView(
         strokeJoin = Paint.Join.ROUND
     }
     private val label = text(13.5f, bold = true).apply { textAlign = Paint.Align.CENTER }
+    private val glyph = text(22f).apply { textAlign = Paint.Align.CENTER }
     private val title = text(18f, bold = true)
     private val about = text(12f)
     private val number = text(11f, bold = true).apply { textAlign = Paint.Align.CENTER }
@@ -155,8 +199,10 @@ internal class WheelView(
     private fun layOut() {
         if (width <= 0 || height <= 0) return
         val top = 0f
-        outer = minOf(context.dp(155f).toFloat(), height * 0.44f, width * 0.34f)
-        inner = outer * 0.44f
+        // It grows with its tiles, as the design's does, and never past the screen.
+        val count = actions.size
+        outer = minOf(context.dp(WheelSize.outer(count) * UNIT * scale).toFloat(), height * 0.46f, width * 0.36f)
+        inner = outer * (WheelSize.inner(count) / WheelSize.outer(count))
         cx = width / 2f
         cy = height / 2f
         val line = holes.reduceOrNull { a, b -> a.union(b) }
@@ -179,6 +225,7 @@ internal class WheelView(
         val innerGap = Math.toDegrees((gap / inner).toDouble()).toFloat()
         val rimRadius = outer + context.dp(7f)
         val rimGap = Math.toDegrees((context.dp(6f) / rimRadius).toDouble()).toFloat()
+        if (actions.isEmpty()) return
         val step = 360f / actions.size
         while (shapes.size < actions.size) shapes += Path()
         while (rims.size < actions.size) rims += Path()
@@ -187,15 +234,23 @@ internal class WheelView(
             shapes[i].apply {
                 rewind()
                 oval.set(cx - outer, cy - outer, cx + outer, cy + outer)
-                arcTo(oval, mid - step / 2 + outerGap, step - 2 * outerGap, true)
-                oval.set(cx - inner, cy - inner, cx + inner, cy + inner)
-                arcTo(oval, mid + step / 2 - innerGap, -(step - 2 * innerGap))
-                close()
+                if (actions.size == 1) {
+                    // One slice is the whole ring.
+                    fillType = Path.FillType.EVEN_ODD
+                    addCircle(cx, cy, outer, Path.Direction.CW)
+                    addCircle(cx, cy, inner, Path.Direction.CW)
+                } else {
+                    fillType = Path.FillType.WINDING
+                    arcTo(oval, mid - step / 2 + outerGap, step - 2 * outerGap, true)
+                    oval.set(cx - inner, cy - inner, cx + inner, cy + inner)
+                    arcTo(oval, mid + step / 2 - innerGap, -(step - 2 * innerGap))
+                    close()
+                }
             }
             rims[i].apply {
                 rewind()
                 oval.set(cx - rimRadius, cy - rimRadius, cx + rimRadius, cy + rimRadius)
-                arcTo(oval, mid - step / 2 + rimGap, step - 2 * rimGap, true)
+                arcTo(oval, mid - step / 2 + rimGap, minOf(step - 2 * rimGap, 359.9f), true)
             }
         }
     }
@@ -214,9 +269,18 @@ internal class WheelView(
         for (b in lit) canvas.drawRoundRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad, corner, corner, hole)
         boxes.forEachIndexed { i, b -> if (b != null) drawBoxTag(canvas, b, i + 1, on = pointed == i + 1, pad, corner) }
 
+        if (actions.isEmpty()) {
+            dashed.color = Ink.BORDER_STRONG
+            canvas.drawCircle(cx, cy, (outer + inner) / 2, dashed)
+            drawMiddle(canvas)
+            return
+        }
         val step = 360f / actions.size
         val middle = (outer + inner) / 2
         val iconSize = context.dp(22f).toFloat()
+        // How wide a slice is where its name is written: a long name in a narrow slice is cut short.
+        val room = if (actions.size == 1) outer else (2 * middle * sin(Math.toRadians(step / 2.0))).toFloat() - context.dp(10f)
+        val lift = if (iconsOnly) 0f else context.dp(9f).toFloat()
         actions.indices.forEach { i ->
             val on = i == hover
             val off = whyNot(actions[i]) != null
@@ -224,8 +288,10 @@ internal class WheelView(
             edge.color = if (on && !off) Ink.FILL else Ink.BORDER_STRONG
             canvas.drawPath(shapes[i], fill)
             canvas.drawPath(shapes[i], edge)
-            if (on) {
-                rim.color = Ink.ACCENT
+            // A rim on a slice that opens a wheel, and on the one pointed at.
+            val opens = actions[i].action == WheelAction.WHEEL || actions[i].action == WheelAction.BOXES
+            if (on || opens) {
+                rim.color = if (on) Ink.ACCENT else Ink.DIM
                 canvas.drawPath(rims[i], rim)
             }
             val ink = when {
@@ -237,22 +303,41 @@ internal class WheelView(
             val x = cx + middle * cos(angle).toFloat()
             val y = cy + middle * sin(angle).toFloat()
             // The icons are drawn on a 24-unit square, as the design's are.
-            val scale = iconSize / 24f
-            iconMatrix.setScale(scale, scale)
-            iconMatrix.postTranslate(x - iconSize / 2, y - iconSize / 2 - context.dp(9f))
-            icons[i].transform(iconMatrix, iconPath)
-            icon.color = ink
-            icon.strokeWidth = 1.9f * scale
-            canvas.drawPath(iconPath, icon)
-            // A box's icon is a frame with its number in it.
-            actions[i].takeIf { it.action == WheelAction.BOX }?.box?.let { slot ->
-                number.color = ink
-                canvas.drawText(slot.toString(), x, y - context.dp(9f) - (number.ascent() + number.descent()) / 2, number)
+            val slice = actions[i]
+            if (slice.glyph.isNotEmpty()) {
+                // The player's own emoji or character, in place of an icon.
+                glyph.color = ink
+                canvas.drawText(slice.glyph, x, y - lift - (glyph.ascent() + glyph.descent()) / 2, glyph)
+            } else {
+                val scale = iconSize / 24f
+                iconMatrix.setScale(scale, scale)
+                iconMatrix.postTranslate(x - iconSize / 2, y - iconSize / 2 - lift)
+                icons[i].transform(iconMatrix, iconPath)
+                icon.color = ink
+                icon.strokeWidth = 1.9f * scale
+                canvas.drawPath(iconPath, icon)
+                // A box's icon is a frame with its number in it.
+                if (slice.number.isNotEmpty()) {
+                    number.color = ink
+                    canvas.drawText(slice.number, x, y - lift - (number.ascent() + number.descent()) / 2, number)
+                }
             }
-            label.color = ink
-            canvas.drawText(actions[i].label, x, y + context.dp(9f) + label.textSize * 0.8f, label)
+            if (!iconsOnly) {
+                label.color = ink
+                val name = TextUtils.ellipsize(slice.label, label, room.coerceAtLeast(label.textSize * 2), TextUtils.TruncateAt.END).toString()
+                canvas.drawText(name, x, y + context.dp(9f) + label.textSize * 0.8f, label)
+            }
         }
         drawMiddle(canvas)
+        if (caption.isNotEmpty()) {
+            // Above the ring, or under it where there is no room above.
+            about.color = Ink.TEXT
+            about.textAlign = Paint.Align.CENTER
+            val said = TextUtils.ellipsize(caption, about, width - context.dp(48f).toFloat(), TextUtils.TruncateAt.END).toString()
+            val above = cy - outer - context.dp(22f)
+            canvas.drawText(said, cx, if (above > about.textSize) above else cy + outer + context.dp(22f) + about.textSize, about)
+            about.textAlign = Paint.Align.LEFT
+        }
     }
 
     /** A box's number at its top left corner, and a dashed outline round a box not pointed at. */
@@ -288,13 +373,15 @@ internal class WheelView(
         val textWidth = (radius * 1.55f).toInt().coerceAtLeast(1)
         title.color = if (chosen == null) Ink.DIM else Ink.TEXT
         about.color = Ink.DIM
-        val heading = chosen?.label ?: "Point"
+        val heading = chosen?.label ?: heading.ifBlank { "Point" }
         val name = StaticLayout.Builder.obtain(heading, 0, heading.length, title, textWidth)
             .setAlignment(Layout.Alignment.ALIGN_CENTER).setMaxLines(1).setEllipsize(TextUtils.TruncateAt.END).build()
         val line = when {
             why != null -> why
             undrawn -> "Not drawn yet"
-            chosen != null -> chosen.about
+            chosen != null -> note(chosen) ?: chosen.about
+            actions.isEmpty() -> "No tiles yet. Add some in Settings › Wheel."
+            this.heading.isNotBlank() -> "Point with a stick"
             else -> "with a stick"
         }
         val more = StaticLayout.Builder.obtain(line, 0, line.length, about, textWidth)
@@ -308,7 +395,7 @@ internal class WheelView(
         edge.color = Ink.BORDER_STRONG
         canvas.drawCircle(cx, y + dial, dial, edge)
         fill.color = Ink.ACCENT
-        val angle = hover?.let { Math.toRadians((-90.0 + it * 360.0 / actions.size)) }
+        val angle = hover?.takeIf { actions.isNotEmpty() }?.let { Math.toRadians((-90.0 + it * 360.0 / actions.size)) }
         val reach = dial * 0.55f
         canvas.drawCircle(
             cx + (angle?.let { reach * cos(it).toFloat() } ?: 0f), y + dial + (angle?.let { reach * sin(it).toFloat() } ?: 0f),
@@ -326,7 +413,7 @@ internal class WheelView(
     /** The slice under a finger at ([x], [y]), or null for the middle and outside the ring. */
     private fun sliceAt(x: Float, y: Float): Int? {
         val d = hypot(x - cx, y - cy)
-        if (d < inner * 0.85f || d > outer + context.dp(36f)) return null
+        if (actions.isEmpty() || d < inner * 0.85f || d > outer + context.dp(36f)) return null
         return WheelAim.slice(x - cx, y - cy, actions.size, dead = 0f)
     }
 
@@ -352,28 +439,7 @@ internal class WheelView(
         /** Where [OverlayHost]'s own tap lands, which the wheel leaves alone. */
         private const val CORNER_PX = 16
 
-        /** A box's corners, with room for its number in the middle. */
-        private const val BOX_ICON = "M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"
-
-        /** The slices' icons, as the design draws them: strokes on a 24-unit square. */
-        private val ICONS = mapOf(
-            WheelAction.TRANSLATE to "M4 5h8M8 3v2M5.5 5c.7 2.9 2.7 5 5.5 6M10.5 5c-.7 2.9-2.7 5-5.5 6M13 21l4-10 4 10M14.4 18h5.2",
-            WheelAction.ASK to "M20.5 12a8.5 8.5 0 0 1-12.3 7.6L3.5 20.5l1-4.4A8.5 8.5 0 1 1 20.5 12zM9.7 9.6a2.4 2.4 0 0 1 4.6.8c0 1.6-2.3 2-2.3 3.3M12 16.4h.01",
-            WheelAction.EXPLAIN to "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.1V16h5v-.1c0-.8.4-1.6 1.1-2.1A6 6 0 0 0 12 3z",
-            WheelAction.RECAP to "M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 4v5h5M12 7.5V12l3 2",
-            WheelAction.NOTE to "M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4",
-            WheelAction.BOX to BOX_ICON,
-            // Two boxes, one over the other.
-            WheelAction.BOXES to "M3.5 4.5h11v8h-11zM9.5 11.5h11v8h-11z",
-            // A box with a line across it: read once.
-            WheelAction.READ_ONCE to "$BOX_ICON M8 12h8",
-            // A box with a plus in it.
-            WheelAction.NEW_BOX to "$BOX_ICON M12 8.5v7M8.5 12h7",
-            // A sparkle.
-            WheelAction.AI to "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z",
-            // A bookmark: kept.
-            WheelAction.KEEP to "M6.5 3.5h11v17L12 16.5l-5.5 4z",
-            WheelAction.LINES to "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01",
-        )
+        /** How many dp one of the design's units is: its wheel of six tiles is this app's of 155 dp. */
+        private const val UNIT = 155f / 182f
     }
 }

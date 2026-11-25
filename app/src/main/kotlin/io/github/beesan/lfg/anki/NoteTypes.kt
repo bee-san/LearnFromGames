@@ -160,6 +160,12 @@ object NoteTypes {
         return fields.any { slotOf(lookupFamily, it) == Slot.WORD_AUDIO }
     }
 
+    /** Which field of the note type takes the picture, if it has one. */
+    fun pictureField(family: Family, fields: List<String>): Int? {
+        val lookupFamily = if (family == Family.OWN) Family.LAPIS else family
+        return fields.indexOfFirst { slotOf(lookupFamily, it) == Slot.PICTURE }.takeIf { it >= 0 }
+    }
+
     /** Which field of the note type takes the sentence's sound, if it has one. */
     fun audioField(family: Family, fields: List<String>): Int? {
         val lookupFamily = if (family == Family.OWN) Family.LAPIS else family
