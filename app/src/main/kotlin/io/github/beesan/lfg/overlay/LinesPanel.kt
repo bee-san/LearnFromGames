@@ -105,7 +105,7 @@ data class PanelUi(
     val lookup: LookupState = LookupState(),
     /** A box is being drawn: Crop is Cancel. */
     val picking: Boolean = false,
-    /** The foot of the screen: the controller's buttons in lookup mode, else a tip. */
+    /** The foot of the screen: the controller's buttons in lookup mode, else nothing. */
     val foot: String = "",
     /** The row the sheet speaks of; while there is one, new lines do not pull the list to its end. */
     val lit: String? = null,
@@ -227,8 +227,10 @@ fun LinesPanel(
             }
         }
 
-        HorizontalDivider(color = Lfg.Border)
-        Text(ui.foot, color = Lfg.Dim, fontSize = 12.5.sp, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 6.dp, end = 12.dp, bottom = 6.dp))
+        if (ui.foot.isNotEmpty()) {
+            HorizontalDivider(color = Lfg.Border)
+            Text(ui.foot, color = Lfg.Dim, fontSize = 12.5.sp, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 6.dp, end = 12.dp, bottom = 6.dp))
+        }
     }
 }
 

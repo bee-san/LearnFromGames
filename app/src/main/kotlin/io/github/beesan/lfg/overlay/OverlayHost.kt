@@ -1204,7 +1204,7 @@ class OverlayHost(
                 sheet = sheet,
                 lookup = state,
                 picking = picking,
-                foot = if (state.controllerMode) hintsText(view.context) else "Tap a word to look it up, or beside a line to translate or explain it.",
+                foot = if (state.controllerMode) hintsText(view.context) else "",
                 lit = lit,
                 endSignal = endSignal,
                 keep = keep,
