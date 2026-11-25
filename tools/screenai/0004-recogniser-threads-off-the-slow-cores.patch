@@ -1,0 +1,83 @@
+LearnFromGames: in fast mode the line recognizers' threads keep off the machine's slowest cores.
+
+Each pass starts a thread per batch. A thread that new has no history for the scheduler to go by, and on a phone's
+processor it is put on a small core, where its invoke takes three times as long and holds the pass up. The
+threads now ask for the cores whose top frequency is above the lowest (nothing is asked where all are alike, as
+on a desktop, and a refusal changes nothing). On an AYN Thor (Snapdragon 8 Gen 2, three small cores) a 1080p
+game screen's recognition went from 54 ms to 21 and the whole read from 84 ms to 54. The output is the same.
+
+diff --git a/cpp/src/recognizer.cc b/cpp/src/recognizer.cc
+index 070b2ef..30dd698 100644
+--- a/cpp/src/recognizer.cc
++++ b/cpp/src/recognizer.cc
+@@ -25,8 +25,41 @@
+ #include "tflite_model.h"
+ #include "x86_compat.h"
+ 
++#if defined(__linux__)
++#include <sched.h>
++#endif
++
+ namespace screenai {
+ namespace rec {
++
++#if defined(__linux__)
++// LearnFromGames (tight batches): the cores that are not the slowest of the machine, by their top frequency; none
++// where all cores are alike or the frequencies cannot be read. A thread started for one invoke has no history for
++// the scheduler to go by and is put on a small core of a phone's processor, where the invoke takes three times as
++// long: on a Snapdragon 8 Gen 2 a screen's recognition took 54 ms left to the scheduler and 21 ms kept off its
++// three small cores.
++static const cpu_set_t* FasterCores() {
++  static const cpu_set_t set = [] {
++    cpu_set_t s;
++    CPU_ZERO(&s);
++    long freq[CPU_SETSIZE], lowest = 0;
++    int n = 0;
++    for (; n < CPU_SETSIZE; n++) {
++      char path[96];
++      std::snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", n);
++      FILE* f = std::fopen(path, "r");
++      if (!f) break;
++      if (std::fscanf(f, "%ld", &freq[n]) != 1) freq[n] = 0;
++      std::fclose(f);
++      if (n == 0 || freq[n] < lowest) lowest = freq[n];
++    }
++    for (int i = 0; i < n; i++)
++      if (freq[i] > lowest) CPU_SET(i, &s);
++    return s;
++  }();
++  return CPU_COUNT(&set) > 0 ? &set : nullptr;
++}
++#endif
+ namespace {
+ 
+ constexpr const char* kModelRoot = "gocr/gocr_models/";
+@@ -422,7 +455,14 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+   std::vector<std::map<std::string, Output>> outputs(num_batches);
+   std::atomic<size_t> next_batch{0};
+   std::atomic<bool> ok{true};
+-  auto worker = [&](TfliteModel* model) {
++  auto worker = [&](TfliteModel* model, bool own_thread) {
++#if defined(__linux__)
++    // Refused where the process may not use those cores; the thread then runs where it is put, as before.
++    if (own_thread && tight_batches_)
++      if (const cpu_set_t* faster = FasterCores()) sched_setaffinity(0, sizeof *faster, faster);
++#else
++    (void)own_thread;
++#endif
+     for (size_t b; (b = next_batch.fetch_add(1)) < num_batches && ok;) {
+       if (!model->Resize(0, {static_cast<int>(batch_slots(b)), kLineHeight, kChunkInput, 1}) ||
+           !model->AllocateTensors())
+@@ -441,10 +481,10 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+   };
+   const size_t pool = std::min(models_.size(), num_batches);
+   if (pool <= 1) {
+-    worker(models_[0].get());
++    worker(models_[0].get(), false);
+   } else {
+     std::vector<std::thread> threads;
+-    for (size_t i = 0; i < pool; i++) threads.emplace_back(worker, models_[i].get());
++    for (size_t i = 0; i < pool; i++) threads.emplace_back(worker, models_[i].get(), true);
+     for (std::thread& t : threads) t.join();
+   }
+   if (!ok) return {};

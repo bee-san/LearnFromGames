@@ -32,6 +32,8 @@
 #   0002-eigen-subset-without-vectorization-off-arm64     screenai_ocr: its Eigen subset lacks the x86 headers
 #   0003-fast-mode-and-gray-input                         screenai_ocr: SetOCRFastMode, the same lines, text and
 #                                                         boxes for about half the work; gray pixels as they are
+#   0004-recogniser-threads-off-the-slow-cores            screenai_ocr: fast mode's recognizer threads ask for
+#                                                         the faster cores of a phone's processor
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
