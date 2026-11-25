@@ -7,6 +7,7 @@ import kotlin.math.atan2
 enum class WheelAction(val label: String, val about: String) {
     AI("AI", "Translate, explain, recap or ask"),
     NOTE("Entry", "A diary entry on this moment"),
+    KEEP("Keep", "This screen in today’s diary"),
     READ_ONCE("Read once", "Two corners, read at once"),
     BOXES("Boxes", "The game’s own boxes"),
     LINES("Lines", "What was read lately"),
@@ -32,7 +33,7 @@ data class WheelSlice(val action: WheelAction, val box: Int = 0) {
  * the boxes' own; B goes back to it.
  */
 object WheelLevels {
-    val TOP = listOf(WheelAction.AI, WheelAction.NOTE, WheelAction.READ_ONCE, WheelAction.BOXES, WheelAction.LINES).map { WheelSlice(it) }
+    val TOP = listOf(WheelAction.AI, WheelAction.NOTE, WheelAction.KEEP, WheelAction.READ_ONCE, WheelAction.BOXES, WheelAction.LINES).map { WheelSlice(it) }
     val AI = listOf(WheelAction.TRANSLATE, WheelAction.EXPLAIN, WheelAction.RECAP, WheelAction.ASK).map { WheelSlice(it) }
 
     /** A game's [count] boxes, box 1 always among them, drawn or not, and one more to draw. */

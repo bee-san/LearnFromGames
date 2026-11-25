@@ -371,6 +371,8 @@ internal class WheelView(
             WheelAction.NEW_BOX to "$BOX_ICON M12 8.5v7M8.5 12h7",
             // A sparkle.
             WheelAction.AI to "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z",
+            // A bookmark: kept.
+            WheelAction.KEEP to "M6.5 3.5h11v17L12 16.5l-5.5 4z",
             WheelAction.LINES to "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01",
         )
     }

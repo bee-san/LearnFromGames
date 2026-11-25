@@ -16,13 +16,21 @@ class WheelTest {
     private fun at(level: List<WheelSlice>, x: Float, y: Float) = WheelAim.slice(x, y, level.size)?.let { level[it].action }
 
     @Test
-    fun `the top level is AI, Entry, Read once, Boxes and Lines, clockwise from the top`() {
+    fun `the top level is AI, Entry, Keep, Read once, Boxes and Lines, clockwise from the top`() {
         val top = WheelLevels.TOP
         assertEquals(WheelAction.AI, at(top, 0f, -1f))
-        assertEquals(WheelAction.NOTE, at(top, 0.95f, -0.31f))
-        assertEquals(WheelAction.READ_ONCE, at(top, 0.59f, 0.81f))
-        assertEquals(WheelAction.BOXES, at(top, -0.59f, 0.81f))
-        assertEquals(WheelAction.LINES, at(top, -0.95f, -0.31f))
+        assertEquals(WheelAction.NOTE, at(top, 0.87f, -0.5f))
+        assertEquals(WheelAction.KEEP, at(top, 0.87f, 0.5f))
+        assertEquals(WheelAction.READ_ONCE, at(top, 0f, 1f))
+        assertEquals(WheelAction.BOXES, at(top, -0.87f, 0.5f))
+        assertEquals(WheelAction.LINES, at(top, -0.87f, -0.5f))
+    }
+
+    @Test
+    fun `every top slice is one the D-pad can point at`() {
+        val ways = listOf(-1f, 0f, 1f).flatMap { x -> listOf(-1f, 0f, 1f).map { y -> x to y } }.filter { it != 0f to 0f }
+        val reached = ways.mapNotNull { (x, y) -> WheelAim.slice(x, y, WheelLevels.TOP.size) }.toSet()
+        assertEquals(WheelLevels.TOP.indices.toSet(), reached)
     }
 
     @Test

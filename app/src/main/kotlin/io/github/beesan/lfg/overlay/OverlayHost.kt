@@ -1753,6 +1753,12 @@ class OverlayHost(
                 drawBox(slice.box)
             }
             WheelAction.NEW_BOX -> drawBox(gameBoxes().size + 1)
+            // An entry with no words: the screen, kept in today's diary.
+            WheelAction.KEEP -> {
+                render()
+                onSaveNote(line?.takeIf { it.lineId != null }, null, "", true)
+                notice(gameDisplay, "Kept in today’s diary")
+            }
             WheelAction.NOTE -> {
                 val kept = line?.takeIf { it.lineId != null }
                 beginNote(Noting(kept, null), if (kept != null) "Diary entry on this line" else "Diary entry on " + (line?.gameName?.ifBlank { null } ?: "this game"))
