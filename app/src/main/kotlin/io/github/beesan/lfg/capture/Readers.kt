@@ -2,6 +2,7 @@
 package io.github.beesan.lfg.capture
 
 import android.content.Context
+import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.TextLine
 import io.github.beesan.lfg.ocr.Frame
 import io.github.beesan.lfg.ocr.ModelStore
@@ -27,11 +28,23 @@ interface TextReader {
  */
 interface ChangeProbe {
     suspend fun signature(frame: Frame): String
+
+    /** The same, with where on the frame it found anything that may be text; null from a probe that cannot say. */
+    suspend fun look(frame: Frame): Look = Look(signature(frame), null)
 }
+
+/** What a probe made of a frame: its signature, and the boxes it found text in, for reading only there ([Bands]). */
+class Look(val signature: String, val found: List<Box>?)
 
 /** VOCR as the probe: the signature is the text it reads. */
 class VocrProbe(private val vocr: Vocr) : ChangeProbe {
-    override suspend fun signature(frame: Frame): String = withContext(Dispatchers.Default) { Vocr.signature(vocr.read(frame)) }
+    override suspend fun signature(frame: Frame): String = look(frame).signature
+
+    /** Every box the spotter gave counts as found, the faint ones too: a box too many only makes a band taller. */
+    override suspend fun look(frame: Frame): Look = withContext(Dispatchers.Default) {
+        val lines = vocr.read(frame)
+        Look(Vocr.signature(lines), lines.map { it.box })
+    }
 }
 
 /**

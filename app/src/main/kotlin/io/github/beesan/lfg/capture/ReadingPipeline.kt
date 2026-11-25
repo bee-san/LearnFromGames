@@ -20,6 +20,7 @@ import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LineStore
 import io.github.beesan.lfg.ocr.KanaRepair
 import io.github.beesan.lfg.ocr.TextClean
+import io.github.beesan.lfg.ocr.Bands
 import io.github.beesan.lfg.ocr.Frame
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -129,6 +130,16 @@ class ReadingPipeline(
 
     /** What the probe made of the last picture; null when the next one must be probed whatever it shows. */
     private var lastSignature: String? = null
+
+    /**
+     * Where the probe found text on the last picture probed and on the one before it, in the pixels of the
+     * part looked at: the reader is given only the rows around them ([Bands]). Null for the whole of it.
+     */
+    private var lastFound: List<Box>? = null
+    private var previousFound: List<Box>? = null
+
+    /** Reused between readings, as [buffer] is: the bands of a picture, stacked. */
+    private var bandBuffer: IntArray? = null
 
     /** Pictures are written behind the reading: the text is tappable before its picture is on disk. */
     private val pictures = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -256,6 +267,8 @@ class ReadingPipeline(
         detector.reset()
         interfaceText.reset()
         lastSignature = null
+        lastFound = null
+        previousFound = null
         _latest.value = null
         // The lines may have been changed meanwhile, in the app's own screens.
         kept.values.forEach { it.recent = null }
@@ -294,12 +307,16 @@ class ReadingPipeline(
             detector.reset()
             interfaceText.reset()
             lastSignature = null
+            lastFound = null
+            previousFound = null
             lastGame = game.id
             kept[game.id]?.recent = null
         } else if (area != lastArea) {
             // The box was drawn, moved or taken away: what the probe made of the old part says nothing of this one.
             detector.reset()
             lastSignature = null
+            lastFound = null
+            previousFound = null
         }
         lastArea = area
         if (eager) {
@@ -337,8 +354,11 @@ class ReadingPipeline(
         }
         if (fresh) {
             Perf.measure("ring") { FrameRing.offer(whole, nowMs) }
-            val signature = Perf.measure("probe") { probe().signature(frame) }
+            val look = Perf.measure("probe") { probe().look(frame) }
+            val signature = look.signature
             lastSignature = signature
+            previousFound = lastFound
+            lastFound = look.found
             if (signature.isEmpty()) {
                 // The text has gone (a scene change, a menu): nothing is on screen to tap.
                 detector.offer(signature, nowMs)
@@ -357,7 +377,10 @@ class ReadingPipeline(
         if (detector.restless) Perf.add("settle.restless", (nowMs - detector.changeStartedMs) * 1_000_000)
         else Perf.add("settle.still", (nowMs - detector.stillSinceMs) * 1_000_000)
         val appearedNow = detector.changeStartedMs.takeIf { it in 1..nowMs } ?: nowMs
-        keep(engine, frame, bitmap, game, displayId, nowMs, appearedNow, offsetX, offsetY, covered, cut, area, ours, detector.confirming, publish = true)
+        keep(
+            engine, frame, lastFound, bitmap, game, displayId, nowMs, appearedNow, offsetX, offsetY, covered, cut, area, ours,
+            detector.confirming, publish = true,
+        )
         return still
     }
 
@@ -380,7 +403,10 @@ class ReadingPipeline(
             return
         }
         try {
-            keep(engine, frame, picture, game, displayId, previousAtMs, previousAtMs, offsetX, offsetY, covered, cut, area, ours, recheck = false, publish = false)
+            keep(
+                engine, frame, previousFound, picture, game, displayId, previousAtMs, previousAtMs, offsetX, offsetY, covered, cut, area, ours,
+                recheck = false, publish = false,
+            )
         } finally {
             picture.recycle()
         }
@@ -388,13 +414,18 @@ class ReadingPipeline(
 
     /**
      * Reads [frame], the part of [bitmap] looked at, and keeps what is new. [publish]: these are the
-     * lines on screen now, to tap.
+     * lines on screen now, to tap. [found] is where the probe found text on [frame], or null: only the
+     * rows around it are read ([Bands]).
      */
     private suspend fun keep(
-        engine: TextReader, frame: Frame, bitmap: Bitmap, game: Game, displayId: Int, nowMs: Long, appearedNow: Long,
+        engine: TextReader, frame: Frame, found: List<Box>?, bitmap: Bitmap, game: Game, displayId: Int, nowMs: Long, appearedNow: Long,
         offsetX: Int, offsetY: Int, covered: List<Box>, cut: Box?, area: Box?, ours: List<Box>, recheck: Boolean, publish: Boolean,
     ) {
-        val rows = Perf.measure("read") { engine.read(frame) }
+        val bands = found?.let { Bands.around(it, frame.width, frame.height) }
+        val rows = Perf.measure("read") {
+            if (bands == null) engine.read(frame)
+            else bands.unstack(engine.read(bands.stack(frame, bandBuffer).also { bandBuffer = it.argb }))
+        }
             // The reader's forms made the game's own (TextClean), and what is not the game's text dropped.
             .mapNotNull(TextClean::line).filter { it.text.isNotBlank() }
             // A kana read as its lookalike put right by the dictionary (KanaRepair).

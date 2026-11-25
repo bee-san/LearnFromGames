@@ -4,7 +4,9 @@ package io.github.beesan.lfg
 import android.app.Instrumentation
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.TextLine
+import io.github.beesan.lfg.ocr.Bands
 import io.github.beesan.lfg.ocr.Frame
 import io.github.beesan.lfg.ocr.ModelStore
 import io.github.beesan.lfg.ocr.ScreenAi
@@ -19,6 +21,9 @@ import java.io.File
  * through TextClean, as in the app, and its time counts.
  *
  *     adb shell am instrument -w -e engines screenai,vocr io.github.beesan.lfg/.OcrBench
+ *
+ * `screenai-bands` is ScreenAI as the app reads with it: only the rows around what VOCR found (Bands), with
+ * the stacking and the moving back in its time, but not VOCR's own look, which the app has made already.
  */
 class OcrBench : Instrumentation() {
     private var arguments: Bundle? = null
@@ -46,9 +51,25 @@ class OcrBench : Instrumentation() {
         val wanted = (arguments?.getString("engines") ?: "screenai,vocr").split(',').map { it.trim() }
         val models = ModelStore(context)
         val engines = LinkedHashMap<String, (Frame) -> List<TextLine>>()
+        // What an engine is given before its clock starts.
+        val prepare = HashMap<String, (Frame) -> Unit>()
         if ("screenai" in wanted) {
             val engine = models.screenAiDir()?.let { ScreenAi.open(it) } ?: error("ScreenAI is not installed")
             engines["screenai"] = engine::read
+        }
+        if ("screenai-bands" in wanted) {
+            val engine = models.screenAiDir()?.let { ScreenAi.open(it) } ?: error("ScreenAI is not installed")
+            val vocr = Vocr.open(context) ?: error("VOCR could not open")
+            var found: List<Box>? = null
+            var of: Frame? = null
+            prepare["screenai-bands"] = { frame ->
+                found = vocr.read(frame).map { it.box }
+                of = frame
+            }
+            engines["screenai-bands"] = { frame ->
+                val bands = found?.takeIf { of === frame }?.let { Bands.around(it, frame.width, frame.height) }
+                if (bands == null) engine.read(frame) else bands.unstack(engine.read(bands.stack(frame)))
+            }
         }
         if ("vocr" in wanted) {
             val vocr = Vocr.open(context) ?: error("VOCR could not open")
@@ -57,10 +78,11 @@ class OcrBench : Instrumentation() {
         val files = dir.listFiles { f -> f.name.endsWith(".png") }!!.sortedBy { it.name }
         val out = File(dir, "results.jsonl").bufferedWriter()
         // One untimed read each first, so loading the models is not counted against the first picture.
-        files.firstOrNull()?.let { first -> frame(first).let { f -> engines.values.forEach { it(f) } } }
+        files.firstOrNull()?.let { first -> frame(first).let { f -> engines.forEach { (name, read) -> prepare[name]?.invoke(f); read(f) } } }
         for (file in files) {
             val frame = frame(file)
             for ((name, read) in engines) {
+                prepare[name]?.invoke(frame)
                 val start = System.nanoTime()
                 val lines = read(frame).mapNotNull(TextClean::line)
                 val ms = (System.nanoTime() - start) / 1e6
