@@ -51,6 +51,7 @@ import io.github.beesan.lfg.capture.LfgAccessibilityService
 import io.github.beesan.lfg.capture.SoundCapture
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.ocr.ScreenAi
+import io.github.beesan.lfg.update.UpdateWorker
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -114,8 +115,35 @@ class MainActivity : ComponentActivity() {
             val extraBoxes by model.extraBoxes.collectAsStateWithLifecycle()
             val boxDraw by model.boxDraw.collectAsStateWithLifecycle()
             val recording by SoundCapture.running.collectAsStateWithLifecycle()
-            val update by Updates.available.collectAsStateWithLifecycle()
-            LaunchedEffect(Unit) { Updates.check(applicationContext) }
+            val update by Updates.state.collectAsStateWithLifecycle()
+            // GitHub is asked once a day as the app opens; with "Get updates" on, what it has is fetched behind the app.
+            LaunchedEffect(Unit) {
+                Updates.check(applicationContext)
+                val now = model.prefs.value
+                if (now.updateApp) UpdateWorker.fetch(applicationContext, now.wifiOnly)
+            }
+            // What "Check now" in Settings found, and whether it is still asking.
+            var updateChecked by remember { mutableStateOf<Updates.Checked?>(null) }
+            var updateChecking by remember { mutableStateOf(false) }
+            val checkForUpdate: () -> Unit = {
+                lifecycleScope.launch {
+                    updateChecking = true
+                    updateChecked = Updates.check(applicationContext, force = true)
+                    updateChecking = false
+                    if (model.prefs.value.updateApp) UpdateWorker.fetch(applicationContext, wifiOnly = false, asked = true)
+                }
+            }
+            // The button beside a newer LFG, on Home and in Settings. Only this tap ever installs: it ends LFG, and a game's reading with it.
+            val takeUpdate: () -> Unit = {
+                when (val found = update) {
+                    is Updates.State.Ready -> (application as io.github.beesan.lfg.App).scope.launch { Updates.install(applicationContext) }
+                    is Updates.State.Available ->
+                        if (found.release.apk) UpdateWorker.fetch(applicationContext, wifiOnly = false, asked = true)
+                        else open(Intent(Intent.ACTION_VIEW, Uri.parse(found.release.url)))
+                    is Updates.State.Failed -> open(Intent(Intent.ACTION_VIEW, Uri.parse(found.release.url)))
+                    else -> Unit
+                }
+            }
             val notListening = prefs.sentenceAudio && !recording
             // The colours Settings picked, light or dark as the theme says, "Match system" following the system.
             val palette = Palette.of(prefs.colours, prefs.theme, isSystemInDarkTheme())
@@ -264,10 +292,9 @@ class MainActivity : ComponentActivity() {
                             shortcut = shortcutLabel(prefs),
                             loaded = linesLoaded,
                             problem = if (notListening) ("Sentence audio is not listening to game sound yet" to "Start")
-                                else update?.let { "LFG ${it.version} is out" to "Update" },
+                                else updateBanner(update),
                             onProblem = {
-                                if (notListening) microphone.launch(android.Manifest.permission.RECORD_AUDIO)
-                                else update?.let { open(Intent(Intent.ACTION_VIEW, Uri.parse(it.url))) }
+                                if (notListening) microphone.launch(android.Manifest.permission.RECORD_AUDIO) else takeUpdate()
                             },
                             onTurnOn = ::openAccessibilitySettings,
                             onOpenLine = {
@@ -614,7 +641,17 @@ class MainActivity : ComponentActivity() {
                         page == Page.HELP -> {
                             val report by model.diagnostics.collectAsStateWithLifecycle()
                             LaunchedEffect(Unit) { model.gatherDiagnostics() }
-                            HelpScreen(report, onCopy = { report?.let(::copyReport) }, onShare = { report?.let(::shareReport) }, onBack = ::back)
+                            HelpScreen(
+                                report, onCopy = { report?.let(::copyReport) }, onShare = { report?.let(::shareReport) }, onBack = ::back,
+                                version = remember { Updates.installed(applicationContext) },
+                                update = update,
+                                checked = updateChecked,
+                                checking = updateChecking,
+                                getUpdates = prefs.updateApp,
+                                onGetUpdates = { on -> model.updatePrefs { it.copy(updateApp = on) } },
+                                onCheck = checkForUpdate,
+                                onUpdate = takeUpdate,
+                            )
                         }
                         page == Page.GAMES -> GamesScreen(
                             games, packageName, { model.updateGame(it) }, ::back,
@@ -816,6 +853,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         model.refresh()
+        Updates.inFront(applicationContext)
     }
 
     /** Android's own page, opened at this app's entry so the path is switch, then Allow. */

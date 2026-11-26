@@ -77,6 +77,7 @@ import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.core.StatsPeriod
+import io.github.beesan.lfg.core.Updates
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.PictureKeeper
 import io.github.beesan.lfg.dict.DictState
@@ -1227,8 +1228,57 @@ fun DialogueScreen(
     state.message?.let { Hint(it) }
 }
 
+/**
+ * What the Version row says beside the version: how a newer LFG is coming along, or else what
+ * "Check now" last [checked]. Nothing until one or the other has something to say.
+ */
+internal fun updateNote(state: Updates.State, checked: Updates.Checked?, checking: Boolean): String = when {
+    checking -> "Checking…"
+    state is Updates.State.Available -> "LFG ${state.release.version} is out"
+    state is Updates.State.Downloading -> "Getting LFG ${state.release.version}… ${(state.progress * 100).toInt()}%"
+    state is Updates.State.Ready -> "LFG ${state.release.version} is ready"
+    state is Updates.State.Installing -> "Installing LFG ${state.release.version}…"
+    state is Updates.State.Failed -> state.reason
+    checked == Updates.Checked.UP_TO_DATE -> "Up to date"
+    checked == Updates.Checked.OFFLINE -> "No internet"
+    checked == Updates.Checked.FAILED -> "Could not check"
+    checked == Updates.Checked.SKIPPED -> "Test builds do not update"
+    else -> ""
+}
+
 @Composable
-fun HelpScreen(report: String?, onCopy: () -> Unit, onShare: () -> Unit, onBack: () -> Unit) = Page("Help and diagnostics", onBack) {
+fun HelpScreen(
+    report: String?,
+    onCopy: () -> Unit,
+    onShare: () -> Unit,
+    onBack: () -> Unit,
+    /** The LFG installed, and how a newer one is coming along ([Updates.state]). */
+    version: String,
+    update: Updates.State,
+    /** What "Check now" last found, and whether it is still asking. */
+    checked: Updates.Checked?,
+    checking: Boolean,
+    getUpdates: Boolean,
+    onGetUpdates: (Boolean) -> Unit,
+    onCheck: () -> Unit,
+    /** The button beside a newer LFG: fetch it, install it, or open it in the browser. */
+    onUpdate: () -> Unit,
+) = Page("Help and diagnostics", onBack) {
+    Group("Updates") {
+        Card("Get updates", "Fetches new versions by itself") { OnOff(getUpdates, onGetUpdates) }
+        Card("Version", listOf(version, updateNote(update, checked, checking)).filter { it.isNotEmpty() }.joinToString(" · ")) {
+            when (update) {
+                is Updates.State.Ready -> LfgButton("Install", onUpdate, primary = true)
+                is Updates.State.Available -> LfgButton("Update", onUpdate, primary = true)
+                // Not fetched or not installed: asking again tries again, and the browser can get it meanwhile.
+                is Updates.State.Failed -> {
+                    LfgButton("Check now", onCheck, enabled = !checking)
+                    LfgButton("Update", onUpdate)
+                }
+                else -> LfgButton("Check now", onCheck, enabled = !checking && update is Updates.State.None)
+            }
+        }
+    }
     Group("Report") {
         Card("Diagnostics", "No keys, none of the text LFG read") {
             LfgButton("Copy", onCopy, primary = true, enabled = report != null)

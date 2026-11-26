@@ -34,6 +34,8 @@ data class Prefs(
     val wifiOnly: Boolean = false,
     /** Dictionaries that name where their next release is are brought up to date once a day. */
     val updateDictionaries: Boolean = true,
+    /** LFG looks for a newer version of itself once a day and fetches it. Installing it always waits for a tap. */
+    val updateApp: Boolean = true,
     /** The title of the dictionary a tapped kanji is looked up in; empty for Bee's Ultimate Kanji Dictionary. */
     val kanjiDictionary: String = "",
     /** On a two-screen handheld, the screen the game is not on shows the game's lines as they are read. */
@@ -194,7 +196,7 @@ data class Prefs(
 
     /**
      * These settings, a profile's, with what every profile shares taken from [from], the settings in use:
-     * set-up, the keys, backups, the game folders, storage and downloads, and the widget's size.
+     * set-up, the keys, backups, the game folders, storage and downloads, LFG's own updates, and the widget's size.
      * A setting not named here is each profile's own.
      */
     fun withShared(from: Prefs): Prefs = copy(
@@ -204,7 +206,7 @@ data class Prefs(
         backupFolder = from.backupFolder, backupEvery = from.backupEvery, backupKeep = from.backupKeep,
         backupPictures = from.backupPictures, backupLast = from.backupLast, backupLastSize = from.backupLastSize, gsmFile = from.gsmFile,
         cocoonFolder = from.cocoonFolder, esdeFolder = from.esdeFolder, retroArchFolder = from.retroArchFolder, edenFolder = from.edenFolder,
-        keepScreensDays = from.keepScreensDays, wifiOnly = from.wifiOnly, updateDictionaries = from.updateDictionaries,
+        keepScreensDays = from.keepScreensDays, wifiOnly = from.wifiOnly, updateDictionaries = from.updateDictionaries, updateApp = from.updateApp,
         widgetSize = from.widgetSize,
     )
 
@@ -270,6 +272,7 @@ class Settings(context: Context) {
             keepScreensDays = store.getInt("keepScreensDays", d.keepScreensDays),
             wifiOnly = store.getBoolean("wifiOnly", d.wifiOnly),
             updateDictionaries = store.getBoolean("updateDictionaries", d.updateDictionaries),
+            updateApp = store.getBoolean("updateApp", d.updateApp),
             kanjiDictionary = store.getString("kanjiDictionary", d.kanjiDictionary) ?: d.kanjiDictionary,
             secondScreenPanel = store.getBoolean("secondScreenPanel", d.secondScreenPanel),
             appOnSecondScreen = store.getBoolean("appOnSecondScreen", d.appOnSecondScreen),
@@ -364,6 +367,7 @@ class Settings(context: Context) {
             .putInt("keepScreensDays", next.keepScreensDays)
             .putBoolean("wifiOnly", next.wifiOnly)
             .putBoolean("updateDictionaries", next.updateDictionaries)
+            .putBoolean("updateApp", next.updateApp)
             .putString("kanjiDictionary", next.kanjiDictionary)
             .putBoolean("secondScreenPanel", next.secondScreenPanel)
             .putBoolean("appOnSecondScreen", next.appOnSecondScreen)

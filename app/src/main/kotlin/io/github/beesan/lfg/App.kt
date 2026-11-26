@@ -119,6 +119,8 @@ class App : Application() {
         }
         // The same for the daily look for newer dictionaries, which is also set going on a first start.
         scope.launch { settings.prefs.map { it.updateDictionaries to it.wifiOnly }.distinctUntilChanged().collect { (on, wifi) -> io.github.beesan.lfg.dict.DictionaryUpdateWorker.schedule(this@App, on, wifi) } }
+        // And for the daily look for a newer LFG. It is fetched, and waits for a tap to be installed.
+        scope.launch { settings.prefs.map { it.updateApp to it.wifiOnly }.distinctUntilChanged().collect { (on, wifi) -> io.github.beesan.lfg.update.UpdateWorker.schedule(this@App, on, wifi) } }
     }
 
     /** Starts the app again from its first screen: after a restore, which replaced the database under it. */

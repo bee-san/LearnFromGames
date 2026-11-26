@@ -194,7 +194,9 @@ object SettingsIndex {
             setting("Join the Discord", "Where to send a zip too big for mail", "community chat")
             setting("Delete all", "Deletes every saved screen of dialogue", "clear remove")
         },
-        page(Page.HELP, "Help and diagnostics", "A report to send with a bug, or after a first run on a new device", "problem issue crash log debug support") {
+        page(Page.HELP, "Help and diagnostics", "A report to send with a bug, or after a first run on a new device", "problem issue crash log debug support about") {
+            setting("Get updates", "Fetches new versions of LFG by itself", "update upgrade new version release automatic download install")
+            setting("Version", "The LFG installed, and a look for a newer one", "update upgrade new version release check now install about")
             setting("Copy", "Copies the report, to paste with what happened", "bug log clipboard")
             setting("Share…", "Sends the report with another app", "bug log send")
         },

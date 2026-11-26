@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.ReadingStats
+import io.github.beesan.lfg.core.Updates
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.widget.WidgetData
 import java.text.SimpleDateFormat
@@ -90,7 +91,8 @@ fun HomeScreen(
         if (problem != null) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(problem.first, color = Lfg.Warn, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                LfgButton(problem.second, onProblem, primary = true)
+                // No word for the button: there is nothing to press yet.
+                if (problem.second.isNotEmpty()) LfgButton(problem.second, onProblem, primary = true)
             }
         }
         val latest = lines.firstOrNull()
@@ -119,6 +121,20 @@ fun HomeScreen(
             }
         }
     }
+}
+
+/**
+ * What Home says of a newer LFG, and the word on its button: no word while it is being fetched
+ * or installed. One that could not be fetched or installed is offered as it was before LFG
+ * updated itself, for the browser to get.
+ */
+internal fun updateBanner(state: Updates.State): Pair<String, String>? = when (state) {
+    Updates.State.None -> null
+    is Updates.State.Available -> "LFG ${state.release.version} is out" to "Update"
+    is Updates.State.Downloading -> "Getting LFG ${state.release.version}…" to ""
+    is Updates.State.Ready -> "LFG ${state.release.version} is ready" to "Install"
+    is Updates.State.Installing -> "Installing LFG ${state.release.version}…" to ""
+    is Updates.State.Failed -> "LFG ${state.release.version} is out" to "Update"
 }
 
 @Composable

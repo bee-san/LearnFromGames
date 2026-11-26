@@ -31,9 +31,14 @@ android {
         // which decides whether the restricted-settings helper shows.
         minSdk = 33
         targetSdk = 35
-        // The release workflow numbers each build and names it after its tag; a build at a desk is 0.1.0.
-        versionCode = System.getenv("LFG_VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = System.getenv("LFG_VERSION_NAME")?.removePrefix("v")?.takeIf { it.isNotBlank() } ?: "0.1.0"
+        // The release workflow names each build after its tag; a build at a desk is 0.1.0. The code comes from
+        // the name, so a later version always installs over an earlier one: 0.1.16 is 1016, 1.2.3 is 1002003.
+        // LFG_VERSION_CODE, when set, is the code instead.
+        val named = System.getenv("LFG_VERSION_NAME")?.removePrefix("v")?.takeIf { it.isNotBlank() } ?: "0.1.0"
+        val numbers = named.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+        versionCode = System.getenv("LFG_VERSION_CODE")?.toIntOrNull()
+            ?: (numbers.getOrElse(0) { 0 } * 1_000_000 + numbers.getOrElse(1) { 0 } * 1_000 + numbers.getOrElse(2) { 0 })
+        versionName = named
 
         if (!releasing) {
             ndk {
