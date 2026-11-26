@@ -39,6 +39,7 @@ import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.ui.EntryLink
 import io.github.beesan.lfg.ui.EntryScroller
+import io.github.beesan.lfg.ui.GameSounds
 import io.github.beesan.lfg.ui.Lfg
 import io.github.beesan.lfg.ui.LineRowUi
 import io.github.beesan.lfg.ui.TalkUi
@@ -933,7 +934,8 @@ class OverlayHost(
     @SuppressLint("ViewConstructor")
     private inner class FocusView(context: Context) : android.widget.FrameLayout(context) {
         /** The wheel, drawn here while it is up: this window has the controller it is pointed with. */
-        val wheel = WheelView(context, onPick = ::pickWheel, onDismiss = ::putAwayWheel, onBack = ::backWheel).apply { visibility = View.GONE }
+        val wheel = WheelView(context, onPick = ::pickWheel, onDismiss = ::putAwayWheel, onBack = ::backWheel, onPoint = { sound(GameSounds.Sound.MOVE) })
+            .apply { visibility = View.GONE }
 
         init {
             isFocusable = true
@@ -1733,6 +1735,7 @@ class OverlayHost(
         wheelSet = wheels()
         wheelPath.clear()
         showLevel(WheelSet.TOP)
+        sound(GameSounds.Sound.OPEN)
         aimAfresh = false
         // Lookup under the wheel stops where it is: nothing may keep stepping while the wheel has the controller.
         input.release()
@@ -1775,6 +1778,9 @@ class OverlayHost(
 
     private fun hovered(): WheelSlice? = focusView()?.wheel?.hover?.let { wheelLevel.getOrNull(it) }
 
+    /** What the wheel does is heard, while Settings › Appearance has its sounds on. */
+    private fun sound(sound: GameSounds.Sound) = GameSounds.play(sound)
+
     /** The wheel shows the wheel [id], gone into from the one showing, or with [back] come back to: nothing is pointed at. */
     private fun showLevel(id: String, back: Boolean = false) {
         if (!back) wheelPath += id
@@ -1795,6 +1801,8 @@ class OverlayHost(
     /** The wheel and its card go, with nothing more done. */
     fun putAwayWheel() {
         if (!wheelUp) return
+        // Heard only when the ring itself goes with nothing picked: after a pick it has gone already.
+        if (wheelOpen) sound(GameSounds.Sound.AWAY)
         wheelOpen = false
         wheelHeld = false
         closeCard()
@@ -1877,6 +1885,7 @@ class OverlayHost(
         if (wheelPath.size <= 1) return putAwayWheel()
         wheelPath.removeAt(wheelPath.size - 1)
         showLevel(wheelPath.last(), back = true)
+        sound(GameSounds.Sound.BACK)
         render()
     }
 
@@ -1889,14 +1898,19 @@ class OverlayHost(
     private fun pickWheel(slice: WheelSlice) {
         wheelHeld = false
         // A slice that cannot act does nothing: the wheel says why, and stays.
-        if (wheelWhyNot(slice) != null) return render()
+        if (wheelWhyNot(slice) != null) {
+            sound(GameSounds.Sound.NO)
+            return render()
+        }
         wheelPath.lastOrNull()?.let { at -> wheelLevel.indexOf(slice).takeIf { it >= 0 }?.let { lastPick[at] = it } }
         // A wheel opens in the wheel, which stays up.
         levelOf(slice)?.let {
             showLevel(it)
+            sound(GameSounds.Sound.INTO)
             return render()
         }
         if (slice.action == WheelAction.BACK) return backWheel()
+        sound(GameSounds.Sound.PICK)
         // Settings › Wheel can keep it open after a tile that opens nothing over the game: Keep or Copy several times.
         val stay = prefs().wheelStay && slice.action.quick
         wheelOpen = stay
@@ -2342,8 +2356,9 @@ class OverlayHost(
         wheel.hover = slice
         // With the shortcut still held, AI's or the boxes' level opens as soon as it is pointed at,
         // so letting go picks in it: hold, point at AI, point at Translate, let go.
-        val pointed = wheelLevel.getOrNull(slice) ?: return
-        if (wheelHeld && prefs().wheelOpenHeld && wheelWhyNot(pointed) == null) levelOf(pointed)?.let { showLevel(it) }
+        val into = wheelLevel.getOrNull(slice)?.takeIf { wheelHeld && prefs().wheelOpenHeld && wheelWhyNot(it) == null }?.let(::levelOf)
+        if (into != null) showLevel(into)
+        sound(if (into != null) GameSounds.Sound.INTO else GameSounds.Sound.MOVE)
     }
 
     private fun wheelOpenKey(event: KeyEvent): Boolean {

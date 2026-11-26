@@ -15,7 +15,7 @@ class SettingsSearchTest {
     private val open = setOf(
         Page.APPEARANCE, Page.BACKUP, Page.TRANSLATION, Page.DIARY_SETTINGS, Page.DICTIONARIES, Page.ANKI, Page.CONTROLS, Page.WHEEL,
         Page.RECOGNITION, Page.GAMES, Page.GAME_NAMES, Page.CHARACTER_NAMES, Page.MEDIA, Page.APPS, Page.PRACTICE, Page.STORAGE,
-        Page.DIALOGUE, Page.HELP, Page.GOALS, Page.LANGUAGE,
+        Page.DIALOGUE, Page.HELP, Page.GOALS, Page.LANGUAGE, Page.PROFILES,
     )
 
     @Test

@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import io.github.beesan.lfg.Prefs
+import io.github.beesan.lfg.Profiles
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LfgDatabase
 import java.io.File
@@ -40,6 +41,11 @@ object Backup {
     /** The folders under the app's files that hold pictures: the screen's, each line's own, and notes'. */
     private val PICTURES = listOf("frames", "crops", "notes")
 
+    /** Whether a settings file is the profiles' list, or the settings of a profile not in use ([Profiles]). */
+    internal fun profiles(name: String) = name == Profiles.STORE + ".xml" || PROFILE.matches(name)
+
+    private val PROFILE = Regex(Regex.escape(Profiles.FILE_PREFIX) + "\\d+\\.xml")
+
     fun fileName(now: Date = Date()) = PREFIX + SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.ROOT).format(now) + ".zip"
 
     /** Writes a backup to [out]. */
@@ -48,7 +54,10 @@ object Backup {
         db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(FULL)").use { it.moveToFirst() }
         ZipOutputStream(out.buffered()).use { zip ->
             add(zip, DB, context.getDatabasePath(DB))
-            add(zip, SETTINGS, File(context.applicationInfo.dataDir, "shared_prefs/$SETTINGS"))
+            val stores = File(context.applicationInfo.dataDir, "shared_prefs")
+            add(zip, SETTINGS, File(stores, SETTINGS))
+            // The profiles not in use, each in its own file, and the list of them.
+            stores.listFiles()?.filter { profiles(it.name) }?.forEach { add(zip, it.name, it) }
             if (pictures) {
                 for (dir in PICTURES) File(context.filesDir, dir).listFiles()?.forEach { add(zip, "files/$dir/${it.name}", it) }
             }
@@ -93,7 +102,11 @@ object Backup {
         File(live.path + "-wal").delete()
         File(live.path + "-shm").delete()
         database.copyTo(live, overwrite = true)
-        File(dir, SETTINGS).takeIf { it.isFile }?.copyTo(File(context.applicationInfo.dataDir, "shared_prefs/$SETTINGS"), overwrite = true)
+        val stores = File(context.applicationInfo.dataDir, "shared_prefs")
+        File(dir, SETTINGS).takeIf { it.isFile }?.copyTo(File(stores, SETTINGS), overwrite = true)
+        // The backup's profiles take the place of the ones here; a backup from before profiles leaves the one its settings are.
+        stores.listFiles()?.filter { profiles(it.name) }?.forEach { it.delete() }
+        dir.listFiles()?.filter { it.isFile && profiles(it.name) }?.forEach { it.copyTo(File(stores, it.name), overwrite = true) }
         for (name in PICTURES) {
             val into = File(context.filesDir, name).apply { mkdirs() }
             File(dir, "files/$name").listFiles()?.forEach { it.copyTo(File(into, it.name), overwrite = true) }

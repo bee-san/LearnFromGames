@@ -41,6 +41,10 @@ object ButtonSounds {
     /** Well under full volume, as the library plays them. */
     private const val VOLUME = 0.35f
 
+    /** Settings › Appearance, "Sound volume": the volume is multiplied by this. */
+    @Volatile
+    var level: Float = 1f
+
     private val DOWN = intArrayOf(
         R.raw.click_down_1, R.raw.click_down_2, R.raw.click_down_3, R.raw.click_down_4,
         R.raw.click_down_5, R.raw.click_down_6, R.raw.click_down_7,
@@ -110,7 +114,8 @@ object ButtonSounds {
     private fun play(sample: Int) {
         val pool = pool ?: return
         if (sample !in ready) return
-        runCatching { pool.play(sample, VOLUME, VOLUME, 1, 0, rate) }
+        val volume = (VOLUME * level).coerceAtMost(1f)
+        runCatching { pool.play(sample, volume, volume, 1, 0, rate) }
     }
 }
 

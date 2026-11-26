@@ -488,6 +488,19 @@ class MainActivity : ComponentActivity() {
                             onRetry = model::retryDownloads,
                             onBack = ::back,
                         )
+                        page == Page.PROFILES -> {
+                            val profiles by model.profiles.collectAsStateWithLifecycle()
+                            val profileMessage by model.profileMessage.collectAsStateWithLifecycle()
+                            ProfilesScreen(
+                                profiles, dictionary, fetchingDictionary, profileMessage,
+                                onUse = model::useProfile,
+                                onNew = model::newProfile,
+                                onRename = model::renameProfile,
+                                onTile = { profile -> addProfileTile(profile, model::profileTile) },
+                                onRemove = model::removeProfile,
+                                onBack = ::back,
+                            )
+                        }
                         page == Page.DICTIONARIES -> DictionariesScreen(
                             state = dictionary,
                             fetching = fetchingDictionary,
@@ -855,7 +868,32 @@ class MainActivity : ComponentActivity() {
         false
     }
 
+    /**
+     * Asks Android to put [profile]'s tile in the quick settings: it shows its own question, and [said] hears
+     * what came of it. The tile is the one already kept for the profile ([io.github.beesan.lfg.capture.ProfileTile]).
+     */
+    private fun addProfileTile(profile: io.github.beesan.lfg.Profile, said: (String?) -> Unit) {
+        val bar = getSystemService(android.app.StatusBarManager::class.java)
+        val tile = android.content.ComponentName(this, io.github.beesan.lfg.capture.ProfileTile.of(profile.slot))
+        val icon = android.graphics.drawable.Icon.createWithResource(this, io.github.beesan.lfg.R.drawable.ic_tile_profile)
+        runCatching {
+            bar.requestAddTileService(tile, profile.shown, icon, mainExecutor) { result ->
+                said(
+                    when (result) {
+                        android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "${profile.shown} is in your quick settings."
+                        android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "${profile.shown} is already in your quick settings."
+                        android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED -> null
+                        else -> ADD_TILE_BY_HAND
+                    },
+                )
+            }
+        }.onFailure { said(ADD_TILE_BY_HAND) }
+    }
+
     companion object {
+        /** Android would not add a profile's tile when asked: where it can be added by hand. */
+        private const val ADD_TILE_BY_HAND = "Android would not add it. Edit your quick settings and drag “LFG profile” in."
+
         const val ACTION_STATS = "io.github.beesan.lfg.action.STATS"
 
         /** A diary entry written from over a game: [EXTRA_LINE] is the line's id. */

@@ -91,8 +91,19 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 - **Settings › search is a list kept by hand** (`SettingsIndex.ALL` in `ui/SettingsSearch.kt`): a setting added, renamed or moved gets its row there, with the words people would type for it. `SettingsSearchTest` checks that every row points at a page Settings can open by itself.
 - A new setting is a field of `Prefs` and a line in both `Settings.read()` and `Settings.update()`. One whose default must differ for people already set up is read from a setting they have (`setupDone` from `keepDialogueAsked`), not migrated.
 - **Button sounds** play as `USAGE_ASSISTANCE_SONIFICATION`, which game-sound capture never records; a sound played as media would end up on cards. Material's `Button` ignores `LocalIndication`, so `LfgButton` clicks through `rememberClickSource()`, and only inside `ClickSounds { }`: the overlays over a game stay silent.
+- **The wheel's and lookup's sounds** are `ui/GameSounds.kt`, one entry a sound, played as sonification like the buttons'. Over a game only what the player did is heard (`lookup.Heard`: a step, a card asked for, made or failed), never a line arriving by itself. The tick is one sound, the same every time. The files are made by `tools/sounds` (its README has the recipe and why each was chosen); the owner likes the Hi75 thock and a PSP menu's tick, and pure synthesised pops read as cheap.
+- **Hearing a sound on the emulator, which has no ears:** `adb shell dumpsys audio | grep "new player"` gives each `SoundPool`'s `piid` (the app makes two: `GameSounds` first, the buttons' when a page opens), and `grep "piid:<n> state:started"` lists one line for each sound played, with its time.
 - A field for a key is a password to the keyboard as well (`KeyboardType.Password`), or the keyboard suggests the key and learns it.
 - **ML Kit** translates only when OpenRouter cannot be reached (`OpenRouter.Failure.offline`), never for a wrong key. Its models come by Android's download manager and work without Google Play services (seen on the emulator). Its translations are marked as Google's, which its terms ask for. It brought appcompat with it, and with appcompat lint's `AppCompatCustomView`, which is switched off in `app/build.gradle.kts`.
+
+## Profiles
+
+- The profile in use **is** the ordinary settings (`Settings`, the `settings` file); one not in use is the same keys in a file of its own (`profile-<id>`), with its Anki target beside it in `profiles`. Changing profile (`Profiles.use`) puts one away and takes the other out, so nothing else in the app knows of profiles.
+- **A new setting is each profile's own** unless it is added to `Prefs.withShared` (set-up, keys, backups, game folders, storage and downloads, the widget's size). Wheels, boxes and dictionaries are not a profile's.
+- A profile with no name goes by its language's (`ProfileRules.shown`), so it follows a change of language.
+- **Tiles:** six `ProfileTile` services in the manifest, off until there are two profiles (`Profiles.syncTiles`). A tile redraws by watching `profiles.list` while it is listening: `TileService.requestListeningState` does nothing for them while the shade is open. Android 13 leaves the tile of a deleted profile greyed out in the shade until the user drags it away.
+- Changing to another language over a game reads that game's text as the new language. That is the user's to choose, not a bug to guard.
+- A backup carries `profiles.xml` and each `profile-*.xml`; one made before profiles puts back only `settings.xml`.
 
 ## Words the user reads
 

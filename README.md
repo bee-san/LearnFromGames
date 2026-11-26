@@ -28,6 +28,8 @@ LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSent
 - **Search in Settings.** Type what you are looking for; every setting on every page is found by its name or by what you would call it.
 - **Translation with no internet.** With an OpenRouter key, a line you translate while offline is translated on the device by [ML Kit](https://developers.google.com/ml-kit/language/translation) instead, and says so: "(Google Translate, offline)". The model for your language (30 to 50 MB) is fetched ahead of time, while there is internet. Latin, Ancient Greek, Old Irish, Assyrian Neo-Aramaic, Yiddish and Basque have none.
 - **Buttons that click.** The app's buttons play the press and release of a mechanical keyboard ([button-sounds](https://github.com/joshwcomeau/button-sounds), Hi75 gentle). Settings › Appearance turns them off.
+- **Profiles.** A language and settings of its own for each: Japanese on the handheld with a controller, Spanish by touch. Each profile has a quick settings tile, and the wheel has a Profile tile, so changing takes one tap or one pick. Keys, backups and game folders are shared.
+- **A wheel you can hear.** A tick for each slice you point at and each word a lookup steps to, a thock when you pick, two notes going into a wheel and coming back out, a chime when a card is made. Short and quiet, and never on a card's sentence audio. Settings › Appearance has the switch and the volume.
 - **Reads the game for you.** An accessibility service pictures the screen, notices when new text has stopped moving, and reads it. No screen-recording prompt, no setup per game.
 - **Tap a word on the game.** Each line of text becomes tappable where it is drawn. A wrapped sentence is one sentence, and a word cut by the line break is still one word.
 - **Or never let go of the controller.** L3 + R3 turns the pad into a text cursor: by word, by line, by character. The game receives nothing until you leave. The shortcut can be one button instead (L3, R3, Select or Start), which is then kept from the game, and the left stick can go word by word where the stick is under your thumb. A tap that misses the words does not reach the game either.
@@ -442,6 +444,10 @@ The app is GPL-3.0-or-later, as hoshidicts is.
   > The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
   >
   > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+- The wheel's and lookup's sounds (`app/src/main/res/raw/sound_*.ogg`) were made for LFG from the Hi75
+  recordings above and from marimba notes and a swish that [Earshot](https://github.com/Leonxlnx/earshot)
+  (MIT) renders in code. `tools/sounds` says how each is made.
 
 ## Thanks
 

@@ -183,7 +183,8 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
         modifier = if (page == lastSetting) Modifier.focusRequester(back) else Modifier,
     )
     Item("Language", "The language you are learning", Page.LANGUAGE)
-    Item("Appearance", "Colours, light or dark, and button sounds", Page.APPEARANCE)
+    Item("Profiles", "A language and settings of its own for each", Page.PROFILES)
+    Item("Appearance", "Colours, light or dark, and sounds", Page.APPEARANCE)
     Item("Backup", "Back up, restore, and back up on a schedule", Page.BACKUP)
     Item("Translation", "Translate and explain lines with your OpenRouter key", Page.TRANSLATION)
     Item("Diary", "When the model writes each day you played", Page.DIARY_SETTINGS)
@@ -413,6 +414,18 @@ fun AppearanceScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack:
         Choice(Palette.SCHEMES, prefs.colours) { v -> onChange { it.copy(colours = v) } }
     }
     Card("Button sounds", "Buttons click when you press them.") { OnOff(prefs.buttonSounds) { on -> onChange { it.copy(buttonSounds = on) } } }
+    Card("Wheel and lookup sounds", "A tick as you move, a thock when you pick, a chime for a new card.") {
+        OnOff(prefs.gameSounds) { on -> onChange { it.copy(gameSounds = on) } }
+    }
+    Card("Sound volume", "How loud LFG’s own sounds are.") {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Choice(Prefs.SOUND_VOLUME_STEPS.map { it.toString() }.zip(listOf("Quiet", "Normal", "Loud")), prefs.soundVolume.toString()) { v ->
+                onChange { it.copy(soundVolume = v.toInt()) }
+                // Heard as it is chosen.
+                GameSounds.sample(v.toInt())
+            }
+        }
+    }
 }
 
 /**
@@ -1138,7 +1151,7 @@ internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINES, LINE, DIARY, DIARY_MONTH, DIARY_DAY, DIARY_ENTRY, DIARY_WRITE, DIARY_SHARE, DIARY_SETTINGS, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE, BOX_DRAW, WHEEL, WHEEL_EDIT, SEARCH, LANGUAGE }
+enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINES, LINE, DIARY, DIARY_MONTH, DIARY_DAY, DIARY_ENTRY, DIARY_WRITE, DIARY_SHARE, DIARY_SETTINGS, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE, BOX_DRAW, WHEEL, WHEEL_EDIT, SEARCH, LANGUAGE, PROFILES }
 
 @Composable
 fun StorageScreen(

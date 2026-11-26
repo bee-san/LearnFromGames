@@ -48,6 +48,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -100,6 +101,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val reader: StateFlow<ModelState> = app.models.screenAi
     val prefs: StateFlow<Prefs> = app.settings.prefs
 
+    /** Settings › Profiles. */
+    val profiles: StateFlow<List<io.github.beesan.lfg.Profile>> = app.profiles.list
+
+    /** What came of asking for a profile's quick settings tile. */
+    private val _profileMessage = MutableStateFlow<String?>(null)
+    val profileMessage: StateFlow<String?> = _profileMessage
+
+    fun useProfile(id: String) {
+        _profileMessage.value = null
+        app.profiles.use(id)
+    }
+
+    fun newProfile(language: io.github.beesan.lfg.core.Language) {
+        _profileMessage.value = null
+        app.profiles.add(language)
+    }
+
+    fun renameProfile(id: String, name: String) = app.profiles.rename(id, name)
+
+    fun removeProfile(id: String) {
+        _profileMessage.value = null
+        app.profiles.remove(id)
+    }
+
+    fun profileTile(message: String?) {
+        _profileMessage.value = message
+    }
+
     /** The newest lines; null until the store has answered, so an empty list really is empty. */
     private val recentLines: StateFlow<List<GameLine>?> =
         app.database.lines().recent(300).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -133,6 +162,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val lineLookup = LookupController(viewModelScope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) }, selection = { app.settings.prefs.value.picking },
         vnQuestion = { app.characterNames.question(it) }, vnAnswer = { question, yes -> app.characterNames.answer(question, yes) },
         lookupKanji = { app.dictionaries.lookupKanji(it, app.settings.prefs.value.kanjiDictionary) },
+        // A card made from a page chimes as one made over a game does; the page's own buttons already click.
+        heard = { if (it == io.github.beesan.lfg.lookup.Heard.CARD_MADE || it == io.github.beesan.lfg.lookup.Heard.CARD_FAILED) GameSounds.play(it) },
     )
 
     private val _styles = MutableStateFlow<List<EntryHtml.Style>>(emptyList())
@@ -147,6 +178,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch { LfgAccessibilityService.running.collect { refresh() } }
         viewModelScope.launch { app.wordAudio.refreshInfo() }
+        // Another profile, from here, a tile or the wheel: where its cards go in Anki is its own.
+        viewModelScope.launch { app.profiles.list.map { all -> all.firstOrNull { it.inUse }?.id }.distinctUntilChanged().drop(1).collect { refresh() } }
         viewModelScope.launch {
             dictionary.collect {
                 _styles.value = app.dictionaries.styles()

@@ -42,6 +42,8 @@ internal class WheelView(
     private val onPick: (WheelSlice) -> Unit,
     private val onDismiss: () -> Unit,
     private val onBack: () -> Unit,
+    /** A finger moved to another slice: the tick that is heard, which a stick's pointing asks for by itself. */
+    private val onPoint: () -> Unit = {},
 ) : View(context) {
     /** The slice pointed at, by its place in [slices]; null for none yet. */
     var hover: Int? = null
@@ -422,7 +424,12 @@ internal class WheelView(
         if (event.actionMasked == MotionEvent.ACTION_DOWN) ownTap = event.x < CORNER_PX && event.y < CORNER_PX
         if (ownTap) return true
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> sliceAt(event.x, event.y)?.let { hover = it }
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> sliceAt(event.x, event.y)?.let {
+                if (hover != it) {
+                    hover = it
+                    onPoint()
+                }
+            }
             MotionEvent.ACTION_UP -> {
                 val slice = sliceAt(event.x, event.y)
                 when {

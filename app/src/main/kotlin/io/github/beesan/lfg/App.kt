@@ -69,6 +69,7 @@ class App : Application() {
     val dialogueBoxes by lazy { DialogueBoxes(this) }
     val extraBoxes by lazy { ExtraBoxes(this) }
     val wheels by lazy { Wheels(this) }
+    val profiles by lazy { Profiles(this, settings, anki, scope) }
     val speech by lazy { Speech(this) { settings.prefs.value.learning } }
     val media by lazy { MediaAttacher(this, scope, anki, database, { settings.prefs.value }, speech) }
     val lineAsker by lazy { io.github.beesan.lfg.ask.LineAsker(database) { settings.prefs.value } }
@@ -85,6 +86,8 @@ class App : Application() {
         val readerMissing = models.screenAiDir() == null && ScreenAi.available()
         if (dictionaries.state.value is DictState.Missing || dictionaries.defaultsPending() || readerMissing) DictionaryWorker.start(this, wifiOnly = settings.prefs.value.wifiOnly)
         scope.launch(Dispatchers.IO) { models.forgetMeiki() }
+        // Android is shown the quick settings tile of each profile there is.
+        scope.launch { profiles.syncTiles() }
         // Another language to learn, at set-up or in Settings: its dictionaries are the ones in use, and are fetched if it has none.
         scope.launch {
             settings.prefs.map { it.language }.distinctUntilChanged().drop(1).collect {
@@ -95,6 +98,15 @@ class App : Application() {
         // With a key, lines get translated: what translating them with no internet needs is fetched while there is some.
         scope.launch {
             settings.prefs.map { listOf(it.aiReady, it.language, it.translateInto, it.wifiOnly) }.distinctUntilChanged().collect { translator.prepareOffline() }
+        }
+        // The app's own sounds: read once, and as loud as Settings › Appearance says.
+        scope.launch(Dispatchers.IO) { io.github.beesan.lfg.ui.GameSounds.load(this@App) }
+        scope.launch {
+            settings.prefs.map { it.gameSounds to it.soundVolume }.distinctUntilChanged().collect { (on, volume) ->
+                io.github.beesan.lfg.ui.GameSounds.enabled = on
+                io.github.beesan.lfg.ui.GameSounds.level = volume / 100f
+                io.github.beesan.lfg.ui.ButtonSounds.level = volume / 100f
+            }
         }
         // The widgets measure against the goals and draw in the chosen colours, so they redraw as soon as one changes.
         scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme, it.widgetSize) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }

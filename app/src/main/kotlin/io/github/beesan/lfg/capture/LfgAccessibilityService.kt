@@ -48,6 +48,7 @@ import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.games.Covers
 import io.github.beesan.lfg.games.Hosts
 import io.github.beesan.lfg.lookup.CardButton
+import io.github.beesan.lfg.lookup.Heard
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.ask.Recap
@@ -144,6 +145,7 @@ class LfgAccessibilityService : AccessibilityService() {
             alreadyInAnki = {
                 (practiceDisplay != Display.INVALID_DISPLAY).also { practising -> if (practising) _practice.update { it.copy(cards = it.cards + 1) } }
             },
+            heard = { io.github.beesan.lfg.ui.GameSounds.play(it) },
         )
         overlays = OverlayHost(
             service = this,
@@ -555,6 +557,7 @@ class LfgAccessibilityService : AccessibilityService() {
         WheelAction.CARD, WheelAction.HEAR, WheelAction.ALOUD, WheelAction.COPY, WheelAction.LOOKUP ->
             "Nothing read on this screen yet".takeIf { line == null }
         WheelAction.KNOWN -> "Connect AnkiDroid in Settings › Anki".takeIf { !app.settings.prefs.value.knownWords && !ankiConnected() }
+        WheelAction.PROFILE -> "Make a second profile in Settings › Profiles".takeIf { app.profiles.list.value.size < 2 }
         else -> null
     }
 
@@ -565,6 +568,11 @@ class LfgAccessibilityService : AccessibilityService() {
             WheelAction.FURIGANA -> said(app.settings.prefs.value.furigana)
             WheelAction.KNOWN -> said(app.settings.prefs.value.knownWords)
             WheelAction.PAUSE -> if (front?.game?.id in paused) "Paused. Pick to read again" else null
+            // Which profile is in use, and which a pick changes to.
+            WheelAction.PROFILE -> app.profiles.list.value.let { all ->
+                val at = all.indexOfFirst { it.inUse }
+                if (all.size < 2 || at < 0) null else "${all[at].shown}. Pick for ${all[(at + 1) % all.size].shown}"
+            }
             else -> null
         }
     }
@@ -616,6 +624,7 @@ class LfgAccessibilityService : AccessibilityService() {
             WheelAction.NAMES -> overlays.openPage(MainActivity.PAGE_NAMES, playing?.game?.id)
             WheelAction.SEARCH -> overlays.openPage(MainActivity.PAGE_SEARCH, playing?.game?.id)
             WheelAction.SETTINGS -> overlays.openPage(MainActivity.PAGE_SETTINGS, playing?.game?.id)
+            WheelAction.PROFILE -> app.profiles.next()?.let { overlays.say("Profile: ${it.shown}") }
             WheelAction.OTHER_SCREEN -> {
                 app.settings.update { it.copy(secondScreenPanel = !it.secondScreenPanel) }
                 overlays.say(if (prefs.secondScreenPanel) "Lines on the other screen off" else "Lines on the other screen on")
@@ -648,8 +657,14 @@ class LfgAccessibilityService : AccessibilityService() {
                 senses = listOfNotNull(translation), gameName = ready.gameName, picturePath = ready.framePath,
                 lineStartMs = ready.appearedAtMs.takeUnless { ready.fromApp }, fromApp = ready.fromApp,
             )
+            val result = app.cards.add(id, content)
+            when (result) {
+                is io.github.beesan.lfg.anki.CardResult.Added, is io.github.beesan.lfg.anki.CardResult.Waiting -> io.github.beesan.lfg.ui.GameSounds.play(Heard.CARD_MADE)
+                is io.github.beesan.lfg.anki.CardResult.Failed -> io.github.beesan.lfg.ui.GameSounds.play(Heard.CARD_FAILED)
+                io.github.beesan.lfg.anki.CardResult.Duplicate -> Unit
+            }
             overlays.say(
-                when (val result = app.cards.add(id, content)) {
+                when (result) {
                     is io.github.beesan.lfg.anki.CardResult.Added -> "Card added"
                     io.github.beesan.lfg.anki.CardResult.Duplicate -> "This line is in Anki already"
                     is io.github.beesan.lfg.anki.CardResult.Waiting -> result.reason + " The card is kept here until it is."

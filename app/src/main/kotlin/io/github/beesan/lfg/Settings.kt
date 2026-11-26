@@ -2,6 +2,7 @@
 package io.github.beesan.lfg
 
 import android.content.Context
+import android.content.SharedPreferences
 import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingGoals
@@ -173,6 +174,10 @@ data class Prefs(
     val wheelDim: Int = 60,
     /** The app's buttons click as they are pressed and let go. */
     val buttonSounds: Boolean = true,
+    /** Over a game the wheel ticks from slice to slice and thocks at a pick, lookup ticks from word to word, and a card made chimes. */
+    val gameSounds: Boolean = true,
+    /** How loud the app's own sounds are, as a percentage: one of [SOUND_VOLUME_STEPS]. */
+    val soundVolume: Int = 100,
     /** Set-up has been gone through to its end; until then the app opens on it, at [setupStep] (a [io.github.beesan.lfg.core.SetupStep]'s name). */
     val setupDone: Boolean = false,
     val setupStep: String = "",
@@ -186,6 +191,22 @@ data class Prefs(
 
     /** The language being learnt; Japanese until the question is answered. */
     val learning: Language get() = Language.orJapanese(language)
+
+    /**
+     * These settings, a profile's, with what every profile shares taken from [from], the settings in use:
+     * set-up, the keys, backups, the game folders, storage and downloads, and the widget's size.
+     * A setting not named here is each profile's own.
+     */
+    fun withShared(from: Prefs): Prefs = copy(
+        setupDone = from.setupDone, setupStep = from.setupStep,
+        keepDialogue = from.keepDialogue, keepDialogueAsked = from.keepDialogueAsked,
+        openRouterKey = from.openRouterKey, steamKey = from.steamKey, steamAccount = from.steamAccount,
+        backupFolder = from.backupFolder, backupEvery = from.backupEvery, backupKeep = from.backupKeep,
+        backupPictures = from.backupPictures, backupLast = from.backupLast, backupLastSize = from.backupLastSize, gsmFile = from.gsmFile,
+        cocoonFolder = from.cocoonFolder, esdeFolder = from.esdeFolder, retroArchFolder = from.retroArchFolder, edenFolder = from.edenFolder,
+        keepScreensDays = from.keepScreensDays, wifiOnly = from.wifiOnly, updateDictionaries = from.updateDictionaries,
+        widgetSize = from.widgetSize,
+    )
 
     val picking: io.github.beesan.lfg.core.Selection
         get() = io.github.beesan.lfg.core.Selection(selection != SELECT_CHARACTER, japaneseOnly && learning.japanese, learning.wordStart)
@@ -226,18 +247,21 @@ data class Prefs(
         val WHEEL_REACH_STEPS = listOf(50, 75, 90)
         val WHEEL_SIZE_STEPS = listOf(80, 100, 120)
         val WHEEL_DIM_STEPS = listOf(40, 60, 80)
+        val SOUND_VOLUME_STEPS = listOf(50, 100, 180)
     }
 }
 
 class Settings(context: Context) {
+    private val app = context.applicationContext
     private val store = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     /** The OpenRouter and Steam keys, in a file of their own so a backup of the settings never holds them. */
     private val secrets = context.getSharedPreferences("secrets", Context.MODE_PRIVATE)
-    private val _prefs = MutableStateFlow(read())
+    private val _prefs = MutableStateFlow(read(store))
     val prefs: StateFlow<Prefs> = _prefs
 
-    private fun read() = Prefs().let { d ->
+    /** The settings [store] holds: the ones in use, or those of a profile not in use, which is the same names in a file of its own. The two keys come from their own file either way. */
+    private fun read(store: SharedPreferences) = Prefs().let { d ->
         Prefs(
             shortcut = store.getString("shortcut", d.shortcut) ?: d.shortcut,
             swapConfirm = store.getBoolean("swapConfirm", d.swapConfirm),
@@ -308,6 +332,8 @@ class Settings(context: Context) {
             wheelSize = store.getInt("wheelSize", d.wheelSize),
             wheelDim = store.getInt("wheelDim", d.wheelDim),
             buttonSounds = store.getBoolean("buttonSounds", d.buttonSounds),
+            gameSounds = store.getBoolean("gameSounds", d.gameSounds),
+            soundVolume = store.getInt("soundVolume", d.soundVolume),
             // Set up before set-up had steps: not gone through again.
             setupDone = store.getBoolean("setupDone", store.getBoolean("keepDialogueAsked", false)),
             setupStep = store.getString("setupStep", d.setupStep) ?: d.setupStep,
@@ -317,8 +343,21 @@ class Settings(context: Context) {
 
     fun update(change: (Prefs) -> Prefs) {
         val next = change(_prefs.value)
-        store.edit()
-            .putString("shortcut", next.shortcut)
+        write(store.edit(), next).apply()
+        secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
+        _prefs.value = next
+    }
+
+    /** The settings a profile not in use was left with ([io.github.beesan.lfg.Profiles]), from its own [file]; null when it holds none. */
+    fun saved(file: String): Prefs? = app.getSharedPreferences(file, Context.MODE_PRIVATE).takeIf { it.all.isNotEmpty() }?.let(::read)
+
+    /** [prefs] kept in [file] for a profile no longer in use. Written before it returns: the settings in use change straight after. */
+    fun save(file: String, prefs: Prefs) {
+        write(app.getSharedPreferences(file, Context.MODE_PRIVATE).edit(), prefs).commit()
+    }
+
+    private fun write(to: SharedPreferences.Editor, next: Prefs): SharedPreferences.Editor =
+        to.putString("shortcut", next.shortcut)
             .putBoolean("swapConfirm", next.swapConfirm)
             .putString("tapLookup", next.tapLookup)
             .putBoolean("stickWords", next.stickWords)
@@ -384,11 +423,9 @@ class Settings(context: Context) {
             .putInt("wheelSize", next.wheelSize)
             .putInt("wheelDim", next.wheelDim)
             .putBoolean("buttonSounds", next.buttonSounds)
+            .putBoolean("gameSounds", next.gameSounds)
+            .putInt("soundVolume", next.soundVolume)
             .putBoolean("setupDone", next.setupDone)
             .putString("setupStep", next.setupStep)
             .putBoolean("usesController", next.usesController)
-            .apply()
-        secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
-        _prefs.value = next
-    }
 }

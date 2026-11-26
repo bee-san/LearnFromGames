@@ -61,6 +61,13 @@ class AnkiBridge(private val context: Context) {
             }.apply()
         }
 
+    /** Where cards go, as it is kept: a profile takes it along when it is put away, and brings it back ([io.github.beesan.lfg.Profiles]). */
+    var targetKept: String?
+        get() = prefs.getString(KEY_TARGET, null)
+        set(value) {
+            prefs.edit().apply { if (value == null) remove(KEY_TARGET) else putString(KEY_TARGET, value) }.apply()
+        }
+
     /**
      * Picks where cards go and saves the choice. Tried in order: an installed
      * Kiku, Lapis or Senren note type with the deck holding most of its notes;

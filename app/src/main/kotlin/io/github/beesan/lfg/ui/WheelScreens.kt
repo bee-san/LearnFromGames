@@ -176,7 +176,7 @@ fun WheelSettingsScreen(
     Card("Stick reach", "How far the stick is pushed before it points.") {
         Stepper("${prefs.wheelReach}%", prefs.wheelReach, Prefs.WHEEL_REACH_STEPS) { v -> onChange { it.copy(wheelReach = v) } }
     }
-    Card("Tick on each slice") { OnOff(prefs.wheelTick) { v -> onChange { it.copy(wheelTick = v) } } }
+    Card("Vibrate on each slice") { OnOff(prefs.wheelTick) { v -> onChange { it.copy(wheelTick = v) } } }
     Card("Start on the last pick", "Each wheel opens pointing at the slice picked last.") {
         OnOff(prefs.wheelStartLast) { v -> onChange { it.copy(wheelStartLast = v) } }
     }

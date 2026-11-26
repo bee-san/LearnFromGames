@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A head and shoulders in a ring: a profile. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2a10,10 0,1 0,0 20a10,10 0,0 0,0 -20zM12,4a8,8 0,0 1,6.32 12.9C16.76,15.4 14.5,14.5 12,14.5s-4.76,0.9 -6.32,2.4A8,8 0,0 1,12 4zM12,6.5a3.25,3.25 0,1 0,0 6.5a3.25,3.25 0,0 0,0 -6.5zM12,16.5c1.9,0 3.6,0.66 4.82,1.86A7.96,7.96 0,0 1,12 20a7.96,7.96 0,0 1,-4.82 -1.64C8.4,17.16 10.1,16.5 12,16.5z" />
+</vector>

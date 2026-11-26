@@ -72,6 +72,7 @@ enum class WheelAction(val id: String, val label: String, val about: String, val
     PAUSE("pause", "Pause reading", "Stop reading this game for now", WheelGroup.LFG, "Stop reading this game until the tile is picked again."),
     HIDE("hide", "Hide LFG", "Nothing over the game until the shortcut", WheelGroup.LFG, "Nothing over the game until the shortcut is pressed."),
     SETTINGS("settings", "Settings", "LFG’s settings", WheelGroup.LFG, "LFG’s settings, on the other screen where there is one."),
+    PROFILE("profile", "Profile", "Change to your next profile", WheelGroup.LFG, "Change to your next profile: its language and its settings. Profiles are made in Settings › Profiles."),
     BACK("back", "Back", "Up to the wheel this one is in", WheelGroup.LFG, "Up to the wheel this one is in. B already does this; the tile is for touch."),
     ;
 

@@ -28,6 +28,9 @@ import kotlinx.coroutines.withContext
 
 enum class CardButton { ADD, ADDING, IN_ANKI, WAITING }
 
+/** What a lookup does that can be heard: a step to another word, a card asked for, and the card made or not. */
+enum class Heard { STEP, CARD_ASKED, CARD_MADE, CARD_FAILED }
+
 /** A line that can be looked up in: on screen now (with [geometry]) or from the store (without). */
 data class LookupLine(
     val text: String,
@@ -120,6 +123,8 @@ class LookupController(
      * in the tutorial, where opening AnkiDroid at the card would take the player out of what they are trying.
      */
     private val alreadyInAnki: () -> Boolean = { false },
+    /** Something happened that has a sound over a game ([Heard]): only what the player did, never a line arriving by itself. */
+    private val heard: (Heard) -> Unit = {},
 ) {
     private val _state = MutableStateFlow(LookupState())
     val state: StateFlow<LookupState> = _state
@@ -372,6 +377,7 @@ class LookupController(
             else -> return
         }
         setButtons(entry.expression, CardButton.ADDING)
+        heard(Heard.CARD_ASKED)
         _state.update { it.copy(message = null) }
         scope.launch {
             val line = if (shown.lineId != null) shown else prepare(shown).also { ready ->
@@ -379,6 +385,7 @@ class LookupController(
                 _state.update { s -> s.copy(lines = s.lines.map { if (it === shown) ready else it }) }
             }
             val lineId = line.lineId ?: run {
+                heard(Heard.CARD_FAILED)
                 setButtons(entry.expression, CardButton.ADD, message = "The line could not be saved.")
                 return@launch
             }
@@ -400,6 +407,12 @@ class LookupController(
                 is CardResult.Added, CardResult.Duplicate -> done[key] = CardButton.IN_ANKI
                 is CardResult.Waiting -> done[key] = CardButton.WAITING
                 is CardResult.Failed -> Unit
+            }
+            // Heard whichever word is shown by now: the card was made, or was not.
+            when (result) {
+                is CardResult.Added, is CardResult.Waiting -> heard(Heard.CARD_MADE)
+                is CardResult.Failed -> heard(Heard.CARD_FAILED)
+                CardResult.Duplicate -> Unit
             }
             // The reply may arrive after another word was chosen; that word's buttons are left alone.
             if (_state.value.selectedLine?.lineId != lineId) return@launch
@@ -475,7 +488,10 @@ class LookupController(
         val cursor = cursor ?: return
         val state = _state.value
         if (!state.selected) {
-            cursor.first()?.let { lookUp(it.line, it.index) }
+            cursor.first()?.let {
+                heard(Heard.STEP)
+                lookUp(it.line, it.index)
+            }
             return
         }
         val from = CursorPos(state.line, state.spanStart)
@@ -488,6 +504,7 @@ class LookupController(
             Move.DOWN -> cursor.down(from)
         }
         if (to == from) return
+        heard(Heard.STEP)
         resting?.cancel()
         if (!stick) {
             lookUp(to.line, to.index)

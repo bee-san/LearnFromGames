@@ -66,10 +66,17 @@ object SettingsIndex {
      */
     val ALL: List<SettingHit> = listOf(
         page(Page.LANGUAGE, "Language", "The language you are learning", "japanese chinese korean spanish french german study learn"),
-        page(Page.APPEARANCE, "Appearance", "Colours, light or dark, and button sounds", "look style display") {
+        page(Page.PROFILES, "Profiles", "A language and settings of its own for each", "second language two languages switch change user account person share") {
+            setting("New profile", "Another language, starting with the settings you have now", "add create make")
+            setting("Add to quick settings", "A tile for each profile, to change to it from anywhere", "tile shade notification quick switch")
+            setting("Rename", "Call a profile what you like", "name")
+        },
+        page(Page.APPEARANCE, "Appearance", "Colours, light or dark, and sounds", "look style display") {
             setting("Theme", "Light, dark, or the same as the system", "dark mode night black white")
             setting("Colours", "Pink, mono, amber, teal or purple", "colors color colour scheme palette accent")
             setting("Button sounds", "Buttons click when you press them", "click audio mute sfx")
+            setting("Wheel and lookup sounds", "A tick as you move, a thock when you pick, a chime for a new card", "audio sfx mute tick click chime radial ring menu")
+            setting("Sound volume", "How loud LFG’s own sounds are", "audio loud quiet level sfx")
         },
         page(Page.BACKUP, "Backup", "Back up, restore, and back up on a schedule", "save copy move new device") {
             setting("Back up now", "Lines, stats, the diary, recaps, waiting cards and settings, in one file", "backup save export")
@@ -133,7 +140,7 @@ object SettingsIndex {
             setting("Open wheels while held", "Pointing at a wheel tile opens it at once", "inside nested")
             setting("D-pad", "Point at a slice, or step round the wheel", "dpad direction")
             setting("Stick reach", "How far the stick is pushed before it points", "dead zone deadzone joystick analog sensitivity")
-            setting("Tick on each slice", "A tick is felt for each slice pointed at", "vibration vibrate haptic rumble buzz")
+            setting("Vibrate on each slice", "A tick is felt for each slice pointed at", "vibration haptic rumble buzz tick")
             setting("Start on the last pick", "Each wheel opens pointing at the slice picked last", "remember")
             setting("Wheel after a pick", "Close, or stay open to pick again", "keep open")
             setting("Slices", "Names and icons, or icons only", "labels text")

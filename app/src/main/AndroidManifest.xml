@@ -106,6 +106,92 @@
             </intent-filter>
         </service>
 
+        <!-- A tile a profile, to change to it from anywhere. Off until its profile is made (Profiles.syncTiles). -->
+        <service
+            android:name=".capture.ProfileTile1"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_profile"
+            android:label="@string/tile_profile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+        <service
+            android:name=".capture.ProfileTile2"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_profile"
+            android:label="@string/tile_profile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+        <service
+            android:name=".capture.ProfileTile3"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_profile"
+            android:label="@string/tile_profile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+        <service
+            android:name=".capture.ProfileTile4"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_profile"
+            android:label="@string/tile_profile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+        <service
+            android:name=".capture.ProfileTile5"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_profile"
+            android:label="@string/tile_profile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+        <service
+            android:name=".capture.ProfileTile6"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_profile"
+            android:label="@string/tile_profile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+
         <service
             android:name=".capture.SoundService"
             android:exported="false"
