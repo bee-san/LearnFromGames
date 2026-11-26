@@ -29,6 +29,9 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 
 - Push a `vX.Y.Z` tag on `main`. `.github/workflows/release.yml` builds both signed APKs and makes the GitHub release, with notes generated from pull requests only: work pushed straight to `main` needs the notes written by hand (`gh release edit vX.Y.Z --notes-file …`, with the user's go-ahead).
 - Versions so far bump the last number, features included.
+- The workflow takes about a quarter of an hour. `gh run watch` outlives a ten-minute command: ask `gh run view <id> --json status,conclusion` in a loop instead.
+- Build the release at the desk once before tagging when a library was added (`./gradlew :app:assembleRelease`, signed with the debug key when there is no keystore): the shrinker only runs there, and the debug build says nothing about it.
+- Four old branches show as unmerged in the check above and are not: `backup/local-main-526df5f`, `claude/determined-mccarthy-8a0eb3`, `recap-current-game` and `sentence-audio-lower-screen`. Their work is on `main` under other commits (checked 2026-11-26).
 - The workflow's version code is its run number (v0.1.3 is 4).
 - The release key lives in `~/.config/lfg-release/` and in the repository's secrets. Never make a new one or overwrite the secrets.
 
@@ -54,17 +57,52 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 
 - `lfg_api33` (Android 13, as the Thor) on port 5560. Test there, not on API 35: an Android 14 API passed on 35 and crashed on 33.
 - Never run `uiautomator dump` while testing: it suspends accessibility services.
+- **Right after `adb install -r` the service is connected but sees no windows**, even once it is switched off and on: nothing is read, and `LfgPerf` in logcat shows only `front` at about 0.1 ms with no `shot`. Force-stop the app, switch the service off and on again, and test from the second start. A failure seen only on the first run after an install is this, not the code.
+- `am force-stop` switches the service off. A running app writes its settings back over a `settings.xml` pushed under it, so stop it first.
+- The app's pages are on the second screen (`input -d 2 tap`, `adb emu screenrecord screenshot --display 1`); games, and the tutorial, on the first. A row's place differs between the two: the second is narrow, so take a picture before tapping by coordinates.
+- `tools/virtual_pad.py` talks to plain `adb`: set `ANDROID_SERIAL=emulator-5560`. The pad it makes counts as a connected controller, and goes when the script ends.
+- Never read `shared_prefs/secrets.xml`. A test that needs an OpenRouter key types a made-up one into the app (`input text`) and deletes it in Settings › Translation afterwards.
+- No internet for a test: `adb shell cmd connectivity airplane-mode enable`, and `disable` after.
+- A new dependency needs one build without `--offline` before `--offline` works again.
 
 ## Languages
 
 - The rules that take an inflected word back to its dictionary form are hoshidicts' language packs (`third_party/hoshidicts/languages/<code>`), the same ones Hachidori ships. Gradle's `languagePacks` task copies each pack's two JSON files into the APK's assets; Japanese is built into the engine. `core/Language.kt` has one entry a pack and `SetupTest` fails when the two disagree, so a new pack upstream needs its line there.
 - Moving the hoshidicts submodule forward: dictionaries people already imported must still open. Import one with the old `lfg_dict_host`, build the new one (`cmake -S app/src/main/cpp -B <dir> && cmake --build <dir> --target lfg_dict_host`), and compare `all <dir> <text>` from both.
 - A dictionary belongs to the language it was added under (`InstalledDictionary.language`); only the language being learnt is listed, fetched and looked up in.
+- What is Japanese's alone asks `Language.japanese`: `TextClean`'s clean-up (which drops a line with nothing Japanese in it), `KanaRepair`, VOCR as the probe, readings in the AI prompts. Anything new that assumes kana or kanji goes behind it too.
+- `TextClean` counts `…` and `。` as Japanese, so English with an ellipsis in it ("Reading the screen…") is kept as a line when Japanese is being learnt. Text of the app's own that a game's reading could see is kept out of the picture, not left to the clean-up.
+- A language whose pack says `scanStart: word` is looked up from the start of the word touched (`Selection.wordStart`); Japanese, Chinese, Korean and German from the character.
+- The AI prompts name the language (`Language.orJapanese(line.language)` for one line, `prefs().learning` for a game) and must come out unchanged for Japanese: `AskLanguageTest` pins them, so a prompt changed on purpose is changed there too.
 
 ## Set-up and the tutorial
 
 - Set-up is `core/SetupFlow.kt` (which steps there are) and `ui/SetupScreen.kt`; the tutorial is `ui/PracticeActivity.kt`, which the service reads as a game (`LfgAccessibilityService.practiseOn`). Words there follow the owner's rule: few, plain, every sentence worth reading.
+- **Android presses the focused button for a stick click, Start or Select that nothing took, and goes Back for B.** On a page of the app the shortcut itself (L3 + R3) therefore presses whatever has the pad's focus. A page that asks for controller buttons takes them in `dispatchKeyEvent` first, as `MainActivity` does for "Pick your LFG button" and `PracticeActivity` does throughout; and nothing there is focused that a stray press must not reach.
+- Overriding `dispatchKeyEvent` in an activity fails lint with `RestrictedApi` (it mistakes it for androidx.core's): `@SuppressLint("RestrictedApi")` with a line saying why.
+- The tutorial's guide is a strip along the top because the entry opens above the word, two thirds of the screen high: anything lower is covered while a word is looked up.
+- The service reads the tutorial only inside the box `PracticeActivity` reports (`practiceBox`), and not before it has one: read whole, the guide's own words become the game's lines. Its lines go when it ends, but for those a card was made from.
+- A word already in Anki counts as the tutorial's card (`alreadyInAnki`): the card button would otherwise open AnkiDroid and take the player out of it.
+- On a two-screen handheld the tutorial opens on the game's screen and the pages stay on the other. It ends with `finish()` alone: starting `MainActivity` from there carries the app's pages onto the game's screen.
 - To see set-up again on the emulator: `am force-stop` the app first (a running app writes its settings back over yours), take `setupDone`, `keepDialogueAsked` and `language` out of `shared_prefs/settings.xml`, then switch the service on again, since a force-stop switches it off.
+
+## Settings, sounds and translation
+
+- **Settings › search is a list kept by hand** (`SettingsIndex.ALL` in `ui/SettingsSearch.kt`): a setting added, renamed or moved gets its row there, with the words people would type for it. `SettingsSearchTest` checks that every row points at a page Settings can open by itself.
+- A new setting is a field of `Prefs` and a line in both `Settings.read()` and `Settings.update()`. One whose default must differ for people already set up is read from a setting they have (`setupDone` from `keepDialogueAsked`), not migrated.
+- **Button sounds** play as `USAGE_ASSISTANCE_SONIFICATION`, which game-sound capture never records; a sound played as media would end up on cards. Material's `Button` ignores `LocalIndication`, so `LfgButton` clicks through `rememberClickSource()`, and only inside `ClickSounds { }`: the overlays over a game stay silent.
+- A field for a key is a password to the keyboard as well (`KeyboardType.Password`), or the keyboard suggests the key and learns it.
+- **ML Kit** translates only when OpenRouter cannot be reached (`OpenRouter.Failure.offline`), never for a wrong key. Its models come by Android's download manager and work without Google Play services (seen on the emulator). Its translations are marked as Google's, which its terms ask for. It brought appcompat with it, and with appcompat lint's `AppCompatCustomView`, which is switched off in `app/build.gradle.kts`.
+
+## Words the user reads
+
+- The owner's rule (2026-11-26), for set-up and everywhere else: few words; each sentence holds only what is needed; no technical jargon; a sentence not worth reading is taken out. Say what happens for the person ("LFG spots a game by itself"), not how it works.
+- A screen asks one thing. What LFG can see for itself (a controller already there, AnkiDroid installed, downloads done) is not asked.
+- Say only what is true of every case: "nothing leaves your device" stopped being true the moment a line could be sent to be translated.
+
+## Working with helpers
+
+- Helpers sharing one checkout are each given their own files and told not to run Gradle: a build while another is mid-edit fails for both. Compile once they are all back, and expect a test or a caller to need mending.
 
 ## Before pushing
 
