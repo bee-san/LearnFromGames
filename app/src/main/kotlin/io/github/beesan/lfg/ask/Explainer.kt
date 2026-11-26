@@ -136,6 +136,8 @@ class Explainer(
                 "in three parts. First the line's meaning in natural $into, on its own line. Then the line taken apart in " +
                 "order, one part a line, each as: the ${language.title},$reading a dash, " +
                 "and what it means or does there (the particle's job, the verb's dictionary form and how it is conjugated). " +
+                // Asked for by the owner, 2026-11-26: a comma or a bracket was getting a line of its own.
+                "Leave punctuation out of the parts: no line for a comma, a full stop, a bracket, a quotation mark or the like. " +
                 "Then, only if there is one, a single short note on a nuance, an idiom, the register or who it implies. " +
                 "Be brief: no greeting,${if (language.japanese) " no romaji," else ""} nothing about lines other than the one asked about." +
                 suggest(into, fresh = true)
