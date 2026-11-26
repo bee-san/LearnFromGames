@@ -39,7 +39,7 @@ class App : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val database by lazy { LfgDatabase.open(this) }
     val lines by lazy {
-        LineStore(database, language = { (Language.of(settings.prefs.value.language) ?: Language.JAPANESE).tag }) { line ->
+        LineStore(database, language = { settings.prefs.value.learning.tag }) { line ->
             StatsWidgets.requestUpdate(this)
             // "Every line": each new line is translated as it is read, behind the reading. A menu label is not a line.
             val prefs = settings.prefs.value
@@ -54,7 +54,7 @@ class App : Application() {
             }
         }
     }
-    val translator by lazy { Translator(database) { settings.prefs.value } }
+    val translator by lazy { Translator(database, io.github.beesan.lfg.ask.OfflineTranslator()) { settings.prefs.value } }
     val explainer by lazy {
         io.github.beesan.lfg.ask.Explainer(database, { settings.prefs.value }) { lineId -> cards.refreshExplained(lineId) }
             .also { made -> scope.launch(Dispatchers.IO) { made.load() } }
@@ -62,14 +62,14 @@ class App : Application() {
     val diary by lazy { io.github.beesan.lfg.data.Diary(database) }
     val recapper by lazy { Recapper(database, { settings.prefs.value }, diary = diary) }
     val asker by lazy { Asker(database, { settings.prefs.value }) }
-    val dictionaries by lazy { DictionaryRepository(this) }
+    val dictionaries by lazy { DictionaryRepository(this) { Language.of(settings.prefs.value.language) } }
     val wordAudio by lazy { WordAudio(this) }
     val anki by lazy { AnkiBridge(this) }
     val settings by lazy { Settings(this) }
     val dialogueBoxes by lazy { DialogueBoxes(this) }
     val extraBoxes by lazy { ExtraBoxes(this) }
     val wheels by lazy { Wheels(this) }
-    val speech by lazy { Speech(this) }
+    val speech by lazy { Speech(this) { settings.prefs.value.learning } }
     val media by lazy { MediaAttacher(this, scope, anki, database, { settings.prefs.value }, speech) }
     val lineAsker by lazy { io.github.beesan.lfg.ask.LineAsker(database) { settings.prefs.value } }
     val cards by lazy { CardMaker(anki, database, lines, { settings.prefs.value }, media, File(filesDir, "media"), wordAudio) { StatsWidgets.requestUpdate(this) } }
@@ -85,6 +85,17 @@ class App : Application() {
         val readerMissing = models.screenAiDir() == null && ScreenAi.available()
         if (dictionaries.state.value is DictState.Missing || dictionaries.defaultsPending() || readerMissing) DictionaryWorker.start(this, wifiOnly = settings.prefs.value.wifiOnly)
         scope.launch(Dispatchers.IO) { models.forgetMeiki() }
+        // Another language to learn, at set-up or in Settings: its dictionaries are the ones in use, and are fetched if it has none.
+        scope.launch {
+            settings.prefs.map { it.language }.distinctUntilChanged().drop(1).collect {
+                dictionaries.onLanguage()
+                if (dictionaries.state.value is DictState.Missing) DictionaryWorker.start(this@App, replace = true, wifiOnly = settings.prefs.value.wifiOnly)
+            }
+        }
+        // With a key, lines get translated: what translating them with no internet needs is fetched while there is some.
+        scope.launch {
+            settings.prefs.map { listOf(it.aiReady, it.language, it.translateInto, it.wifiOnly) }.distinctUntilChanged().collect { translator.prepareOffline() }
+        }
         // The widgets measure against the goals and draw in the chosen colours, so they redraw as soon as one changes.
         scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme, it.widgetSize) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
         // WorkManager keeps the automatic backup across restarts; it changes only when the setting does.

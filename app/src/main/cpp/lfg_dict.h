@@ -6,7 +6,7 @@
 #include <string>
 
 struct hd_query;
-struct hd_deinflector;
+struct hd_languages;
 struct hd_lookup;
 
 namespace lfg {
@@ -28,18 +28,25 @@ class Session {
   bool ok() const { return lookup_ != nullptr; }
   bool add_dictionary(const std::string& path, DictKind kind);
 
+  // Adds a language pack of hoshidicts (its language.json and transforms.json,
+  // which holds the rules that take an inflected word back to its dictionary
+  // form). Japanese is built in. Returns "" or what was wrong with the pack.
+  std::string add_language(const std::string& language_json, const std::string& transforms_json);
+
   // Longest-match lookup from the first character of `text`. Returns
   // {"results":[{"matched","deinflected","trace":[{"name","description"}],
   //   "expression","reading","rules","score",
   //   "glossaries":[{"dictionary","glossary","definitionTags","termTags"}],
   //   "frequencies":[{"dictionary","values":[{"value","display"}]}]}]}.
   // `glossary` is the raw Yomitan glossary JSON, carried as a string.
-  std::string lookup(const std::string& text, int max_results, size_t scan_length) const;
+  // `language` is the code of a pack: "ja", or one added with add_language.
+  // An unknown one finds nothing.
+  std::string lookup(const std::string& text, int max_results, size_t scan_length, const std::string& language = "ja") const;
 
   // How long, in UTF-16 units, the best match at the start of `text` is; 0
   // when nothing matches. What the controller's word steps need, without
   // building and parsing every entry's JSON as `lookup` would.
-  int match_length(const std::string& text, size_t scan_length) const;
+  int match_length(const std::string& text, size_t scan_length, const std::string& language = "ja") const;
 
   // Each dictionary's own stylesheet: [{"dictionary","css"}].
   std::string styles() const;
@@ -49,7 +56,7 @@ class Session {
 
  private:
   hd_query* query_ = nullptr;
-  hd_deinflector* deinflector_ = nullptr;
+  hd_languages* languages_ = nullptr;
   hd_lookup* lookup_ = nullptr;
 };
 

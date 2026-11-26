@@ -69,6 +69,8 @@ class ReadingPipeline(
     private val dialogueDir: () -> File? = { null },
     /** How many characters of a text its longest dictionary word covers, 0 for none; for [KanaRepair]. */
     private val matchLength: suspend (String) -> Int = { 0 },
+    /** The language being read is Japanese: its text is cleaned and its kana repaired as Japanese ([TextClean], [KanaRepair]). */
+    private val japanese: () -> Boolean = { true },
 ) {
     private val _latest = MutableStateFlow<Reading?>(null)
     val latest: StateFlow<Reading?> = _latest
@@ -427,9 +429,9 @@ class ReadingPipeline(
             else bands.unstack(engine.read(bands.stack(frame, bandBuffer).also { bandBuffer = it.argb }))
         }
             // The reader's forms made the game's own (TextClean), and what is not the game's text dropped.
-            .mapNotNull(TextClean::line).filter { it.text.isNotBlank() }
+            .let { rows -> japanese().let { ja -> rows.mapNotNull { TextClean.line(it, ja) } } }.filter { it.text.isNotBlank() }
             // A kana read as its lookalike put right by the dictionary (KanaRepair).
-            .let { rows -> Perf.measure("repair") { rows.map { KanaRepair.line(it, matchLength) } } }
+            .let { rows -> if (japanese()) Perf.measure("repair") { rows.map { KanaRepair.line(it, matchLength) } } else rows }
             .map { it.moved(offsetX + (cut?.left ?: 0), offsetY + (cut?.top ?: 0)) }
             // Text under another window (a system dialog on a whole-screen picture) is not the game's.
             .filter { line -> covered.none { it.intersects(line.box) } && ours.none { across(line, it) } }

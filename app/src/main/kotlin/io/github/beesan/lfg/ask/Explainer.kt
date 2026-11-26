@@ -2,6 +2,7 @@
 package io.github.beesan.lfg.ask
 
 import io.github.beesan.lfg.Prefs
+import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.data.ExplanationRow
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LfgDatabase
@@ -60,7 +61,11 @@ class Explainer(
     /** Asks for [line]'s explanation, in place of any it has. Throws [OpenRouter.Failure] with a message to show. */
     suspend fun explain(line: GameLine): Conversation {
         val p = prefs()
-        val answer = OpenRouter.ask(p.openRouterKey, p.model, system(p.translateInto), prompt(line.gameName, before(line, p), line.lineText))
+        // The language the line was read as, which the one being learnt now may not be.
+        val language = Language.orJapanese(line.language)
+        val answer = OpenRouter.ask(
+            p.openRouterKey, p.model, system(p.translateInto, language), prompt(line.gameName, before(line, p), line.lineText, language),
+        )
         val (text, next) = split(answer)
         return save(line.id, Conversation(text, suggestions = next), p.model)
     }
@@ -72,8 +77,9 @@ class Explainer(
         val so = conversation(line.id) ?: throw OpenRouter.Failure("Explain the line first.")
         if (asked.isEmpty()) return so
         if (so.full) throw OpenRouter.Failure("That is $MAX_QUESTIONS questions on this line. Explain again starts over.")
+        val language = Language.orJapanese(line.language)
         val body = OpenRouter.body(
-            p.model, followUp(p.translateInto), prompt(line.gameName, before(line, p), line.lineText), talk = talk(so, asked),
+            p.model, followUp(p.translateInto, language), prompt(line.gameName, before(line, p), line.lineText, language), talk = talk(so, asked),
         )
         val (text, next) = split(OpenRouter.answer(OpenRouter.request(p.openRouterKey, body)))
         // "Explain again" may have run meanwhile: the answer belongs to the conversation it was asked in.
@@ -119,25 +125,34 @@ class Explainer(
                 "numbering, that the learner might ask next about this line: its grammar, a word in it, its tone or how else it could be said" +
                 (if (fresh) "" else ", none of them asked already") + ". Each under eight words."
 
-        fun system(into: String) =
-            "You explain lines of Japanese games to someone learning Japanese, in $into. Answer in plain text, no Markdown, " +
+        /** Each part of the line comes with its reading where the writing does not show it: hiragana over kanji, pinyin in Chinese. */
+        fun system(into: String, language: Language = Language.JAPANESE): String {
+            val reading = when (language) {
+                Language.JAPANESE -> " its reading in hiragana in brackets where it has kanji,"
+                Language.CHINESE -> " its reading in pinyin in brackets,"
+                else -> ""
+            }
+            return "You explain lines of ${language.games} to someone learning ${language.title}, in $into. Answer in plain text, no Markdown, " +
                 "in three parts. First the line's meaning in natural $into, on its own line. Then the line taken apart in " +
-                "order, one part a line, each as: the Japanese, its reading in hiragana in brackets where it has kanji, a dash, " +
+                "order, one part a line, each as: the ${language.title},$reading a dash, " +
                 "and what it means or does there (the particle's job, the verb's dictionary form and how it is conjugated). " +
                 "Then, only if there is one, a single short note on a nuance, an idiom, the register or who it implies. " +
-                "Be brief: no greeting, no romaji, nothing about lines other than the one asked about." + suggest(into, fresh = true)
+                "Be brief: no greeting,${if (language.japanese) " no romaji," else ""} nothing about lines other than the one asked about." +
+                suggest(into, fresh = true)
+        }
 
         /** The model's instructions for a question asked after the explanation. */
-        fun followUp(into: String) =
-            "You are helping someone learning Japanese with one line of a Japanese game, in $into. You have explained the line; " +
-                "now answer their question about it in plain text, no Markdown, in two to four sentences, with a Japanese example " +
-                "where one helps and no romaji. Stay on this line: its words, its grammar, its tone and who is speaking. If the " +
+        fun followUp(into: String, language: Language = Language.JAPANESE) =
+            "You are helping someone learning ${language.title} with one line of ${language.aGame}, in $into. You have explained the line; " +
+                "now answer their question about it in plain text, no Markdown, in two to four sentences, with " +
+                (if (language.japanese) "a Japanese example where one helps and no romaji" else "an example in ${language.title} where one helps") +
+                ". Stay on this line: its words, its grammar, its tone and who is speaking. If the " +
                 "question is about the game and not the line (where to go, what happens next), say in one sentence that Ask on " +
                 "the wheel answers questions about the game. No greeting, and do not repeat the question." + suggest(into, fresh = false)
 
         /** The line to explain, after the lines before it, which are context and are not explained. */
-        fun prompt(game: String, before: List<String>, line: String): String = buildString {
-            append("A line from ").append(game.ifBlank { "a Japanese game" }).append('.')
+        fun prompt(game: String, before: List<String>, line: String, language: Language = Language.JAPANESE): String = buildString {
+            append("A line from ").append(game.ifBlank { language.aGame }).append('.')
             if (before.isNotEmpty()) {
                 append(" The lines just before it, oldest first, are for context only; don't explain them:\n<before>\n")
                 before.forEach { append(it.replace('\n', ' ')).append('\n') }

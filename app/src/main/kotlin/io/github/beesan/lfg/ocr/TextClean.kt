@@ -61,10 +61,18 @@ object TextClean {
     /** One piece of the line: usually one character and its box; a space between words has none. */
     private class Piece(var text: String, var box: Box?)
 
-    /** [line] cleaned, or null when nothing of the game's text is left in it. */
-    fun line(line: TextLine): TextLine? {
+    /**
+     * [line] cleaned, or null when nothing of the game's text is left in it. With [japanese] off the
+     * line is in another language: it loses only the box's cursor at its ends, and goes when no letter is in it.
+     */
+    fun line(line: TextLine, japanese: Boolean = true): TextLine? {
         val pieces = pieces(line)
         cursors(pieces)
+        if (!japanese) {
+            val text = pieces.joinToString("") { it.text }
+            if (text.codePoints().noneMatch(Character::isLetter)) return null
+            return rebuilt(line, text, pieces)
+        }
         spaces(pieces, line.vertical)
         forms(pieces)
         twins(pieces)
@@ -72,6 +80,11 @@ object TextClean {
         brackets(pieces)
         val text = pieces.joinToString("") { it.text }
         if (border(text) || foreign(text) || stray(text) || tiles(text)) return null
+        return rebuilt(line, text, pieces)
+    }
+
+    /** [line] as [pieces] now spell it, each character's box kept with it. */
+    private fun rebuilt(line: TextLine, text: String, pieces: List<Piece>): TextLine {
         if (text == line.text) return line
         val chars = ArrayList<CharBox>(pieces.size)
         var at = 0

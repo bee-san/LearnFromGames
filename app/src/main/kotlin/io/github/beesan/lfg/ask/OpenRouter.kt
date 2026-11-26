@@ -37,7 +37,11 @@ import java.net.URL
 object OpenRouter {
     const val API = "https://openrouter.ai/api/v1"
 
-    class Failure(message: String) : Exception(message)
+    /**
+     * [offline]: OpenRouter was never heard from, which is what having no internet looks like. A refused
+     * key, an empty account or a model's error is an answer, and is not that.
+     */
+    class Failure(message: String, val offline: Boolean = false) : Exception(message)
 
     /** A page the web search read, from the answer's annotations. */
     data class Source(val url: String, val title: String)
@@ -140,14 +144,14 @@ object OpenRouter {
                 outputStream.use { it.write(body.toByteArray()) }
             }
         } catch (_: IOException) {
-            throw Failure("OpenRouter isn’t reachable. Check the connection and try again.")
+            throw Failure("OpenRouter isn’t reachable. Check the connection and try again.", offline = true)
         }
         try {
             val code = connection.responseCode
             if (code != 200) throw Failure(failure(code))
             connection.inputStream.bufferedReader().use { it.readText() }
         } catch (_: IOException) {
-            throw Failure("OpenRouter isn’t reachable. Check the connection and try again.")
+            throw Failure("OpenRouter isn’t reachable. Check the connection and try again.", offline = true)
         } finally {
             connection.disconnect()
         }

@@ -15,6 +15,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.io.File
+import io.github.beesan.lfg.core.Language
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -32,6 +33,8 @@ data class InstalledDictionary(
      * games linked to it, and first there. Null for an ordinary dictionary.
      */
     val vndb: String? = null,
+    /** The tag of the language it is a dictionary of. Those from before there was a second language are Japanese. */
+    val language: String = "ja",
 ) {
     /** What the dictionary holds, for its row: `Japanese–English terms`-style detail is not stored, so counts are shown. */
     val summary: String
@@ -60,7 +63,11 @@ sealed interface DictState {
  * one thread: a hoshidicts session is not shared across threads here.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class DictionaryRepository(private val context: Context) {
+class DictionaryRepository(
+    private val context: Context,
+    /** The language being learnt, or null before set-up has asked: its dictionaries are the ones listed, fetched and looked up in. */
+    private val language: () -> Language? = { Language.JAPANESE },
+) {
     private val prefs = context.getSharedPreferences("dictionaries", Context.MODE_PRIVATE)
     private val root = File(context.filesDir, "dictionaries")
     private val native = Dispatchers.IO.limitedParallelism(1)
@@ -84,7 +91,10 @@ class DictionaryRepository(private val context: Context) {
     private val _fetching = MutableStateFlow<DictState?>(null)
     val fetching: StateFlow<DictState?> = _fetching
 
-    fun installed(): List<InstalledDictionary> = prefs.getString(KEY_INSTALLED, null)?.let {
+    /** The dictionaries of the language being learnt. Another language's stay on the device, for when it is learnt again. */
+    fun installed(): List<InstalledDictionary> = (language() ?: Language.JAPANESE).tag.let { tag -> everything().filter { it.language == tag } }
+
+    private fun everything(): List<InstalledDictionary> = prefs.getString(KEY_INSTALLED, null)?.let {
         try {
             DictJson.decodeFromString<List<InstalledDictionary>>(it)
         } catch (_: Exception) {
@@ -102,7 +112,7 @@ class DictionaryRepository(private val context: Context) {
         if (handle == 0L) return@withContext emptyList()
         // The engine scans at most this many characters ahead; no word is longer.
         val scan = text.take(SCAN_LENGTH)
-        val json = io.github.beesan.lfg.core.Perf.measure("lookup.native") { Hoshidicts.lookup(handle, scan, maxResults, SCAN_LENGTH) }
+        val json = io.github.beesan.lfg.core.Perf.measure("lookup.native") { Hoshidicts.lookup(handle, scan, maxResults, SCAN_LENGTH, tag()) }
         io.github.beesan.lfg.core.Perf.measure("lookup.decode") { DictJson.decodeFromString<LookupResponse>(json).results }
     }
 
@@ -117,7 +127,7 @@ class DictionaryRepository(private val context: Context) {
         val chosen = kanjiDictionary(dictionaries, title)
         val handle = if (chosen != null) openSession(only = chosen) else openSession()
         if (handle == 0L) return@withContext emptyList()
-        val json = Hoshidicts.lookup(handle, kanji, 16, SCAN_LENGTH)
+        val json = Hoshidicts.lookup(handle, kanji, 16, SCAN_LENGTH, tag())
         DictJson.decodeFromString<LookupResponse>(json).results.filter { it.expression == kanji }
     }
 
@@ -125,7 +135,7 @@ class DictionaryRepository(private val context: Context) {
     suspend fun matchLength(text: String, vndb: String? = null): Int = withContext(native) {
         if (text.isEmpty()) return@withContext 0
         val handle = openSession(vndb)
-        if (handle == 0L) 0 else io.github.beesan.lfg.core.Perf.measure("match") { Hoshidicts.matchLength(handle, text.take(SCAN_LENGTH), SCAN_LENGTH) }
+        if (handle == 0L) 0 else io.github.beesan.lfg.core.Perf.measure("match") { Hoshidicts.matchLength(handle, text.take(SCAN_LENGTH), SCAN_LENGTH, tag()) }
     }
 
     /**
@@ -135,12 +145,27 @@ class DictionaryRepository(private val context: Context) {
     private fun openSession(vndb: String? = null, only: InstalledDictionary? = null): Long {
         val dictionaries = listed ?: installed().also { listed = it }
         val names = vndb?.let { id -> dictionaries.firstOrNull { it.vndb == id } }
-        val key = only?.let { "only:" + it.title } ?: names?.vndb ?: ""
+        val learning = language() ?: Language.JAPANESE
+        val key = learning.tag + ":" + (only?.let { "only:" + it.title } ?: names?.vndb ?: "")
         sessions[key]?.let { return it }
         val chosen = if (only != null) listOf(only) else listOfNotNull(names) + dictionaries.filter { it.vndb == null }
         if (chosen.isEmpty()) return 0L
         val handle = Hoshidicts.open()
         if (handle == 0L) return 0L
+        // Japanese's rules are in the engine; every other language's come with the app, as hoshidicts' pack.
+        if (!learning.japanese) {
+            val problem = try {
+                val pack = "languages/${learning.tag}"
+                Hoshidicts.addLanguage(handle, context.assets.open("$pack/language.json").use { it.readBytes() }, context.assets.open("$pack/transforms.json").use { it.readBytes() })
+            } catch (e: java.io.IOException) {
+                "its files are missing: ${e.message}"
+            }
+            if (problem.isNotEmpty()) {
+                android.util.Log.e(TAG, "the ${learning.title} language pack could not be used: $problem")
+                Hoshidicts.close(handle)
+                return 0L
+            }
+        }
         for (d in chosen) {
             if (d.terms > 0) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_TERM)
             if (d.frequencies > 0) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_FREQUENCY)
@@ -155,6 +180,23 @@ class DictionaryRepository(private val context: Context) {
         sessions[key] = handle
         return handle
     }
+
+    private fun tag() = (language() ?: Language.JAPANESE).tag
+
+    /**
+     * Another language is being learnt: its dictionaries are the ones listed and looked up in from here on.
+     * The caller starts [DictionaryWorker] for those it has none of.
+     */
+    suspend fun onLanguage() {
+        closeSession()
+        _state.value = installed().let { if (it.isEmpty()) DictState.Missing else DictState.Ready(it) }
+    }
+
+    /** The starter dictionaries of the language being learnt; none before it is chosen. */
+    private fun defaults(): List<DefaultDictionaries.Source> = language()?.let(DefaultDictionaries::of).orEmpty()
+
+    /** Japanese keeps the key it had before there was a second language. */
+    private fun pendingKey() = tag().let { if (it == "ja") KEY_DEFAULTS_PENDING else "$KEY_DEFAULTS_PENDING-$it" }
 
     /** [installed] as the sessions last saw it, so a lookup does not read the list each time. */
     private var listed: List<InstalledDictionary>? = null
@@ -274,8 +316,10 @@ class DictionaryRepository(private val context: Context) {
         withContext(Dispatchers.IO) { File(gone.path).deleteRecursively() }
     }
 
+    /** [all] are the dictionaries of the language being learnt, in their order; the other languages' are kept as they are. */
     private suspend fun save(all: List<InstalledDictionary>) {
-        prefs.edit().putString(KEY_INSTALLED, DictJson.encodeToString(all)).apply()
+        val others = tag().let { tag -> everything().filter { it.language != tag } }
+        prefs.edit().putString(KEY_INSTALLED, DictJson.encodeToString(others + all)).apply()
         closeSession()
         _state.value = if (all.isEmpty()) DictState.Missing else DictState.Ready(all)
     }
@@ -296,17 +340,17 @@ class DictionaryRepository(private val context: Context) {
      * keeps its own set, and one the user removes later does not come back.
      */
     /** The starter dictionaries not installed here, whether or not they are being fetched. */
-    fun defaultsMissing(): List<DefaultDictionaries.Source> = installed().let { have -> DefaultDictionaries.ALL.filter { have.none(it::matches) } }
+    fun defaultsMissing(): List<DefaultDictionaries.Source> = installed().let { have -> defaults().filter { have.none(it::matches) } }
 
     /**
      * Asks for every starter dictionary that is missing, on a device that had
      * dictionaries of its own and so was never given them. [ensureDefaults] fetches them.
      */
     fun requestDefaults() {
-        prefs.edit().putStringSet(KEY_DEFAULTS_PENDING, defaultsMissing().map { it.id }.toSet()).apply()
+        prefs.edit().putStringSet(pendingKey(), defaultsMissing().map { it.id }.toSet()).apply()
     }
 
-    fun defaultsPending(): Boolean = prefs.getStringSet(KEY_DEFAULTS_PENDING, null)?.isNotEmpty() == true
+    fun defaultsPending(): Boolean = prefs.getStringSet(pendingKey(), null)?.isNotEmpty() == true
 
     /**
      * Downloads and imports each starter dictionary still to come, Jitendex
@@ -316,13 +360,16 @@ class DictionaryRepository(private val context: Context) {
      * lock as "Add dictionary…", but the downloads do not.
      */
     suspend fun ensureDefaults(): Boolean = fetchingDefaults.withLock {
-        val chosen = prefs.getStringSet(KEY_DEFAULTS_PENDING, null)
-            ?: if (installed().isEmpty()) DefaultDictionaries.ALL.map { it.id }.toSet() else return true
+        // Which language is not known until set-up has asked: nothing is fetched before.
+        val all = defaults().ifEmpty { return true }
+        val key = pendingKey()
+        val chosen = prefs.getStringSet(key, null)
+            ?: if (installed().isEmpty()) all.map { it.id }.toSet() else return true
         val pending = chosen.toMutableSet()
-        fun remember() = prefs.edit().putStringSet(KEY_DEFAULTS_PENDING, pending.toSet()).apply()
+        fun remember() = prefs.edit().putStringSet(key, pending.toSet()).apply()
         remember()
         var lastError: String? = null
-        for (source in DefaultDictionaries.ALL) {
+        for (source in all) {
             if (source.id !in pending) continue
             if (installed().none(source::matches)) {
                 val error = try {
@@ -341,7 +388,7 @@ class DictionaryRepository(private val context: Context) {
             remember()
         }
         // Unknown ids (a source since dropped) are not waited for.
-        pending.retainAll { DefaultDictionaries.byId(it) != null }
+        pending.retainAll { id -> all.any { it.id == id } }
         remember()
         val now = installed()
         _state.value = when {
@@ -423,7 +470,7 @@ class DictionaryRepository(private val context: Context) {
                 val at = all.indexOfFirst { it.title == old.title }
                 val taken = all.any { it.title == outcome.title && it.title != old.title }
                 if (at < 0) return@withLock null
-                if (!DictionaryUpdates.replaces(old, outcome) || taken || DefaultDictionaries.ALL.any { it.matches(old) && !it.accepts(outcome) }) {
+                if (!DictionaryUpdates.replaces(old, outcome) || taken || defaults().any { it.matches(old) && !it.accepts(outcome) }) {
                     android.util.Log.w(TAG, "${old.title}: release ${theirs.revision} not taken: ${outcome.error.ifEmpty { "${outcome.terms} entries" }}")
                     prefs.edit().putString(skip, theirs.revision).apply()
                     return@withLock null
@@ -491,6 +538,7 @@ class DictionaryRepository(private val context: Context) {
             kanji = outcome.kanji,
             installedAt = System.currentTimeMillis(),
             vndb = vndb,
+            language = tag(),
         )
         save(installed().filter { it.title != added.title } + added)
     }

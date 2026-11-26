@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
@@ -68,6 +70,7 @@ import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.anki.AnkiStatus
 import io.github.beesan.lfg.backup.Backup
 import io.github.beesan.lfg.core.DialogueBox
+import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.ReadingGoals
 import io.github.beesan.lfg.core.ReadingStats
@@ -160,6 +163,16 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     LaunchedEffect(Unit) {
         if (input.inputMode == InputMode.Keyboard && lastSetting != null) runCatching { back.requestFocus() }
     }
+    var query by rememberSaveable { mutableStateOf("") }
+    SettingsSearchField(query, { query = it })
+    // Something typed: the settings it finds, in place of the pages.
+    if (query.isNotBlank()) {
+        SettingsSearchResults(SettingsIndex.search(query)) {
+            lastSetting = it
+            onOpen(it)
+        }
+        return@Page
+    }
     @Composable
     fun Item(name: String, detail: String, page: Page) = Card(
         name, detail,
@@ -169,7 +182,8 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
         },
         modifier = if (page == lastSetting) Modifier.focusRequester(back) else Modifier,
     )
-    Item("Appearance", "Colours, and light or dark", Page.APPEARANCE)
+    Item("Language", "The language you are learning", Page.LANGUAGE)
+    Item("Appearance", "Colours, light or dark, and button sounds", Page.APPEARANCE)
     Item("Backup", "Back up, restore, and back up on a schedule", Page.BACKUP)
     Item("Translation", "Translate and explain lines with your OpenRouter key", Page.TRANSLATION)
     Item("Diary", "When the model writes each day you played", Page.DIARY_SETTINGS)
@@ -183,7 +197,7 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
     Item("Character names", "A visual novel's cast from VNDB, so its names look up as its characters", Page.CHARACTER_NAMES)
     Item("Sound and pictures", "Sentence audio, spoken lines and animated pictures", Page.MEDIA)
     Item("Other apps", "Read browsers, chat and ebooks when you ask", Page.APPS)
-    Item("Practice line", "Try a lookup and a card without a game", Page.PRACTICE)
+    Item("Tutorial", "Practise a lookup, a card and the wheel without a game", Page.PRACTICE)
     Item("Storage", "What LFG keeps, and how long screens are kept", Page.STORAGE)
     Item("Help improve LFG", "Keep screens of dialogue, and send them to train a better reader", Page.DIALOGUE)
     Item("Help and diagnostics", "A report to send with a bug, or after a first run on a new device", Page.HELP)
@@ -343,15 +357,44 @@ fun AnkiScreen(setup: SetupState, onFindAgain: () -> Unit, onConnect: () -> Unit
     }
 }
 
-fun shortcutLabel(prefs: Prefs) = when (prefs.shortcut) {
-    Prefs.SHORTCUT_L1_R1 -> "L1 + R1"
-    Prefs.SHORTCUT_L2_R2 -> "L2 + R2"
-    Prefs.SHORTCUT_SELECT_START -> "Select + Start"
-    Prefs.SHORTCUT_SELECT -> "Select"
-    Prefs.SHORTCUT_START -> "Start"
-    Prefs.SHORTCUT_L3 -> "L3"
-    Prefs.SHORTCUT_R3 -> "R3"
-    else -> "L3 + R3"
+fun shortcutLabel(prefs: Prefs) = io.github.beesan.lfg.core.Shortcut.label(prefs.shortcut)
+
+/**
+ * The language being learnt. Changing it changes what the reader reads lines as, whose rules a lookup
+ * takes words apart by, and which dictionaries are looked up in: each language keeps its own, and
+ * one picked for the first time has its dictionary fetched.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun LanguageScreen(
+    learning: Language,
+    dictionary: DictState,
+    fetching: DictState?,
+    reader: ModelState,
+    onPick: (Language) -> Unit,
+    onRetry: () -> Unit,
+    onBack: () -> Unit,
+) = Page("Language", onBack) {
+    Text("LFG reads your games in this language and looks its words up.", color = Lfg.Dim, fontSize = 15.sp)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Language.entries.forEach { language ->
+            LfgButton(if (language.ownName == language.title) language.title else "${language.title} · ${language.ownName}", { onPick(language) }, primary = language == learning)
+        }
+    }
+    val state = fetching ?: dictionary
+    Card(
+        "${learning.title} dictionaries",
+        when (state) {
+            is DictState.Ready -> state.dictionaries.filter { it.vndb == null }.joinToString { it.title }
+            is DictState.Downloading -> "Downloading… ${if (state.total > 0) state.bytes * 100 / state.total else 0}%"
+            is DictState.Installing -> "Setting up…"
+            is DictState.Failed -> state.reason
+            DictState.Missing -> "Waiting for the internet…"
+        },
+    ) {
+        if (state is DictState.Failed) LfgButton("Try again", onRetry)
+    }
+    if (reader !is ModelState.Ready) Text("The screen reader is still downloading.", color = Lfg.Dim, fontSize = 14.sp)
 }
 
 /** The colour scheme, and whether it is light, dark or follows the system. Used by the app, the overlays and the widgets. */
@@ -369,6 +412,7 @@ fun AppearanceScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack:
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Choice(Palette.SCHEMES, prefs.colours) { v -> onChange { it.copy(colours = v) } }
     }
+    Card("Button sounds", "Buttons click when you press them.") { OnOff(prefs.buttonSounds) { on -> onChange { it.copy(buttonSounds = on) } } }
 }
 
 /**
@@ -488,6 +532,8 @@ private fun SettingText(name: String, detail: String, value: String, secret: Boo
             onValueChange = onChange,
             singleLine = true,
             visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+            // A key is a password to the keyboard too: it then neither suggests it nor learns it.
+            keyboardOptions = if (secret) KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false) else KeyboardOptions.Default,
             textStyle = TextStyle(color = Lfg.Text, fontSize = 16.sp),
             cursorBrush = SolidColor(Lfg.Accent),
             modifier = Modifier.fillMaxWidth().padField(RoundedCornerShape(6.dp), singleLine = true).clip(RoundedCornerShape(6.dp)).background(Lfg.Sunken).padding(horizontal = 12.dp, vertical = 12.dp),
@@ -537,7 +583,7 @@ fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: (
             onChange { it.copy(selection = v) }
         }
     }
-    Card("Japanese characters only", "The cursor and a tap land only on kana and kanji, never on digits or Latin letters. Punctuation is always passed over.") {
+    if (prefs.learning.japanese) Card("Japanese characters only", "The cursor and a tap land only on kana and kanji, never on digits or Latin letters. Punctuation is always passed over.") {
         OnOff(prefs.japaneseOnly) { v -> onChange { it.copy(japaneseOnly = v) } }
     }
     Card("Lines on the other screen", "On a two-screen handheld, the screen the game is not on lists the game's lines as they are read.") {
@@ -1092,7 +1138,7 @@ internal fun durationParts(seconds: Double): List<Pair<String, String>> {
     return if (minutes >= 60) listOf("${minutes / 60}" to "h", "${minutes % 60}" to "min") else listOf("$minutes" to "min")
 }
 
-enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINES, LINE, DIARY, DIARY_MONTH, DIARY_DAY, DIARY_ENTRY, DIARY_WRITE, DIARY_SHARE, DIARY_SETTINGS, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE, BOX_DRAW, WHEEL, WHEEL_EDIT, SEARCH }
+enum class Page { STORAGE, HELP, DIALOGUE, HOME, LINES, LINE, DIARY, DIARY_MONTH, DIARY_DAY, DIARY_ENTRY, DIARY_WRITE, DIARY_SHARE, DIARY_SETTINGS, RECAP, ASK, STATS, GAME_STATS, GOALS, SETTINGS, APPEARANCE, TRANSLATION, BACKUP, DICTIONARIES, SOURCES, ANKI, CONTROLS, RECOGNITION, GAMES, GAME_NAMES, CHARACTER_NAMES, VN_SEARCH, MEDIA, APPS, PRACTICE, BOX_DRAW, WHEEL, WHEEL_EDIT, SEARCH, LANGUAGE }
 
 @Composable
 fun StorageScreen(

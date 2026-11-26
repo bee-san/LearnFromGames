@@ -2,7 +2,7 @@
 
 # LearnFromGames
 
-**Learn Japanese from the games you are already playing.**
+**Learn a language from the games you are already playing.**
 
 Tap a word in a game, or pick it with the controller. Read the entry. Press once for an Anki card with the screenshot.
 
@@ -16,13 +16,18 @@ Tap a word in a game, or pick it with the controller. Read the entry. Press once
 
 </div>
 
-LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSentenceMiner) for Android handhelds, designed for the AYN Thor first. It sits over any game or emulator, reads the Japanese on screen, and turns it into something you can look up and keep.
+LearnFromGames (LFG) is [GameSentenceMiner](https://github.com/bpwhelan/GameSentenceMiner) for Android handhelds, designed for the AYN Thor first. It sits over any game or emulator, reads the text on screen, and turns it into something you can look up and keep.
 
 > [!WARNING]
 > **Nothing here has run on a real handheld yet.** Every part is built and has been run on Android emulators (Android 13 and 15). What only a device can answer is listed under [Not done, or not known](#not-done-or-not-known).
 
 ## What it does
 
+- **Twenty-six languages.** Japanese first, and also Chinese, Korean, English, Spanish, French, German, Italian, Portuguese, Russian and sixteen more: every language [hoshidicts](https://github.com/bee-san/hoshidicts) has a pack for. The packs are where [Hachidori](https://github.com/bee-san/hachidori)'s rules live, so *comimos* finds *comer* and *봤어요* finds *보다*. Each language has its own dictionaries, and its Wiktionary dictionary is fetched when you pick it. The reader is told the language; kana repair, furigana, pitch accent and VNDB's names stay Japanese's own.
+- **Set-up that asks one thing at a time.** Your language, whether you play with a controller (and which button opens LFG: press it, or two together), AnkiDroid, games only or everywhere, an OpenRouter key if you have one. Then a tutorial on a practice screen that is read as a game is: the lookup, the card and the wheel you try there are the real ones. Settings › Tutorial opens it again.
+- **Search in Settings.** Type what you are looking for; every setting on every page is found by its name or by what you would call it.
+- **Translation with no internet.** With an OpenRouter key, a line you translate while offline is translated on the device by [ML Kit](https://developers.google.com/ml-kit/language/translation) instead, and says so: "(Google Translate, offline)". The model for your language (30 to 50 MB) is fetched ahead of time, while there is internet. Latin, Ancient Greek, Old Irish, Assyrian Neo-Aramaic, Yiddish and Basque have none.
+- **Buttons that click.** The app's buttons play the press and release of a mechanical keyboard ([button-sounds](https://github.com/joshwcomeau/button-sounds), Hi75 gentle). Settings › Appearance turns them off.
 - **Reads the game for you.** An accessibility service pictures the screen, notices when new text has stopped moving, and reads it. No screen-recording prompt, no setup per game.
 - **Tap a word on the game.** Each line of text becomes tappable where it is drawn. A wrapped sentence is one sentence, and a word cut by the line break is still one word.
 - **Or never let go of the controller.** L3 + R3 turns the pad into a text cursor: by word, by line, by character. The game receives nothing until you leave. The shortcut can be one button instead (L3, R3, Select or Start), which is then kept from the game, and the left stick can go word by word where the stick is under your thumb. A tap that misses the words does not reach the game either.
@@ -420,7 +425,23 @@ The app is GPL-3.0-or-later, as hoshidicts is.
   published for Chromium; no licence for them was found, so the app downloads
   them from Chromium's package store and never ships them.
 - libwebp is BSD-3-Clause. AnkiDroid's API is LGPL-3.0.
+- ML Kit's on-device translation (`com.google.mlkit:translate`) is Google's and is not open source: it comes
+  under the [ML Kit terms](https://developers.google.com/ml-kit/terms), which ask that its translations be
+  shown as Google's. The text it translates stays on the device; ML Kit itself sends Google figures on how
+  it is used. A GPL app that links it is a question for whoever distributes the app.
 - Silero VAD is MIT. Its model's weights ship in `app/src/main/assets/vad`, run by the app's own port of it.
+- Button sounds: the "HI-75 soft" recordings of Josh Comeau's [button-sounds](https://buttons.joshwcomeau.com/),
+  cut into `app/src/main/res/raw/click_*.ogg`, are MIT:
+
+  > MIT License
+  >
+  > Copyright (c) 2026-present Josh Comeau
+  >
+  > Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+  >
+  > The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+  >
+  > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ## Thanks
 

@@ -6,7 +6,9 @@ import android.graphics.drawable.ColorDrawable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.core.view.WindowCompat
-import io.github.beesan.lfg.core.Language
+import io.github.beesan.lfg.core.SetupFlow
+import io.github.beesan.lfg.core.SetupStep
+import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.core.Palette
 import io.github.beesan.lfg.core.StatsPeriod
 import io.github.beesan.lfg.core.Updates
@@ -69,8 +71,9 @@ class MainActivity : ComponentActivity() {
             val fetchingDictionary by model.fetchingDictionary.collectAsStateWithLifecycle()
             val reader by model.reader.collectAsStateWithLifecycle()
             val prefs by model.prefs.collectAsStateWithLifecycle()
-            val practice by model.practice.collectAsStateWithLifecycle()
-            val practiceDone by model.practiceDone.collectAsStateWithLifecycle()
+            val pad by model.pad.collectAsStateWithLifecycle()
+            val practising by PracticeActivity.showing.collectAsStateWithLifecycle()
+            val shortcutPressed by model.shortcutPressed.collectAsStateWithLifecycle()
             val lines by model.lines.collectAsStateWithLifecycle()
             val linesLoaded by model.linesLoaded.collectAsStateWithLifecycle()
             val games by model.games.collectAsStateWithLifecycle()
@@ -160,12 +163,30 @@ class MainActivity : ComponentActivity() {
                 asked?.let { page = it }
                 requested.value = null
             }
-            val ready = setup.complete(dictionary, reader) && prefs.keepDialogueAsked && Language.of(prefs.language) != null
-            val showPractice = page == Page.PRACTICE || (page == Page.HOME && ready && !practiceDone)
-
-            // The first word is looked up before anything is tapped, as the controller cursor is.
-            LaunchedEffect(showPractice) {
-                if (showPractice && practice.entry == null) model.lookupPractice(PRACTICE_SENTENCE.indexOf("不思議"))
+            // Set-up, until it has been gone through once: which of its steps there are, and the one it is on.
+            val settingUp = !prefs.setupDone
+            val downloaded = dictionary is DictState.Ready && reader is io.github.beesan.lfg.ocr.ModelState.Ready
+            val steps = SetupFlow.steps(prefs.usesController, pad != null, downloaded)
+            val step = SetupFlow.settle(SetupStep.of(prefs.setupStep), steps)
+            fun goTo(next: SetupStep) = model.updatePrefs { it.copy(setupStep = next.name) }
+            if (settingUp && page == Page.HOME) {
+                // A controller turned on or paired while set-up asks about one is seen without a press.
+                if (step == SetupStep.CONTROLLER || step == SetupStep.CONNECT) LaunchedEffect(step) {
+                    while (true) {
+                        model.lookForPad()
+                        kotlinx.coroutines.delay(1_000)
+                    }
+                }
+                // "Pick your LFG button": every button pressed is the answer, here and in the service.
+                androidx.compose.runtime.DisposableEffect(step) {
+                    choosingShortcut = step == SetupStep.BUTTON
+                    LfgAccessibilityService.choosingShortcut = choosingShortcut
+                    onDispose {
+                        choosingShortcut = false
+                        LfgAccessibilityService.choosingShortcut = false
+                        model.forgetShortcutPressed()
+                    }
+                }
             }
             fun back() {
                 // Stats keeps its period and chart across the goals page, and opens on its defaults again after Home.
@@ -187,47 +208,51 @@ class MainActivity : ComponentActivity() {
                 }
             }
             // A line's page opened from over a game to ask about the line goes back to the game's lines.
+            // In set-up, back is the question before.
+            BackHandler(enabled = page == Page.HOME && settingUp && SetupFlow.previous(step, steps) != null) { SetupFlow.previous(step, steps)?.let(::goTo) }
             BackHandler(enabled = page != Page.HOME) { if ((page == Page.LINE && askFromGame) || (page == Page.DIARY_WRITE && noteFromGame)) finish() else back() }
 
-            Box(Modifier.fillMaxSize().background(Lfg.Bg).safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
+            ClickSounds(prefs.buttonSounds) { Box(Modifier.fillMaxSize().background(Lfg.Bg).safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
                 val frame = Modifier.widthIn(max = 980.dp).padding(horizontal = 24.dp, vertical = 20.dp)
                 Box(frame) {
                     when {
-                        page == Page.HOME && !ready -> {
+                        page == Page.HOME && settingUp -> {
                             val scroll = rememberScrollState()
-                            Box(Modifier.padScroll(scroll).verticalScroll(scroll).firstFocus()) {
+                            Box(Modifier.padScroll(scroll).verticalScroll(scroll)) {
                                 SetupScreen(
-                                    setup = setup,
-                                    dictionary = dictionary,
-                                    reader = reader,
-                                    onTurnOn = ::openAccessibilitySettings,
-                                    onOpenAppInfo = ::openAppInfo,
-                                    onConnectAnki = { ankiPermission.launch(AnkiBridge.PERMISSION) },
-                                    onInstallAnki = ::openAnkiDroidListing,
-                                    onRetryDownloads = model::retryDownloads,
-                                    wifiOnly = prefs.wifiOnly,
-                                    onWifiOnly = model::setWifiOnly,
-                                    language = Language.of(prefs.language),
-                                    onLanguage = { picked -> model.updatePrefs { it.copy(language = picked.tag) } },
-                                    askKeepDialogue = !prefs.keepDialogueAsked,
-                                    onKeepDialogue = { yes -> model.updatePrefs { it.copy(keepDialogue = yes, keepDialogueAsked = true) } },
-                                )
-                            }
-                        }
-                        showPractice -> {
-                            val scroll = rememberScrollState()
-                            Box(Modifier.padScroll(scroll).verticalScroll(scroll).firstFocus()) {
-                                ReadyScreen(
-                                    setup = setup,
-                                    dictionaryTitles = (dictionary as? DictState.Ready)?.dictionaries?.joinToString { it.title } ?: "",
-                                    practice = practice,
-                                    shortcut = shortcutLabel(prefs),
-                                    onTapCharacter = model::lookupPractice,
-                                    onAddCard = model::addPracticeCard,
-                                    onDone = {
-                                        model.finishPractice()
-                                        page = Page.HOME
-                                    },
+                                    step = step, steps = steps, setup = setup, dictionary = dictionary, reader = reader, prefs = prefs,
+                                    pad = pad, pressed = shortcutPressed, keyTest = keyTest, practising = practising,
+                                    actions = SetupActions(
+                                        onLanguage = { picked ->
+                                            model.updatePrefs { it.copy(language = picked.tag, setupStep = SetupFlow.next(step, steps).name) }
+                                        },
+                                        onTurnOn = ::openAccessibilitySettings,
+                                        onOpenAppInfo = ::openAppInfo,
+                                        onController = { yes ->
+                                            // Without a controller a tap always looks a word up, even on a handheld that has one built in.
+                                            val then = SetupFlow.next(SetupStep.CONTROLLER, SetupFlow.steps(yes, pad != null, downloaded))
+                                            model.updatePrefs {
+                                                it.copy(usesController = yes, tapLookup = if (yes) Prefs.TAP_AUTO else Prefs.TAP_ALWAYS, setupStep = then.name)
+                                            }
+                                        },
+                                        onBluetooth = { open(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
+                                        onShortcut = { saved -> model.updatePrefs { it.copy(shortcut = saved, setupStep = SetupFlow.next(step, steps).name) } },
+                                        onConnectAnki = { ankiPermission.launch(AnkiBridge.PERMISSION) },
+                                        onInstallAnki = ::openAnkiDroidListing,
+                                        onEverywhere = { all -> model.updatePrefs { it.copy(readButton = all, setupStep = SetupFlow.next(step, steps).name) } },
+                                        onKey = { key -> model.updatePrefs { it.copy(openRouterKey = key.trim()) } },
+                                        onTestKey = model::testKey,
+                                        onKeepDialogue = { yes ->
+                                            model.updatePrefs { it.copy(keepDialogue = yes, keepDialogueAsked = true, setupStep = SetupFlow.next(step, steps).name) }
+                                        },
+                                        onWifiOnly = model::setWifiOnly,
+                                        onRetry = model::retryDownloads,
+                                        // The tutorial ends set-up itself, done or skipped.
+                                        onTutorial = { PracticeActivity.start(this@MainActivity) },
+                                        onFinish = { model.updatePrefs { it.copy(setupDone = true) } },
+                                        onNext = { goTo(SetupFlow.next(step, steps)) },
+                                        onBack = { SetupFlow.previous(step, steps)?.let(::goTo) },
+                                    ),
                                 )
                             }
                         }
@@ -452,6 +477,17 @@ class MainActivity : ComponentActivity() {
                         page == Page.GAME_STATS -> GameStatsScreen(stats, games.firstOrNull { it.id == statsGame }, statsGame, statsGamePeriod, ::back)
                         page == Page.GOALS -> GoalsScreen(prefs, model::updatePrefs, ::back)
                         page == Page.SETTINGS -> SettingsScreen(onOpen = { page = it }, onBack = ::back)
+                        // Settings › Tutorial: the practice screen opens, and Settings is what it comes back to.
+                        page == Page.PRACTICE -> LaunchedEffect(Unit) {
+                            PracticeActivity.start(this@MainActivity)
+                            page = Page.SETTINGS
+                        }
+                        page == Page.LANGUAGE -> LanguageScreen(
+                            prefs.learning, dictionary, fetchingDictionary, reader,
+                            onPick = { picked -> model.updatePrefs { it.copy(language = picked.tag) } },
+                            onRetry = model::retryDownloads,
+                            onBack = ::back,
+                        )
                         page == Page.DICTIONARIES -> DictionariesScreen(
                             state = dictionary,
                             fetching = fetchingDictionary,
@@ -642,8 +678,22 @@ class MainActivity : ComponentActivity() {
                         else -> Unit
                     }
                 }
-            }
+            } }
         }
+    }
+
+    /** Set-up is asking which buttons the shortcut should be: they are its answer before they are anything else. */
+    private var choosingShortcut = false
+
+    // Lint takes Activity's own dispatchKeyEvent for androidx.core's restricted one of the same name.
+    @android.annotation.SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (choosingShortcut && (event.action == android.view.KeyEvent.ACTION_UP || event.repeatCount == 0) &&
+            model.shortcutKey(event.keyCode, event.action == android.view.KeyEvent.ACTION_DOWN)
+        ) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onNewIntent(intent: Intent) {

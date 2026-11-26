@@ -41,6 +41,13 @@
             </intent-filter>
         </activity>
 
+        <!-- The tutorial: a screen that looks like a game and is read as one. It fills the screen, as a game does. -->
+        <activity
+            android:name=".ui.PracticeActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation"
+            android:exported="false"
+            android:theme="@style/Theme.Lfg" />
+
         <service
             android:name=".capture.LfgAccessibilityService"
             android:exported="true"

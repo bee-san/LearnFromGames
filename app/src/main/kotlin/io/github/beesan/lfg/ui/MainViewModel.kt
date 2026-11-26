@@ -75,18 +75,6 @@ data class SetupState(
             (anki == AnkiStatus.NOT_INSTALLED || (anki == AnkiStatus.READY && ankiTarget != null))
 }
 
-/** The practice sentence that ends set-up with a real lookup. */
-data class PracticeState(
-    val sentence: String = PRACTICE_SENTENCE,
-    val spanStart: Int = 0,
-    val spanEnd: Int = 0,
-    val entry: Entry? = null,
-    val button: CardButton = CardButton.ADD,
-    val message: String? = null,
-)
-
-const val PRACTICE_SENTENCE = "昨日の夜、森の奥で不思議な光を見たんだ。"
-
 /** [progress] says how adding is going when there is more to say than "Adding…" (a Rubi dictionary's conversion). */
 data class DictionariesState(val busy: Boolean = false, val error: String? = null, val progress: String? = null)
 
@@ -111,13 +99,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val fetchingDictionary: StateFlow<DictState?> = app.dictionaries.fetching
     val reader: StateFlow<ModelState> = app.models.screenAi
     val prefs: StateFlow<Prefs> = app.settings.prefs
-
-    private val _practice = MutableStateFlow(PracticeState())
-    val practice: StateFlow<PracticeState> = _practice
-
-    /** Set-up's last screen has been seen: from then on the app opens on Lines. */
-    private val _practiceDone = MutableStateFlow(ui.getBoolean("practiceDone", false))
-    val practiceDone: StateFlow<Boolean> = _practiceDone
 
     /** The newest lines; null until the store has answered, so an empty list really is empty. */
     private val recentLines: StateFlow<List<GameLine>?> =
@@ -162,10 +143,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _sources = MutableStateFlow<List<DictionarySource>>(emptyList())
     val sources: StateFlow<List<DictionarySource>> = _sources
-
-    /** What became of each word carded from the practice line, so its button reads the same on return. */
-    private val practiceDoneWords = HashMap<String, CardButton>()
-    private var practiceLineId: String? = null
 
     init {
         viewModelScope.launch { LfgAccessibilityService.running.collect { refresh() } }
@@ -252,63 +229,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun finishPractice() {
-        ui.edit().putBoolean("practiceDone", true).apply()
-        _practiceDone.value = true
+    // ── set-up ───────────────────────────────────────────────────────────────
+
+    /** The controller the device has or is connected to, by its name; null for none. Looked for while set-up asks about one. */
+    private val _pad = MutableStateFlow(findPad())
+    val pad: StateFlow<String?> = _pad
+
+    fun lookForPad() {
+        _pad.value = findPad()
     }
 
-    fun showPracticeAgain() {
-        _practiceDone.value = false
-    }
-
-    // ── the practice line ────────────────────────────────────────────────────
-
-    /** Looks up the longest word starting at [index] of the practice sentence. */
-    fun lookupPractice(index: Int) {
-        val sentence = _practice.value.sentence
-        if (index !in sentence.indices) return
-        viewModelScope.launch {
-            val entry = app.dictionaries.lookup(sentence.substring(index)).firstOrNull() ?: return@launch
-            val end = (index + entry.matched.length).coerceAtMost(sentence.length)
-            _practice.update {
-                it.copy(
-                    spanStart = index, spanEnd = end, entry = entry, message = null,
-                    button = practiceDoneWords[entry.expression] ?: CardButton.ADD,
-                )
-            }
+    private fun findPad(): String? {
+        val gamepad = android.view.InputDevice.SOURCE_GAMEPAD
+        for (id in android.view.InputDevice.getDeviceIds()) {
+            val device = android.view.InputDevice.getDevice(id) ?: continue
+            if (!device.isVirtual && device.sources and gamepad == gamepad) return device.name?.takeIf { it.isNotBlank() } ?: "a controller"
         }
+        return null
     }
 
-    fun addPracticeCard() {
-        val state = _practice.value
-        val entry = state.entry ?: return
-        if (state.button != CardButton.ADD) return
-        _practice.update { it.copy(button = CardButton.ADDING, message = null) }
-        viewModelScope.launch {
-            val lineId = practiceLineId ?: run {
-                val game = app.lines.gameFor(app.packageName, PRACTICE_GAME)
-                app.lines.saveLine(game, state.sentence, LineStore.SOURCE_PRACTICE).id.also { practiceLineId = it }
-            }
-            val content = CardContent(
-                expression = entry.expression, reading = entry.reading, sentence = state.sentence,
-                spanStart = state.spanStart, spanEnd = state.spanEnd, senses = entry.senses(), gameName = PRACTICE_GAME,
-            )
-            val result = app.cards.add(lineId, content)
-            when (result) {
-                is CardResult.Added, CardResult.Duplicate -> practiceDoneWords[entry.expression] = CardButton.IN_ANKI
-                is CardResult.Waiting -> practiceDoneWords[entry.expression] = CardButton.WAITING
-                is CardResult.Failed -> Unit
-            }
-            _practice.update {
-                // The reply may arrive after another word was tapped; leave that word's button alone.
-                if (it.entry?.expression != entry.expression) it else when (result) {
-                    is CardResult.Added -> it.copy(button = CardButton.IN_ANKI, message = "Card added")
-                    CardResult.Duplicate -> it.copy(button = CardButton.IN_ANKI)
-                    is CardResult.Waiting -> it.copy(button = CardButton.WAITING, message = result.reason + " The card is kept here until it is.")
-                    is CardResult.Failed -> it.copy(button = CardButton.ADD, message = result.reason)
-                }
-            }
+    /** The buttons pressed at "Pick your LFG button", as [io.github.beesan.lfg.core.Shortcut] saves them; null before any. */
+    private val _shortcutPressed = MutableStateFlow<String?>(null)
+    val shortcutPressed: StateFlow<String?> = _shortcutPressed
+    private val held = LinkedHashSet<Int>()
+    private var chord = emptySet<Int>()
+
+    /**
+     * A button went down or up while set-up asks for the shortcut. The answer is every button that was
+     * down together, taken when the first of them is let go. Returns whether the press was the answer's:
+     * the D-pad and the face buttons are not, so the page can still be moved about and pressed.
+     */
+    fun shortcutKey(code: Int, down: Boolean): Boolean {
+        if (!android.view.KeyEvent.isGamepadButton(code) || !io.github.beesan.lfg.core.Shortcut.allowed(code)) return false
+        if (down) {
+            if (held.isEmpty()) chord = emptySet()
+            held += code
+            chord = chord + code
+        } else {
+            held -= code
+            if (chord.isNotEmpty()) io.github.beesan.lfg.core.Shortcut.of(chord.take(2))?.let { _shortcutPressed.value = it }
         }
+        return true
+    }
+
+    /** The shortcut's step was left: the next visit starts from what is saved. */
+    fun forgetShortcutPressed() {
+        held.clear()
+        chord = emptySet()
+        _shortcutPressed.value = null
     }
 
     // ── lines ────────────────────────────────────────────────────────────────
@@ -948,7 +916,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         /** The most of a file that is read as a wheel. */
         private const val WHEEL_FILE_BYTES = 262_144
-        const val PRACTICE_GAME = "LFG practice"
 
         fun dayLabel(day: LocalDate, today: LocalDate): String = when (day) {
             today -> "Today"

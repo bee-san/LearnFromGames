@@ -53,17 +53,26 @@ JNIEXPORT jboolean JNICALL Java_io_github_beesan_lfg_dict_Hoshidicts_nativeAddDi
   return session(handle)->add_dictionary(to_string(env, path), static_cast<lfg::DictKind>(kind)) ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jbyteArray JNICALL Java_io_github_beesan_lfg_dict_Hoshidicts_nativeAddLanguage(JNIEnv* env, jobject, jlong handle,
+                                                                                         jbyteArray language,
+                                                                                         jbyteArray transforms) {
+  if (handle == 0) return to_bytes(env, "The dictionary engine did not start.");
+  return to_bytes(env, session(handle)->add_language(to_string(env, language), to_string(env, transforms)));
+}
+
 JNIEXPORT jbyteArray JNICALL Java_io_github_beesan_lfg_dict_Hoshidicts_nativeLookup(JNIEnv* env, jobject, jlong handle,
                                                                                     jbyteArray text, jint max_results,
-                                                                                    jint scan_length) {
+                                                                                    jint scan_length, jbyteArray language) {
   if (handle == 0) return to_bytes(env, "{\"results\":[]}");
-  return to_bytes(env, session(handle)->lookup(to_string(env, text), max_results, static_cast<size_t>(scan_length)));
+  return to_bytes(env, session(handle)->lookup(to_string(env, text), max_results, static_cast<size_t>(scan_length),
+                                               to_string(env, language)));
 }
 
 JNIEXPORT jint JNICALL Java_io_github_beesan_lfg_dict_Hoshidicts_nativeMatchLength(JNIEnv* env, jobject, jlong handle,
-                                                                                    jbyteArray text, jint scan_length) {
+                                                                                    jbyteArray text, jint scan_length,
+                                                                                    jbyteArray language) {
   if (handle == 0) return 0;
-  return session(handle)->match_length(to_string(env, text), static_cast<size_t>(scan_length));
+  return session(handle)->match_length(to_string(env, text), static_cast<size_t>(scan_length), to_string(env, language));
 }
 
 JNIEXPORT jbyteArray JNICALL Java_io_github_beesan_lfg_dict_Hoshidicts_nativeStyles(JNIEnv* env, jobject, jlong handle) {

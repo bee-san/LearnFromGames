@@ -23,7 +23,7 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 - `git submodule update --init --recursive`. Without `--recursive`, hoshidicts' own submodules (glaze, zstd, libdeflate…) are empty and CMake fails.
 - Copy `local.properties` from the main checkout (it points at the SDK in `~/.local/share/chimahon-android-sdk`).
 - **ScreenAI is not in git.** `app/src/main/jniLibs/<abi>/libchromescreenai.so` is ignored and made by `tools/build_screenai.sh`. Without it the APK builds fine but has no ScreenAI, and the app has no reader. Copy it from the main checkout, take it out of the release APK of the same tag, or run the script.
-- **Check every APK before installing it:** `unzip -l <apk> | grep '\.so'` must list `libchromescreenai.so`, `liblfg.so` and `libandroidx.graphics.path.so`.
+- **Check every APK before installing it:** `unzip -l <apk> | grep '\.so'` must list `libchromescreenai.so`, `liblfg.so` and `libandroidx.graphics.path.so` (and ML Kit's `libtranslate_jni.so`, which Gradle brings by itself).
 
 ## Releases
 
@@ -54,6 +54,17 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 
 - `lfg_api33` (Android 13, as the Thor) on port 5560. Test there, not on API 35: an Android 14 API passed on 35 and crashed on 33.
 - Never run `uiautomator dump` while testing: it suspends accessibility services.
+
+## Languages
+
+- The rules that take an inflected word back to its dictionary form are hoshidicts' language packs (`third_party/hoshidicts/languages/<code>`), the same ones Hachidori ships. Gradle's `languagePacks` task copies each pack's two JSON files into the APK's assets; Japanese is built into the engine. `core/Language.kt` has one entry a pack and `SetupTest` fails when the two disagree, so a new pack upstream needs its line there.
+- Moving the hoshidicts submodule forward: dictionaries people already imported must still open. Import one with the old `lfg_dict_host`, build the new one (`cmake -S app/src/main/cpp -B <dir> && cmake --build <dir> --target lfg_dict_host`), and compare `all <dir> <text>` from both.
+- A dictionary belongs to the language it was added under (`InstalledDictionary.language`); only the language being learnt is listed, fetched and looked up in.
+
+## Set-up and the tutorial
+
+- Set-up is `core/SetupFlow.kt` (which steps there are) and `ui/SetupScreen.kt`; the tutorial is `ui/PracticeActivity.kt`, which the service reads as a game (`LfgAccessibilityService.practiseOn`). Words there follow the owner's rule: few, plain, every sentence worth reading.
+- To see set-up again on the emulator: `am force-stop` the app first (a running app writes its settings back over yours), take `setupDone`, `keepDialogueAsked` and `language` out of `shared_prefs/settings.xml`, then switch the service on again, since a force-stop switches it off.
 
 ## Before pushing
 

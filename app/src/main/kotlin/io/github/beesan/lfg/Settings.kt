@@ -10,7 +10,10 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** The few choices the app has. Every one has a default, so none is ever asked for. */
 data class Prefs(
-    /** One of the SHORTCUT_ values: a pair of buttons pressed together, or one button alone. */
+    /**
+     * One of the SHORTCUT_ values: a pair of buttons pressed together, or one button alone. Or the
+     * buttons pressed at set-up, as [io.github.beesan.lfg.core.Shortcut] saves them.
+     */
     val shortcut: String = SHORTCUT_L3_R3,
     /** Swap which face button adds a card and which closes, for pads printed the other way round. */
     val swapConfirm: Boolean = false,
@@ -168,13 +171,24 @@ data class Prefs(
     val wheelSize: Int = 100,
     /** How dark the game is behind the wheel, as a percentage. */
     val wheelDim: Int = 60,
+    /** The app's buttons click as they are pressed and let go. */
+    val buttonSounds: Boolean = true,
+    /** Set-up has been gone through to its end; until then the app opens on it, at [setupStep] (a [io.github.beesan.lfg.core.SetupStep]'s name). */
+    val setupDone: Boolean = false,
+    val setupStep: String = "",
+    /** Said at set-up: a controller is used, so the tutorial is the controller's and not the finger's. */
+    val usesController: Boolean = false,
 ) {
     val goals: ReadingGoals get() = ReadingGoals(goalMinutes, goalChars)
 
     /** Translate and Explain are offered wherever a line shows, once there is a key to ask with. */
     val aiReady: Boolean get() = openRouterKey.isNotBlank()
 
-    val picking: io.github.beesan.lfg.core.Selection get() = io.github.beesan.lfg.core.Selection(selection != SELECT_CHARACTER, japaneseOnly)
+    /** The language being learnt; Japanese until the question is answered. */
+    val learning: Language get() = Language.orJapanese(language)
+
+    val picking: io.github.beesan.lfg.core.Selection
+        get() = io.github.beesan.lfg.core.Selection(selection != SELECT_CHARACTER, japaneseOnly && learning.japanese, learning.wordStart)
 
     companion object {
         const val SHORTCUT_L3_R3 = "l3r3"
@@ -293,6 +307,11 @@ class Settings(context: Context) {
             wheelIconsOnly = store.getBoolean("wheelIconsOnly", d.wheelIconsOnly),
             wheelSize = store.getInt("wheelSize", d.wheelSize),
             wheelDim = store.getInt("wheelDim", d.wheelDim),
+            buttonSounds = store.getBoolean("buttonSounds", d.buttonSounds),
+            // Set up before set-up had steps: not gone through again.
+            setupDone = store.getBoolean("setupDone", store.getBoolean("keepDialogueAsked", false)),
+            setupStep = store.getString("setupStep", d.setupStep) ?: d.setupStep,
+            usesController = store.getBoolean("usesController", d.usesController),
         )
     }
 
@@ -364,6 +383,10 @@ class Settings(context: Context) {
             .putBoolean("wheelIconsOnly", next.wheelIconsOnly)
             .putInt("wheelSize", next.wheelSize)
             .putInt("wheelDim", next.wheelDim)
+            .putBoolean("buttonSounds", next.buttonSounds)
+            .putBoolean("setupDone", next.setupDone)
+            .putString("setupStep", next.setupStep)
+            .putBoolean("usesController", next.usesController)
             .apply()
         secrets.edit().putString("openRouterKey", next.openRouterKey).putString("steamKey", next.steamKey).apply()
         _prefs.value = next

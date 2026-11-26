@@ -82,9 +82,9 @@ class DictTest {
     fun theStarterSetIsHachidorisInItsOrder() {
         assertEquals(
             listOf("jitendex", "jmnedict", "bees-ultimate-kanji-dictionary", "jiten", "bees-ultimate-grammar-dictionary"),
-            DefaultDictionaries.ALL.map { it.id },
+            DefaultDictionaries.of(io.github.beesan.lfg.core.Language.JAPANESE).map { it.id },
         )
-        assertTrue(DefaultDictionaries.ALL.all { it.url.startsWith("https://") })
+        assertTrue(DefaultDictionaries.of(io.github.beesan.lfg.core.Language.JAPANESE).all { it.url.startsWith("https://") })
     }
 
     @Test

@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
 import io.github.beesan.lfg.Prefs
+import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LfgDatabase
 import io.github.beesan.lfg.data.QuestionDao
@@ -34,8 +35,10 @@ class Asker(
         val earlier = db.questions().recent(gameId, EARLIER).reversed()
         val image = if (withScreen) screen(lines)?.let(encode) else null
         if (withScreen && image == null) throw OpenRouter.Failure("There is no picture of the screen to send. Read a line first.")
-        val prompt = prompt(gameName, lines.map { it.lineText }, earlier, question, image != null)
-        val response = OpenRouter.request(p.openRouterKey, OpenRouter.body(p.model, system(p.translateInto), prompt, webSearch = true, image = image))
+        val prompt = prompt(gameName, lines.map { it.lineText }, earlier, question, image != null, p.learning)
+        val response = OpenRouter.request(
+            p.openRouterKey, OpenRouter.body(p.model, system(p.translateInto, p.learning), prompt, webSearch = true, image = image),
+        )
         val row = QuestionRow(
             gameId = gameId, question = question.trim(), answer = OpenRouter.answer(response),
             sources = OpenRouter.sources(response).joinToString("\n") { "${it.url}\t${it.title}" },
@@ -52,8 +55,8 @@ class Asker(
         /** Earlier questions that go with one, so "and after that?" makes sense. */
         const val EARLIER = 3
 
-        fun system(into: String) =
-            "You help someone who is playing a Japanese game, and learning Japanese, with a question about the game. " +
+        fun system(into: String, language: Language = Language.JAPANESE) =
+            "You help someone who is playing ${language.aGame}, and learning ${language.title}, with a question about the game. " +
                 "Search the web for walkthroughs, guides and wikis when that helps. " +
                 "Answer only what was asked, in $into: short and practical, a few sentences or numbered steps they can follow. " +
                 "Don't spoil the story past the lines they have read: no later events, twists, deaths or reveals, even when a " +
@@ -62,8 +65,11 @@ class Asker(
                 "instead of guessing. No greeting and no summary of the question."
 
         /** The question, after the game, the last lines read, and the questions asked before it. */
-        fun prompt(game: String, lines: List<String>, earlier: List<QuestionRow>, question: String, withScreen: Boolean): String = buildString {
-            append("I’m playing ").append(game.ifBlank { "a Japanese game" }).append('.')
+        fun prompt(
+            game: String, lines: List<String>, earlier: List<QuestionRow>, question: String, withScreen: Boolean,
+            language: Language = Language.JAPANESE,
+        ): String = buildString {
+            append("I’m playing ").append(game.ifBlank { language.aGame }).append('.')
             if (lines.isNotEmpty()) {
                 append(" The last lines I read, oldest first, show where I am; the story must not go past them:\n<lines>\n")
                 lines.forEach { append(it.replace('\n', ' ')).append('\n') }

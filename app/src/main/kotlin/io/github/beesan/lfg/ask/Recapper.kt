@@ -3,6 +3,7 @@ package io.github.beesan.lfg.ask
 
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.ask.OpenRouter.text
+import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.core.ReadingStats
 import io.github.beesan.lfg.data.Diary
 import io.github.beesan.lfg.data.GameLine
@@ -57,7 +58,7 @@ class Recapper(
         if (fresh.isEmpty()) return row ?: throw OpenRouter.Failure("Nothing has been read in this game yet.")
         for (piece in fresh.chunked(CHUNK)) {
             val earlier = row?.let { Json.decodeFromString<Recap>(it.json) }
-            val answer = OpenRouter.ask(p.openRouterKey, p.model, SYSTEM, prompt(gameName, piece, earlier, p.translateInto, zone))
+            val answer = OpenRouter.ask(p.openRouterKey, p.model, system(p.learning), prompt(gameName, piece, earlier, p.translateInto, zone, p.learning))
             val recap = parse(answer, piece, earlier)
             row = RecapRow(
                 gameId = gameId, json = Json.encodeToString(recap), lastLineId = piece.last().id,
@@ -74,7 +75,9 @@ class Recapper(
         val p = prefs()
         val lines = db.lines().ofGame(gameId).takeLast(SCENE)
         if (lines.isEmpty()) throw OpenRouter.Failure("Nothing has been read in this game yet.")
-        return OpenRouter.ask(p.openRouterKey, p.model, SCENE_SYSTEM, scenePrompt(gameName, lines.map { it.lineText }, p.translateInto)).trim()
+        return OpenRouter.ask(
+            p.openRouterKey, p.model, sceneSystem(p.learning), scenePrompt(gameName, lines.map { it.lineText }, p.translateInto, p.learning),
+        ).trim()
     }
 
     companion object {
@@ -85,8 +88,9 @@ class Recapper(
         const val SCENE = 60
 
         /** The prompt for the scene the newest of [lines] (oldest first) are in. */
-        fun scenePrompt(game: String, lines: List<String>, into: String): String = buildString {
-            append("I’m playing ").append(game.ifBlank { "a game" }).append(", a Japanese game. Here are the lines I read last, oldest first:\n<lines>\n")
+        fun scenePrompt(game: String, lines: List<String>, into: String, language: Language = Language.JAPANESE): String = buildString {
+            append("I’m playing ").append(game.ifBlank { "a game" }).append(", ").append(language.aGame)
+            append(". Here are the lines I read last, oldest first:\n<lines>\n")
             lines.forEach { append(it.replace('\n', ' ')).append('\n') }
             append("</lines>\n\nTell me in ").append(into).append(" what is happening in the scene I’m in now, the one the last lines belong to: ")
             append("who is there, what they are talking about or doing, and where it has got to. Three or four sentences, only from ")
@@ -101,8 +105,11 @@ class Recapper(
         private val DAY = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH)
 
         /** The prompt for the lines read since [earlier]: each day's lines, numbered across all of them. */
-        fun prompt(game: String, lines: List<GameLine>, earlier: Recap?, into: String, zone: ZoneId): String = buildString {
-            append("I’m playing ").append(game.ifBlank { "a game" }).append(", a Japanese game. Here is its Japanese text as I read it, ")
+        fun prompt(
+            game: String, lines: List<GameLine>, earlier: Recap?, into: String, zone: ZoneId, language: Language = Language.JAPANESE,
+        ): String = buildString {
+            append("I’m playing ").append(game.ifBlank { "a game" }).append(", ").append(language.aGame)
+            append(". Here is its ").append(language.title).append(" text as I read it, ")
             append("by day, each line numbered:\n")
             var day = ""
             lines.forEachIndexed { i, line ->
@@ -181,12 +188,12 @@ class Recapper(
         private fun picture(line: GameLine): String? =
             line.screenshotPath?.takeIf { File(it).isFile } ?: line.cropPath?.takeIf { File(it).isFile }
 
-        const val SYSTEM =
-            "You write recaps of Japanese games for someone learning Japanese who is coming back to one: the story so far, " +
+        fun system(language: Language = Language.JAPANESE) =
+            "You write recaps of ${language.games} for someone learning ${language.title} who is coming back to one: the story so far, " +
                 "like a TV recap, from only what they have read. You answer with JSON alone."
 
-        const val SCENE_SYSTEM =
-            "You tell someone learning Japanese what is happening in the scene of a Japanese game they are reading, from only " +
+        fun sceneSystem(language: Language = Language.JAPANESE) =
+            "You tell someone learning ${language.title} what is happening in the scene of ${language.aGame} they are reading, from only " +
                 "what they have read. You answer with the telling alone, in plain text."
     }
 }

@@ -149,13 +149,13 @@ std::string import_dictionary(const std::string& zip_path, const std::string& ou
 
 Session::Session() {
   query_ = hd_query_new();
-  deinflector_ = hd_deinflector_new();
-  if (query_ != nullptr && deinflector_ != nullptr) lookup_ = hd_lookup_new(query_, deinflector_);
+  languages_ = hd_languages_new();
+  if (query_ != nullptr && languages_ != nullptr) lookup_ = hd_lookup_new_with_languages(query_, languages_);
 }
 
 Session::~Session() {
   if (lookup_ != nullptr) hd_lookup_free(lookup_);
-  if (deinflector_ != nullptr) hd_deinflector_free(deinflector_);
+  if (languages_ != nullptr) hd_languages_free(languages_);
   if (query_ != nullptr) hd_query_free(query_);
 }
 
@@ -170,12 +170,35 @@ bool Session::add_dictionary(const std::string& path, DictKind kind) {
   return false;
 }
 
-std::string Session::lookup(const std::string& text, int max_results, size_t scan_length) const {
+std::string Session::add_language(const std::string& language_json, const std::string& transforms_json) {
+  if (languages_ == nullptr) return "The dictionary engine did not start.";
+  if (hd_languages_add(languages_, language_json.c_str(), transforms_json.c_str()) == 0) return {};
+  const char* error = hd_languages_last_error(languages_);
+  return error != nullptr && *error != 0 ? error : "The language pack could not be read.";
+}
+
+namespace {
+
+// One lookup in one language, over every dictionary of the session.
+hd_lookup_results* run(const hd_lookup* lookup, const std::string& text, int max_results, size_t scan_length,
+                       const std::string& language, const hd_lookup_result** results, size_t* count) {
+  hd_language_request request{};
+  request.struct_size = sizeof request;
+  request.language = language.c_str();
+  const char* error = nullptr;
+  return hd_lookup_run_with_language(lookup, text.c_str(), max_results, scan_length, nullptr, &request, results, count,
+                                     &error);
+}
+
+}  // namespace
+
+std::string Session::lookup(const std::string& text, int max_results, size_t scan_length,
+                            const std::string& language) const {
   std::string out = "{\"results\":[";
   if (lookup_ != nullptr && !text.empty()) {
     const hd_lookup_result* results = nullptr;
     size_t count = 0;
-    hd_lookup_results* handle = hd_lookup_run(lookup_, text.c_str(), max_results, scan_length, &results, &count);
+    hd_lookup_results* handle = run(lookup_, text, max_results, scan_length, language, &results, &count);
     if (handle != nullptr) {
       for (size_t i = 0; i < count; ++i) {
         if (i) out.push_back(',');
@@ -188,11 +211,11 @@ std::string Session::lookup(const std::string& text, int max_results, size_t sca
   return out;
 }
 
-int Session::match_length(const std::string& text, size_t scan_length) const {
+int Session::match_length(const std::string& text, size_t scan_length, const std::string& language) const {
   if (lookup_ == nullptr || text.empty()) return 0;
   const hd_lookup_result* results = nullptr;
   size_t count = 0;
-  hd_lookup_results* handle = hd_lookup_run(lookup_, text.c_str(), 1, scan_length, &results, &count);
+  hd_lookup_results* handle = run(lookup_, text, 1, scan_length, language, &results, &count);
   if (handle == nullptr) return 0;
   int units = 0;
   if (count > 0) {

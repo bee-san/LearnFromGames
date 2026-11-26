@@ -106,6 +106,9 @@ android {
         // clock), which do not apply outside AnkiDroid.
         disable += "DirectSystemCurrentTimeMillisUsage"
         disable += "DirectDateInstantiation"
+        // ML Kit brings appcompat with it, and with appcompat this check. The app has no appcompat theme:
+        // its views over a game are made by the service, where appcompat's replacements never load.
+        disable += "AppCompatCustomView"
     }
 
     buildFeatures {
@@ -116,6 +119,19 @@ android {
         java.srcDir("src/$name/kotlin")
     }
 }
+
+// The language packs of hoshidicts: each language's rules for taking an inflected word back to its
+// dictionary form, as Hachidori uses them. Only the two files the engine reads go into the app. Japanese's are
+// built into the engine.
+val languagePacks = tasks.register<Sync>("languagePacks") {
+    from(rootProject.file("third_party/hoshidicts/languages")) {
+        include("*/language.json", "*/transforms.json")
+        exclude("_*/**", "ja/**")
+    }
+    into(layout.buildDirectory.dir("generated/languagePacks/languages"))
+}
+android.sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/languagePacks"))
+tasks.named("preBuild") { dependsOn(languagePacks) }
 
 kotlin {
     jvmToolchain(17)
@@ -140,6 +156,8 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.serialization.json)
     implementation(libs.ankidroid.api)
+    // Translation on the device, for when there is no internet. Its models are fetched, not packed in.
+    implementation(libs.mlkit.translate)
 
     testImplementation(libs.junit)
     // The same reader runs on the build machine against the real models.

@@ -161,7 +161,9 @@ fun Modifier.padField(shape: Shape, singleLine: Boolean): Modifier = composed {
     }
         .focusable()
         // The field itself, inside: reached by A from the pad, or by touch.
-        .onFocusChanged { if (!it.hasFocus) editing = false }
+        // Touched into, it is being written in: a keyboard with keys then types here, where its first key
+        // (which ends touch mode) used to take the focus away.
+        .onFocusChanged { editing = if (!it.hasFocus) false else editing || input.inputMode == InputMode.Touch }
         .focusProperties { canFocus = editing || input.inputMode == InputMode.Touch }
         .focusRequester(field)
 }
@@ -241,6 +243,8 @@ fun LfgButton(
         shape = RoundedCornerShape(5.dp),
         border = BorderStroke(1.dp, if (!enabled) Lfg.Soft else if (primary) Lfg.Fill else Lfg.BorderStrong),
         contentPadding = if (compact) PaddingValues(horizontal = 12.dp, vertical = 4.dp) else PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+        // Material's button draws its own press, so the click of [ClickSounds] is asked for here.
+        interactionSource = rememberClickSource(),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (primary) Lfg.Fill else Lfg.Surface,
             contentColor = if (primary) Lfg.OnFill else Lfg.Text,

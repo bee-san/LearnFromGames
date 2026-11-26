@@ -20,6 +20,11 @@ data class Selection(
     val wholeWord: Boolean = true,
     /** The cursor and a tap land only on kana and kanji; off, on Latin letters and digits too. Never on punctuation. */
     val japaneseOnly: Boolean = false,
+    /**
+     * The language's words are looked up from their first letter ([Language.wordStart]): a tap or the
+     * cursor anywhere in a word takes the whole word, and a word with no entry is still stepped over whole.
+     */
+    val wordStart: Boolean = false,
 )
 
 /** Which characters can hold the cursor: Rubi's `vjo_text_selectable` (core/text_rows.c). */
@@ -52,6 +57,34 @@ object Selectable {
      */
     fun codePoint(codePoint: Int, japaneseOnly: Boolean): Boolean =
         isJapaneseLetter(codePoint) || (!japaneseOnly && Character.isLetterOrDigit(codePoint))
+
+    /** A character a word of a spaced language is spelt with: a letter, a digit, or a mark on one (an accent, a vowel point). */
+    private fun inWord(codePoint: Int): Boolean = Character.isLetterOrDigit(codePoint) || when (Character.getType(codePoint).toByte()) {
+        Character.NON_SPACING_MARK, Character.COMBINING_SPACING_MARK, Character.ENCLOSING_MARK -> true
+        else -> false
+    }
+
+    /** Where the word holding the character at [index] of [text] starts: for a language looked up from a word's first letter. */
+    fun wordStart(text: String, index: Int): Int {
+        var at = index.coerceIn(0, text.length)
+        while (at > 0) {
+            val before = text.codePointBefore(at)
+            if (!inWord(before)) break
+            at -= Character.charCount(before)
+        }
+        return at
+    }
+
+    /** Where the word starting at or holding [index] of [text] ends. */
+    fun wordEnd(text: String, index: Int): Int {
+        var at = index.coerceIn(0, text.length)
+        while (at < text.length) {
+            val here = text.codePointAt(at)
+            if (!inWord(here)) break
+            at += Character.charCount(here)
+        }
+        return at
+    }
 
     /** Whether the character starting at [index] of [text] can hold the cursor. */
     fun at(text: String, index: Int, japaneseOnly: Boolean): Boolean =

@@ -115,6 +115,11 @@ class LookupController(
     private val vnAnswer: suspend (VnQuestion, Boolean) -> Unit = { _, _ -> },
     /** The entries for one kanji in the kanji dictionary (Settings › Dictionaries). */
     private val lookupKanji: suspend (String) -> List<Entry> = { emptyList() },
+    /**
+     * The card button was pressed on a word that is in Anki already. True when that is all there is to do:
+     * in the tutorial, where opening AnkiDroid at the card would take the player out of what they are trying.
+     */
+    private val alreadyInAnki: () -> Boolean = { false },
 ) {
     private val _state = MutableStateFlow(LookupState())
     val state: StateFlow<LookupState> = _state
@@ -208,16 +213,21 @@ class LookupController(
         lookUp(line, index)
     }
 
-    private fun lookUp(line: Int, index: Int) {
+    private fun lookUp(line: Int, at: Int) {
         val target = _state.value.lines.getOrNull(line) ?: return
-        if (index !in target.text.indices) return
+        if (at !in target.text.indices) return
+        // A language looked up by the word: wherever in the word the tap or the cursor is, its first letter.
+        val byWord = selection().wordStart
+        val index = if (byWord) Selectable.wordStart(target.text, at) else at
         selecting?.cancel()
         word = null
         selecting = scope.launch {
             val entries = decorate(io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index), target.gameId) })
             val first = entries.firstOrNull()
             val character = (index + Character.charCount(target.text.codePointAt(index))).coerceAtMost(target.text.length)
-            val end = if (first == null) character else (index + first.matched.length).coerceAtMost(target.text.length)
+            // A word no dictionary has is still one word: marked whole, and stepped over whole.
+            val unknown = if (byWord) Selectable.wordEnd(target.text, index).coerceAtLeast(character) else character
+            val end = if (first == null) unknown else (index + first.matched.length).coerceAtMost(target.text.length)
             _state.update {
                 if (it.lines.getOrNull(line)?.text != target.text) return@update it
                 it.copy(
@@ -345,6 +355,10 @@ class LookupController(
         val shown = state.selectedLine ?: return
         when (state.buttons.getOrNull(index) ?: CardButton.ADD) {
             CardButton.IN_ANKI -> {
+                if (alreadyInAnki()) {
+                    _state.update { it.copy(message = "This word is already in your Anki deck.") }
+                    return
+                }
                 scope.launch(Dispatchers.IO) {
                     try {
                         anki.target?.let { anki.noteId(it, entry.expression) }?.let { anki.openNote(it) }
@@ -466,7 +480,7 @@ class LookupController(
         }
         val from = CursorPos(state.line, state.spanStart)
         // Right goes past the word shown: in Whole word selection, once that word's lookup is in.
-        val matchedEnd = if (selection().wholeWord && state.entries.isNotEmpty()) state.spanEnd else 0
+        val matchedEnd = if (selection().wholeWord && (state.entries.isNotEmpty() || selection().wordStart)) state.spanEnd else 0
         val to = when (move) {
             Move.RIGHT -> if (stick) cursor.stickRight(from) else cursor.right(from, matchedEnd)
             Move.LEFT -> if (stick) cursor.stickLeft(from) else cursor.left(from)

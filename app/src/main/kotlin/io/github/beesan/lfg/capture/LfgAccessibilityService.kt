@@ -47,6 +47,7 @@ import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.games.Covers
 import io.github.beesan.lfg.games.Hosts
+import io.github.beesan.lfg.lookup.CardButton
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.ask.Recap
@@ -68,6 +69,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -130,6 +132,7 @@ class LfgAccessibilityService : AccessibilityService() {
             apart = { app.settings.prefs.value.interfaceApart },
             dialogueDir = { if (app.settings.prefs.value.keepDialogue) DialogueSamples.dir(filesDir) else null },
             matchLength = { app.dictionaries.matchLength(it) },
+            japanese = { app.settings.prefs.value.learning.japanese },
         )
         controller = LookupController(
             scope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) }, ::prepareLine,
@@ -137,6 +140,10 @@ class LfgAccessibilityService : AccessibilityService() {
             vnQuestion = { app.characterNames.question(it) },
             vnAnswer = { question, yes -> app.characterNames.answer(question, yes) },
             lookupKanji = { app.dictionaries.lookupKanji(it, app.settings.prefs.value.kanjiDictionary) },
+            // In the tutorial a word already in Anki counts as a card made, and AnkiDroid stays shut.
+            alreadyInAnki = {
+                (practiceDisplay != Display.INVALID_DISPLAY).also { practising -> if (practising) _practice.update { it.copy(cards = it.cards + 1) } }
+            },
         )
         overlays = OverlayHost(
             service = this,
@@ -252,7 +259,7 @@ class LfgAccessibilityService : AccessibilityService() {
         scope.launch {
             combine(app.settings.prefs, app.models.screenAi) { prefs, _ -> prefs }.collect { prefs ->
                 FrameRing.enabled = prefs.animatedPicture
-                val language = Language.of(prefs.language) ?: Language.JAPANESE
+                val language = prefs.learning
                 withContext(Dispatchers.Default) { Readers.refresh(this@LfgAccessibilityService, app.models, language) }
             }
         }
@@ -286,6 +293,20 @@ class LfgAccessibilityService : AccessibilityService() {
             var wasLookup = false
             controller.state.collect { state ->
                 overlays.onState(state)
+                // What the tutorial watches for, while its screen is the game in front.
+                if (practiceDisplay != Display.INVALID_DISPLAY) {
+                    _practice.update { seen ->
+                        val at = if (state.selected) state.line to state.spanStart else null
+                        seen.copy(
+                            read = state.lines.isNotEmpty(), lookup = state.controllerMode, word = state.selected && state.entries.isNotEmpty(),
+                            moves = if (at != null && seen.at != null && at != seen.at) seen.moves + 1 else seen.moves, at = at,
+                            // A press of the card button, not a word found to be in Anki already as its entry opens.
+                            cards = if (state.button == CardButton.ADDING && seen.button != CardButton.ADDING && state.selected) seen.cards + 1 else seen.cards,
+                            button = if (state.selected) state.button else CardButton.ADD,
+                            closes = if (seen.lookup && !state.controllerMode) seen.closes + 1 else seen.closes,
+                        )
+                    }
+                }
                 // Over a game, a box or the whole screen read once is done with when lookup on it is closed:
                 // the game's own reading comes back, and a stale entry is not left over its next page.
                 if (wasLookup && !state.controllerMode && askedOverGame()) endAsked()
@@ -393,6 +414,8 @@ class LfgAccessibilityService : AccessibilityService() {
      * ([oneButton]).
      */
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        // Set-up is asking which buttons the shortcut should be: every press is its answer, and none is the shortcut.
+        if (choosingShortcut) return false
         // A button for the game, over a box or screen of it read once: the game goes on, so what was read is gone.
         if (event.action == KeyEvent.ACTION_DOWN && KeyEvent.isGamepadButton(event.keyCode) && askedOverGame() &&
             !controller.state.value.controllerMode && !overlays.wheelUp && event.keyCode !in shortcutKeys().toList()
@@ -475,6 +498,7 @@ class LfgAccessibilityService : AccessibilityService() {
                 holdJob = scope.launch {
                     delay(app.settings.prefs.value.wheelHoldMs.toLong())
                     if (shortcutHold.holdReached(SystemClock.uptimeMillis()) && !overlays.openWheel()) shortcutHold.cancelHold()
+                    else if (overlays.wheelShown) _practice.update { it.copy(wheels = it.wheels + 1) }
                 }
             }
             // A note being written in the box from the wheel: nothing else opens over it.
@@ -511,16 +535,7 @@ class LfgAccessibilityService : AccessibilityService() {
     }
 
     /** The two buttons of the lookup shortcut, the same one twice for a shortcut of one button. */
-    private fun shortcutKeys(): Pair<Int, Int> = when (app.settings.prefs.value.shortcut) {
-        Prefs.SHORTCUT_L1_R1 -> KeyEvent.KEYCODE_BUTTON_L1 to KeyEvent.KEYCODE_BUTTON_R1
-        Prefs.SHORTCUT_L2_R2 -> KeyEvent.KEYCODE_BUTTON_L2 to KeyEvent.KEYCODE_BUTTON_R2
-        Prefs.SHORTCUT_SELECT_START -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_START
-        Prefs.SHORTCUT_SELECT -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_SELECT
-        Prefs.SHORTCUT_START -> KeyEvent.KEYCODE_BUTTON_START to KeyEvent.KEYCODE_BUTTON_START
-        Prefs.SHORTCUT_L3 -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBL
-        Prefs.SHORTCUT_R3 -> KeyEvent.KEYCODE_BUTTON_THUMBR to KeyEvent.KEYCODE_BUTTON_THUMBR
-        else -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBR
-    }
+    private fun shortcutKeys(): Pair<Int, Int> = io.github.beesan.lfg.core.Shortcut.keys(app.settings.prefs.value.shortcut)
 
     /** Whether AnkiDroid is there to ask, looked up at most every few seconds: the wheel asks as it is drawn. */
     private var ankiReady = false
@@ -588,7 +603,7 @@ class LfgAccessibilityService : AccessibilityService() {
             }
             WheelAction.HEAR -> line?.let(::hear)
             WheelAction.ALOUD -> line?.let { spoken ->
-                scope.launch { if (!app.speech.say(spoken.text)) overlays.say("This device has no Japanese voice to read with.") }
+                scope.launch { if (!app.speech.say(spoken.text)) overlays.say("This device has no ${app.settings.prefs.value.learning.title} voice to read with.") }
             }
             WheelAction.COPY -> line?.let { copied ->
                 getSystemService(android.content.ClipboardManager::class.java)
@@ -983,7 +998,10 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** One region of the app read on every settled change, as a game is, until it is turned off. */
     private fun startContinuous(game: Game, target: Ordinary, region: Box) {
-        val regional = ReadingPipeline(app.lines, File(filesDir, "frames"), matchLength = { app.dictionaries.matchLength(it) })
+        val regional = ReadingPipeline(
+            app.lines, File(filesDir, "frames"), matchLength = { app.dictionaries.matchLength(it) },
+            japanese = { app.settings.prefs.value.learning.japanese },
+        )
         setAsked(Asked(game, target.packageName, target.displayId, target.windowId, continuous = true, frame = null, framePath = null))
         toast("Reading this region until you turn it off.", avoid = region)
         // The box was picked over text already showing: it is read at once, not after a second picture.
@@ -1115,6 +1133,8 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** The game's box [slot] (1, its dialogue box, or 2 onwards) on this screen, or null when it is not drawn. */
     private fun gameBox(game: Game, displayId: Int, slot: Int): Box? {
+        // The tutorial's screen says where its line is: its own instructions are not the game's text.
+        if (game.packageName == packageName) return practiceBox.takeIf { slot == 1 }
         val kept = (if (slot == 1) app.dialogueBoxes[game.id] else app.extraBoxes[game.id].getOrNull(slot - 2)) ?: return null
         val screen = overlays.screen(displayId) ?: return null
         return kept.on(screen.width, screen.height)
@@ -1317,6 +1337,7 @@ class LfgAccessibilityService : AccessibilityService() {
             if (now == null && front != null && controller.state.value.controllerMode && ++missed < LOST_LOOKS) continue
             missed = 0
             front = now
+            if (practiceDisplay != Display.INVALID_DISPLAY && _practice.value.wheelUp != overlays.wheelUp) _practice.update { it.copy(wheelUp = overlays.wheelUp) }
             overlays.onOwnApp(ownAppOn)
             val prefs = app.settings.prefs.value
             if (!shooting) overlays.showReadButton(ordinaryFront?.displayId?.takeIf { prefs.readButton && (now == null || asked != null) })
@@ -1330,9 +1351,12 @@ class LfgAccessibilityService : AccessibilityService() {
                 frontGame.value = now?.game
                 // The game went behind something else, or came back: the overlays follow at once.
                 val reading = pipeline.latest.value
+                // The tutorial's screen has just opened: whatever was read before, its line is read now.
+                if (now != null && now.game.packageName == packageName) pipeline.forget()
                 if (now == null) controller.clear()
                 // A game has come to the front: its sound is wanted from here on, and Android has to be asked first.
-                else if (prefs.sentenceAudio && !now.game.app) SoundCapture.askOnce(this, now.displayId)
+                // Not the tutorial's screen, which makes none.
+                else if (prefs.sentenceAudio && !now.game.app && now.game.packageName != packageName) SoundCapture.askOnce(this, now.displayId)
                 overlays.onScreen(now?.displayId ?: reading?.displayId ?: Display.INVALID_DISPLAY, true, now != null)
             }
             // No reader, no picture: nothing is captured until something can read it.
@@ -1527,6 +1551,13 @@ class LfgAccessibilityService : AccessibilityService() {
             if (ordinary == null && c.name !in neverAsked) ordinary = Ordinary(c.name, c.displayId, c.window.id, Rect().also(c.window::getBoundsInScreen))
         }
         for (c in candidates) {
+            // The tutorial's screen is read as a game is, so what is practised there is what a game does.
+            // Not before it has said where its line is: read whole, its own instructions would be the game's text.
+            if (c.name == packageName && c.displayId == practiceDisplay && practiceBox != null) {
+                val game = games[PRACTICE] ?: withContext(Dispatchers.IO) { app.lines.gameFor(packageName, PRACTICE_GAME) }.also { games[PRACTICE] = it }
+                ordinaryFront = ordinary
+                return Front(game, c.displayId, c.window.id, Rect().also(c.window::getBoundsInScreen), c.covered)
+            }
             if (c.name in ignored) {
                 // Settings and AnkiDroid are never games, but their text can still be asked for.
                 noteOrdinary(c)
@@ -1750,8 +1781,55 @@ class LfgAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** What the tutorial has seen done on its screen: each count only goes up, so a step is done when its count has. */
+    data class Practised(
+        /** The screen's line has been read: there is something to look up. */
+        val read: Boolean = false,
+        /** Lookup is on, by the shortcut. */
+        val lookup: Boolean = false,
+        /** A word with an entry is showing. */
+        val word: Boolean = false,
+        /** Times the word looked up changed: the cursor moved, or another word was tapped. */
+        val moves: Int = 0,
+        val cards: Int = 0,
+        /** Times lookup was closed again. */
+        val closes: Int = 0,
+        val wheels: Int = 0,
+        /** The wheel, or a card opened from it, is up. */
+        val wheelUp: Boolean = false,
+        internal val at: Pair<Int, Int>? = null,
+        internal val button: CardButton = CardButton.ADD,
+    )
+
     companion object {
         private const val TAG = "LfgService"
+
+        /** The tutorial's row in the games table: this app's own package, as the practice line before it had. */
+        const val PRACTICE_GAME = "LFG practice"
+        private const val PRACTICE = "\u0000practice"
+
+        /** The screen the tutorial is showing on, or [Display.INVALID_DISPLAY] when it is not: there this app is read as a game. */
+        @Volatile
+        private var practiceDisplay = Display.INVALID_DISPLAY
+        private val _practice = MutableStateFlow(Practised())
+        val practice: StateFlow<Practised> = _practice
+
+        /** The tutorial's screen came to the front on [displayId], or left it (null): what was seen done starts afresh. */
+        fun practiseOn(displayId: Int?) {
+            // Where the line is, is said again by each opening, once it is laid out.
+            if (displayId != null && practiceDisplay == Display.INVALID_DISPLAY) practiceBox = null
+            practiceDisplay = displayId ?: Display.INVALID_DISPLAY
+            if (displayId != null) _practice.value = Practised()
+        }
+
+        /** Where the tutorial's line is on its screen, in the screen's pixels: all of it that is read. */
+        @Volatile
+        var practiceBox: Box? = null
+
+        /** Set-up is asking which buttons the shortcut should be: until it has its answer, no press is the shortcut. */
+        @Volatile
+        var choosingShortcut = false
+
         private const val SESSION_LOOK_BACK_S = 12 * 3600.0
         private const val PREFS = "service"
         private const val KEY_AWAITING = "awaiting"

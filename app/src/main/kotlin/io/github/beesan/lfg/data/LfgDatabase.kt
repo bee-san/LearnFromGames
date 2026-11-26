@@ -118,6 +118,16 @@ interface LineDao {
     @Query("SELECT created_at FROM game_lines WHERE game_id = :gameId AND line_text = :text")
     suspend fun savedTimes(gameId: String, text: String): List<Long>
 
+    /**
+     * The tutorial's lines go when it ends, so practice is not counted as reading: every line of
+     * [gameId] but those a card or a note was made from.
+     */
+    @Query(
+        "DELETE FROM game_lines WHERE game_id = :gameId AND id NOT IN (SELECT line_id FROM cards) " +
+            "AND id NOT IN (SELECT line_id FROM notes WHERE line_id IS NOT NULL)",
+    )
+    suspend fun forgetPractice(gameId: String)
+
     /** Every line back in the lines list and the stats: telling interface text apart was turned off. */
     @Query("UPDATE game_lines SET interface_text = 0 WHERE interface_text = 1")
     suspend fun forgetInterface()

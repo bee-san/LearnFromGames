@@ -4,11 +4,14 @@
 //   lfg_dict_host lookup <dictionary_dir> <text>
 //   lfg_dict_host bench <directory of dictionaries> [max_results]
 //   lfg_dict_host all <directory of dictionaries> <text>   (the lookup, then the styles, from all of them)
+//   lfg_dict_host lang <pack directory> <dictionary_dir> <text>   (a lookup in another language, by its pack)
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -133,6 +136,30 @@ int main(int argc, char** argv) {
   const std::string mode = argv[1];
   if (mode == "import") {
     std::puts(lfg::import_dictionary(argv[2], argv[3], false).c_str());
+    return 0;
+  }
+  if (mode == "lang" && argc >= 5) {
+    // A pack is a directory named by its language's code, as third_party/hoshidicts/languages/es.
+    const std::filesystem::path pack = argv[2];
+    auto slurp = [](const std::filesystem::path& file) {
+      std::ifstream in(file, std::ios::binary);
+      std::ostringstream out;
+      out << in.rdbuf();
+      return out.str();
+    };
+    lfg::Session session;
+    const std::string error = session.add_language(slurp(pack / "language.json"), slurp(pack / "transforms.json"));
+    if (!error.empty()) {
+      std::fprintf(stderr, "%s\n", error.c_str());
+      return 1;
+    }
+    if (!session.add_dictionary(argv[3], lfg::DictKind::Term)) {
+      std::fprintf(stderr, "could not open %s\n", argv[3]);
+      return 1;
+    }
+    std::string code = pack.filename().string();
+    if (code.empty()) code = pack.parent_path().filename().string();
+    std::puts(session.lookup(argv[4], 8, 16, code).c_str());
     return 0;
   }
   if (mode == "lookup") {

@@ -3,242 +3,392 @@ package io.github.beesan.lfg.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.anki.AnkiStatus
 import io.github.beesan.lfg.core.Language
+import io.github.beesan.lfg.core.SetupStep
+import io.github.beesan.lfg.core.Shortcut
+import io.github.beesan.lfg.dict.DefaultDictionaries
 import io.github.beesan.lfg.dict.DictState
 import io.github.beesan.lfg.ocr.ModelState
-import io.github.beesan.lfg.ocr.ScreenAi
 import io.github.beesan.lfg.ocr.ModelStore
-import io.github.beesan.lfg.dict.DefaultDictionaries
+import io.github.beesan.lfg.ocr.ScreenAi
+import kotlinx.coroutines.delay
 
+/** What a step of set-up can ask for. Each answer moves on by itself where there is nothing more to say. */
+class SetupActions(
+    val onLanguage: (Language) -> Unit,
+    val onTurnOn: () -> Unit,
+    val onOpenAppInfo: () -> Unit,
+    val onController: (Boolean) -> Unit,
+    val onBluetooth: () -> Unit,
+    /** The buttons pressed are the shortcut from now on. */
+    val onShortcut: (String) -> Unit,
+    val onConnectAnki: () -> Unit,
+    val onInstallAnki: () -> Unit,
+    /** Whether LFG is used outside games too, with its button over other apps. */
+    val onEverywhere: (Boolean) -> Unit,
+    val onKey: (String) -> Unit,
+    val onTestKey: () -> Unit,
+    val onKeepDialogue: (Boolean) -> Unit,
+    val onWifiOnly: (Boolean) -> Unit,
+    val onRetry: () -> Unit,
+    val onTutorial: () -> Unit,
+    /** Set-up ends here, without the tutorial. */
+    val onFinish: () -> Unit,
+    val onNext: () -> Unit,
+    val onBack: () -> Unit,
+)
+
+/**
+ * Set-up: one question to a screen ([io.github.beesan.lfg.core.SetupFlow]), each with as few words as
+ * say it. The downloads run behind every step and are only waited for at the end, if they are not in by then.
+ */
 @Composable
 fun SetupScreen(
+    step: SetupStep,
+    steps: List<SetupStep>,
     setup: SetupState,
     dictionary: DictState,
     reader: ModelState,
-    onTurnOn: () -> Unit,
-    onOpenAppInfo: () -> Unit,
-    onConnectAnki: () -> Unit,
-    onInstallAnki: () -> Unit,
-    onRetryDownloads: () -> Unit,
-    wifiOnly: Boolean = false,
-    onWifiOnly: (Boolean) -> Unit = {},
-    /** The language being learnt; null until the question is answered. */
-    language: Language? = Language.JAPANESE,
-    onLanguage: (Language) -> Unit = {},
-    /** Asked once: whether to keep every screen of dialogue for training a better reader. */
-    askKeepDialogue: Boolean = false,
-    onKeepDialogue: (Boolean) -> Unit = {},
+    prefs: Prefs,
+    /** The controller the device has or is connected to, by name; null for none. */
+    pad: String?,
+    /** The buttons pressed for the shortcut on this visit to its step, as [Shortcut] saves them; null before any. */
+    pressed: String?,
+    keyTest: Pair<Boolean, String>?,
+    /** The tutorial is open on the other screen of a two-screen handheld. */
+    practising: Boolean,
+    actions: SetupActions,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Set up", color = Lfg.Text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(2.dp))
-
-        if (language == null) LanguageQuestion(onLanguage) else SetupRow("Language", "Learning ${language.title}", done = true)
-
-        SetupRow(
-            name = "Screen reading",
-            status = if (setup.serviceOn) "On" else "Off",
-            done = setup.serviceOn,
-            action = if (setup.serviceOn) null else "Turn on",
-            primary = true,
-            onAction = onTurnOn,
-        )
-        if (!setup.serviceOn && setup.installedFromFile) RestrictedSettingsHelp(onOpenAppInfo)
-
-        when {
-            setup.ankiBusy -> SetupRow("AnkiDroid", "Connecting…")
-            setup.anki == AnkiStatus.NOT_INSTALLED -> SetupRow(
-                name = "AnkiDroid",
-                status = "Not installed. Cards wait here until it is.",
-                action = "Install AnkiDroid",
-                onAction = onInstallAnki,
-            )
-            setup.anki == AnkiStatus.NEEDS_PERMISSION -> SetupRow(
-                name = "AnkiDroid",
-                status = "Not connected",
-                action = "Connect",
-                primary = setup.serviceOn,
-                onAction = onConnectAnki,
-            )
-            setup.ankiTarget != null -> SetupRow(
-                name = "AnkiDroid",
-                status = "Cards go to ${setup.ankiTarget.modelName} in ‘${setup.ankiTarget.deckName}’" +
-                    if (setup.ankiTarget.created) ". Note type and deck added to AnkiDroid; they upload at the next sync." else "",
-                done = true,
-            )
-            else -> SetupRow(
-                name = "AnkiDroid",
-                status = setup.ankiError ?: "Not connected",
-                error = setup.ankiError != null,
-                action = "Connect",
-                onAction = onConnectAnki,
-            )
-        }
-
-        // One row for both first-run downloads: the dictionaries, then the reader's files.
-        val name = "Dictionaries and text recognition"
-        val waiting = if (wifiOnly) "Waiting for Wi-Fi…" else "Waiting for a connection…"
-        when {
-            dictionary is DictState.Failed -> SetupRow(name, dictionary.reason, error = true, action = "Try again", onAction = onRetryDownloads)
-            reader is ModelState.Failed -> SetupRow(name, reader.reason, error = true, action = "Try again", onAction = onRetryDownloads)
-            dictionary is DictState.Downloading -> SetupRow(
-                name = name,
-                status = "Downloading ${dictionary.name}… ${mb(dictionary.bytes)} MB of ${mb(dictionary.total)} MB (${percent(dictionary.bytes, dictionary.total)}%)",
-                progress = fraction(dictionary.bytes, dictionary.total),
-            )
-            dictionary is DictState.Installing -> SetupRow(name, "Installing ${dictionary.name}…", progress = 1f)
-            dictionary is DictState.Missing -> SetupRow(name, waiting)
-            reader is ModelState.Downloading -> SetupRow(
-                name = name,
-                status = "Downloading text recognition… ${mb(reader.bytes)} MB of ${mb(reader.total)} MB (${percent(reader.bytes, reader.total)}%)",
-                progress = fraction(reader.bytes, reader.total),
-            )
-            reader is ModelState.Missing -> SetupRow(
-                name,
-                if (ScreenAi.available()) "Dictionaries installed. Text recognition: ${waiting.replaceFirstChar { it.lowercase() }}"
-                else "This build of LFG cannot read the screen. Install a release from GitHub.",
-                error = !ScreenAi.available(),
-            )
-            else -> SetupRow(
-                name = name,
-                status = (dictionary as DictState.Ready).dictionaries.filter { it.vndb == null }.joinToString { it.title } + " and text recognition installed",
-                done = true,
-            )
-        }
-        if (dictionary !is DictState.Ready || reader !is ModelState.Ready) {
-            val total = (DefaultDictionaries.BYTES + ModelStore.SCREENAI_BYTES) / 1_000_000
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "About $total MB to download once: the dictionaries (${DefaultDictionaries.BYTES / 1_000_000} MB), then " +
-                        "ScreenAI's text recognition (${ModelStore.SCREENAI_BYTES / 1_000_000} MB, of which 14 MB is kept).",
-                    color = Lfg.Dim, fontSize = 14.sp, modifier = Modifier.weight(1f),
-                )
-                Choice(listOf("any" to "Any network", "wifi" to "Only on Wi-Fi"), if (wifiOnly) "wifi" else "any") { onWifiOnly(it == "wifi") }
+    Column(Modifier.fillMaxWidth().widthIn(max = 640.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(44.dp)) {
+            if (step != steps.first()) LfgButton("Back", actions.onBack, compact = true)
+            Spacer(Modifier.weight(1f))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                val at = steps.indexOf(step)
+                steps.forEachIndexed { i, _ ->
+                    Box(Modifier.size(if (i == at) 9.dp else 7.dp).clip(CircleShape).background(if (i <= at) Lfg.Fill else Lfg.BorderStrong))
+                }
             }
         }
-        if (askKeepDialogue) KeepDialogueQuestion(onKeepDialogue)
+        when (step) {
+            SetupStep.LANGUAGE -> LanguageStep(Language.of(prefs.language), actions.onLanguage)
+            SetupStep.READING -> ReadingStep(setup, actions)
+            SetupStep.CONTROLLER -> Question(
+                "Do you play with a controller?",
+                pad?.let { "LFG can see $it." } ?: "LFG works with buttons or with touch.",
+            ) {
+                LfgButton("Yes", { actions.onController(true) }, primary = pad != null, modifier = Modifier.firstFocus())
+                LfgButton("No, I use touch", { actions.onController(false) }, primary = pad == null)
+            }
+            SetupStep.CONNECT -> Question("Connect your controller", "Put it in pairing mode, then pick it in Bluetooth. LFG moves on when it connects.") {
+                LfgButton("Open Bluetooth", actions.onBluetooth, primary = true, modifier = Modifier.firstFocus())
+                LfgButton("Skip", actions.onNext)
+            }
+            SetupStep.BUTTON -> ButtonStep(prefs, pressed, actions)
+            SetupStep.ANKI -> AnkiStep(setup, actions)
+            SetupStep.WHERE -> {
+                Heading("Where will you use LFG?")
+                Option("Only in games", "LFG spots a game by itself and starts reading.", !prefs.readButton, Modifier.firstFocus()) { actions.onEverywhere(false) }
+                Option("Everywhere", "A small LFG button floats over other apps. Tap it to read the screen.", prefs.readButton) { actions.onEverywhere(true) }
+            }
+            SetupStep.AI -> AiStep(prefs, keyTest, actions)
+            SetupStep.IMPROVE -> Question("Help LFG read better?", KEEP_DIALOGUE_ASK) {
+                LfgButton("Yes", { actions.onKeepDialogue(true) }, primary = true, modifier = Modifier.firstFocus())
+                LfgButton("No", { actions.onKeepDialogue(false) })
+            }
+            SetupStep.DOWNLOAD -> {
+                Heading("Almost ready")
+                Body("LFG is getting its dictionary and its screen reader.")
+                Downloads(dictionary, reader, prefs, actions, always = true)
+            }
+            SetupStep.TUTORIAL -> if (practising) {
+                Heading("Look at the other screen")
+                Body("The practice screen is open there.")
+            } else Question(
+                "Try it",
+                "A practice screen opens. " + (if (prefs.usesController) "Look a word up, make a flashcard and open the wheel." else "Look a word up and make a flashcard."),
+            ) {
+                LfgButton("Start", actions.onTutorial, primary = true, modifier = Modifier.firstFocus())
+                LfgButton("Skip", actions.onFinish)
+            }
+        }
+        if (step != SetupStep.DOWNLOAD && step != SetupStep.LANGUAGE) Downloads(dictionary, reader, prefs, actions, always = false)
     }
 }
 
-/** Which language to learn: the first thing asked. One answer so far. */
 @Composable
-private fun LanguageQuestion(onAnswer: (Language) -> Unit) {
-    val shape = RoundedCornerShape(8.dp)
+private fun Heading(text: String) = Text(text, color = Lfg.Text, fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold)
+
+@Composable
+private fun Body(text: String, warn: Boolean = false) = Text(text, color = if (warn) Lfg.Warn else Lfg.Dim, fontSize = 17.sp, lineHeight = 24.sp)
+
+/** A step that is a heading, a sentence or two, and its buttons. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Question(title: String, body: String, buttons: @Composable () -> Unit) {
+    Heading(title)
+    Body(body)
+    Spacer(Modifier.height(2.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { buttons() }
+}
+
+/** One of a few answers that each need a sentence: the whole card is the button. */
+@Composable
+private fun Option(name: String, detail: String, chosen: Boolean, modifier: Modifier = Modifier, onPick: () -> Unit) {
+    val shape = RoundedCornerShape(10.dp)
     Column(
-        modifier = Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier
+            .fillMaxWidth()
+            .focusRing(shape)
+            .clip(shape)
+            .background(Lfg.Surface)
+            .border(if (chosen) 2.dp else 1.dp, if (chosen) Lfg.Fill else Lfg.Border, shape)
+            .clickable(onClick = onPick)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Text("Which language are you learning?", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        Text("LFG reads your games in this language. Only Japanese for now; more will come.", color = Lfg.Dim, fontSize = 15.sp, lineHeight = 21.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Language.entries.forEach { LfgButton("${it.title} · ${it.ownName}", { onAnswer(it) }, primary = true) }
+        Text(name, color = Lfg.Text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+        Text(detail, color = Lfg.Dim, fontSize = 15.sp, lineHeight = 21.sp)
+    }
+}
+
+/** The first question: the best-known languages, and the rest behind "More". */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LanguageStep(chosen: Language?, onPick: (Language) -> Unit) {
+    var all by rememberSaveable { mutableStateOf(chosen != null && chosen.ordinal >= Language.COMMON) }
+    Heading("Which language are you learning?")
+    Body("LFG reads your games in it and looks its words up.")
+    Spacer(Modifier.height(2.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Language.entries.take(if (all) Language.entries.size else Language.COMMON).forEachIndexed { i, language ->
+            LfgButton(
+                if (language.ownName == language.title) language.title else "${language.title} · ${language.ownName}",
+                { onPick(language) }, primary = language == chosen, modifier = if (i == 0) Modifier.firstFocus() else Modifier,
+            )
+        }
+        if (!all) LfgButton("More…", { all = true })
+    }
+}
+
+@Composable
+private fun ReadingStep(setup: SetupState, actions: SetupActions) {
+    if (setup.serviceOn) {
+        // Back from Android's page with the switch on: nothing to press.
+        LaunchedEffect(Unit) {
+            delay(DONE_MS)
+            actions.onNext()
+        }
+        Heading("Screen reading is on")
+        Body("LFG can read your games now.")
+        return
+    }
+    Question("Let LFG read your screen", "LFG needs this to see the words in your games. What it reads stays on your device unless you ask for a translation.") {
+        LfgButton("Turn on", actions.onTurnOn, primary = true, modifier = Modifier.firstFocus())
+    }
+    Body("On Android's page: tap LFG, then turn the switch on.")
+    if (setup.installedFromFile) RestrictedSettingsHelp(actions.onOpenAppInfo)
+}
+
+/** Which buttons open LFG: whatever is pressed now, shown at once, and kept on "Use". */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ButtonStep(prefs: Prefs, pressed: String?, actions: SetupActions) {
+    val picked = pressed ?: prefs.shortcut
+    val (first, second) = Shortcut.keys(picked)
+    Heading("Pick your LFG button")
+    Body("Press the button that should open LFG. Two buttons together work too.")
+    val shape = RoundedCornerShape(10.dp)
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape).padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(Shortcut.label(picked), color = Lfg.Text, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            if (first == second) "While you play, the game no longer gets this button." else "The game gets these too, so pick two it does not use together.",
+            color = Lfg.Dim, fontSize = 15.sp, lineHeight = 21.sp,
+        )
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LfgButton("Use ${Shortcut.label(picked)}", { actions.onShortcut(picked) }, primary = true, modifier = Modifier.firstFocus())
+    }
+}
+
+@Composable
+private fun AnkiStep(setup: SetupState, actions: SetupActions) {
+    val target = setup.ankiTarget
+    when {
+        setup.ankiBusy -> {
+            Heading("Flashcards")
+            Body("Setting up AnkiDroid…")
+        }
+        setup.anki == AnkiStatus.NOT_INSTALLED -> Question(
+            "Flashcards",
+            "LFG makes flashcards in AnkiDroid, which is not installed. Cards you make wait in LFG until it is.",
+        ) {
+            LfgButton("Get AnkiDroid", actions.onInstallAnki, modifier = Modifier.firstFocus())
+            LfgButton("Skip", actions.onNext, primary = true)
+        }
+        setup.anki == AnkiStatus.READY && target != null -> Question(
+            "AnkiDroid is ready",
+            "Your flashcards go to ‘${target.deckName}’." +
+                (if (target.created) " LFG added that deck and its card type for you." else "") +
+                (if (setup.ankiNeverSynced) " If you use AnkiWeb, sync AnkiDroid once before your first card." else ""),
+        ) {
+            LfgButton("Next", actions.onNext, primary = true, modifier = Modifier.firstFocus())
+        }
+        else -> {
+            Question("Make flashcards in AnkiDroid?", "LFG sets up a deck for you. One press makes a card from any word.") {
+                LfgButton("Connect AnkiDroid", actions.onConnectAnki, primary = true, modifier = Modifier.firstFocus())
+                LfgButton("Skip", actions.onNext)
+            }
+            setup.ankiError?.let { Body(it, warn = true) }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun KeepDialogueQuestion(onAnswer: (Boolean) -> Unit) {
-    val shape = RoundedCornerShape(8.dp)
-    Column(
-        modifier = Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text("Enable saving full dialogue to improve the app?", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        Text(KEEP_DIALOGUE_ASK, color = Lfg.Dim, fontSize = 15.sp, lineHeight = 21.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LfgButton("Yes", { onAnswer(true) }, primary = true)
-            LfgButton("No", { onAnswer(false) })
-        }
+private fun AiStep(prefs: Prefs, keyTest: Pair<Boolean, String>?, actions: SetupActions) {
+    Heading("Have an OpenRouter key?")
+    Body("With one, LFG can translate and explain lines. No key? Skip this and add one later in Settings.")
+    BasicTextField(
+        value = prefs.openRouterKey,
+        onValueChange = actions.onKey,
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        // A password to the keyboard too: it then neither suggests the key nor learns it.
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+        textStyle = TextStyle(color = Lfg.Text, fontSize = 16.sp),
+        cursorBrush = SolidColor(Lfg.Accent),
+        decorationBox = { field ->
+            Box {
+                if (prefs.openRouterKey.isEmpty()) Text("Paste your key here", color = Lfg.Dim, fontSize = 16.sp)
+                field()
+            }
+        },
+        modifier = Modifier.fillMaxWidth().padField(RoundedCornerShape(8.dp), singleLine = true).clip(RoundedCornerShape(8.dp)).background(Lfg.Sunken)
+            .border(1.dp, Lfg.Border, RoundedCornerShape(8.dp)).padding(horizontal = 14.dp, vertical = 14.dp),
+    )
+    // The key works: nothing more to ask.
+    val works = keyTest?.first == true && keyTest.second.startsWith("Works")
+    if (works) LaunchedEffect(Unit) {
+        delay(DONE_MS)
+        actions.onNext()
+    }
+    keyTest?.let { (ok, said) -> Body(if (works) "Your key works." else said, warn = !ok) }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (prefs.openRouterKey.isNotBlank()) LfgButton("Check my key", actions.onTestKey, primary = true)
+        LfgButton(if (prefs.openRouterKey.isBlank()) "Skip" else "Next", actions.onNext, primary = prefs.openRouterKey.isBlank(), modifier = Modifier.firstFocus())
     }
 }
 
 /** The set-up question's words, also on Settings › Help improve LFG. */
 internal const val KEEP_DIALOGUE_ASK =
-    "Making an OCR program is hard and expensive! You can help me for free by enabling it.\n\n" +
-        "LFG will save screenshots from every bit of dialogue you see, that way I can train a better OCR in the future, " +
-        "improving the app for free.\n\n" +
-        "These screenshots are not sent to me automatically. You have to go into Settings and share them with me."
+    "LFG can keep a screenshot of each line of dialogue you see, so I can teach it to read better. " +
+        "Nothing is sent by itself: you choose when to share them, in Settings."
 
-private fun mb(bytes: Long) = (bytes + 512 * 1024) / (1024 * 1024)
-private fun percent(bytes: Long, total: Long) = if (total > 0) bytes * 100 / total else 0
-private fun fraction(bytes: Long, total: Long) = if (total > 0) bytes.toFloat() / total else 0f
-
+/**
+ * How the first downloads are going: under every step while they run, in one line, so set-up never
+ * looks stuck at its end. With [always] it is the step itself, and says so when they are in.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SetupRow(
-    name: String,
-    status: String,
-    done: Boolean = false,
-    error: Boolean = false,
-    action: String? = null,
-    primary: Boolean = false,
-    progress: Float? = null,
-    onAction: () -> Unit = {},
-) {
-    val shape = RoundedCornerShape(8.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(if (done) Color.Transparent else Lfg.Surface)
-            .border(1.dp, Lfg.Border, shape)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+private fun Downloads(dictionary: DictState, reader: ModelState, prefs: Prefs, actions: SetupActions, always: Boolean) {
+    val failed = (dictionary as? DictState.Failed)?.reason ?: (reader as? ModelState.Failed)?.reason
+    val done = dictionary is DictState.Ready && reader is ModelState.Ready
+    if (done && !always) return
+    val waiting = if (prefs.wifiOnly) "Waiting for Wi-Fi…" else "Waiting for the internet…"
+    val (said, progress) = when {
+        failed != null -> failed to null
+        dictionary is DictState.Downloading -> "Getting the dictionary… ${percent(dictionary.bytes, dictionary.total)}%" to fraction(dictionary.bytes, dictionary.total)
+        dictionary is DictState.Installing -> "Setting up the dictionary…" to 1f
+        dictionary is DictState.Missing -> waiting to null
+        reader is ModelState.Downloading -> "Getting the screen reader… ${percent(reader.bytes, reader.total)}%" to fraction(reader.bytes, reader.total)
+        !ScreenAi.available() -> "This build of LFG cannot read the screen. Install a release from GitHub." to null
+        reader is ModelState.Missing -> waiting to null
+        else -> "Everything is downloaded." to null
+    }
+    val shape = RoundedCornerShape(10.dp)
+    Column(
+        Modifier.fillMaxWidth().padding(top = if (always) 0.dp else 10.dp).clip(shape).border(1.dp, Lfg.Border, shape).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(name, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Text(status, color = if (error) Lfg.Error else if (done) Lfg.Ok else Lfg.Dim, fontSize = 14.sp)
-            if (progress != null) {
-                Spacer(Modifier.height(7.dp))
-                LinearProgressIndicator(
-                    progress = { progress.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(3.dp),
-                    color = Lfg.Fill,
-                    trackColor = Lfg.Sunken,
-                )
+        Text(said, color = if (failed != null || !ScreenAi.available()) Lfg.Error else if (done) Lfg.Ok else Lfg.Dim, fontSize = 15.sp)
+        if (progress != null) {
+            LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(3.dp), color = Lfg.Fill, trackColor = Lfg.Sunken)
+        }
+        if (failed != null) LfgButton("Try again", actions.onRetry, primary = always)
+        if (always && !done) {
+            val total = (DefaultDictionaries.bytes(prefs.learning) + ModelStore.SCREENAI_BYTES) / 1_000_000
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("About $total MB, once.", color = Lfg.Dim, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Choice(listOf("any" to "Any network", "wifi" to "Only on Wi-Fi"), if (prefs.wifiOnly) "wifi" else "any") { actions.onWifiOnly(it == "wifi") }
             }
         }
-        if (action != null) {
-            Spacer(Modifier.width(16.dp))
-            LfgButton(action, onAction, primary = primary)
+        if (always && done) {
+            LaunchedEffect(Unit) {
+                delay(DONE_MS)
+                actions.onNext()
+            }
         }
     }
 }
 
+private fun percent(bytes: Long, total: Long) = if (total > 0) bytes * 100 / total else 0
+private fun fraction(bytes: Long, total: Long) = if (total > 0) bytes.toFloat() / total else 0f
+
 /** Only when Android blocks the switch: an app installed from a file must be allowed restricted settings first. */
 @Composable
 private fun RestrictedSettingsHelp(onOpenAppInfo: () -> Unit) {
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(10.dp)
     Column(
         modifier = Modifier.fillMaxWidth().clip(shape).border(1.dp, Lfg.Border, shape).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("If the switch is greyed out", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        Text("Android blocks Screen reading for apps installed from a file.", color = Lfg.Dim, fontSize = 14.sp)
+        Text("Is the switch greyed out?", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         listOf(
             "Tap LFG in the list, then OK",
-            "In app info, tap ⋮, then Allow restricted settings",
-            "Turn on Screen reading",
+            "Open app info, tap ⋮, then Allow restricted settings",
+            "Come back and turn the switch on",
         ).forEachIndexed { i, step ->
             Row {
                 Box(Modifier.width(24.dp)) { Text("${i + 1}", color = Lfg.Dim, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
@@ -249,3 +399,6 @@ private fun RestrictedSettingsHelp(onOpenAppInfo: () -> Unit) {
         LfgButton("Open app info", onOpenAppInfo)
     }
 }
+
+/** How long a step that finished by itself shows that it has, before the next. */
+private const val DONE_MS = 900L
