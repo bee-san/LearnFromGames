@@ -16,6 +16,10 @@ button-sounds, MIT). The marimba notes and the swish are rendered in code by
 [Earshot](https://github.com/Leonxlnx/earshot) 0.3 (MIT; no recording is shipped with it, and what it
 renders is free to use).
 
+`alt/` holds the ones not chosen, to swap in without making anything again: copy one over the
+`sound_*.ogg` it replaces. They can be tried on a wheel at <https://claude.ai/artifact/NpHAYETVRwVh3kc9aQEkMS>
+(the owner's page).
+
 ## Making them again
 
 ```sh
