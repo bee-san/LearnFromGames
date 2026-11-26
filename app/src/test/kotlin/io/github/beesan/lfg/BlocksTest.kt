@@ -101,6 +101,13 @@ class BlocksTest {
         assertEquals(2, Blocks.group(listOf(row("ユイ", 137, 778, size = 27), row("そのとき彼女は", 138, 818, size = 71))).size)
         // Sizes the readers measured for a name plate over a wrapped sentence: 0.46 of the row's height, 0.6 of it away.
         assertEquals(2, Blocks.group(listOf(row("ユイ", 140, 772, size = 25), row("昨日の夜、森の奥で", 140, 830, size = 54))).size)
+        // Furigana half as tall as its row, as Clannad's is over a choice set large (an AYN Thor's own screens).
+        assertEquals(listOf("立ち尽くす"), Blocks.group(listOf(TextLine("たちつ", Box(700, 149, 872, 185), emptyList()), TextLine("立ち尽くす", Box(686, 182, 1034, 255), emptyList()))).map { it.text })
+        assertEquals(listOf("大喧嘩"), Blocks.group(listOf(TextLine("おおげんか", Box(874, 146, 1076, 180), emptyList()), TextLine("大喧嘩", Box(869, 180, 1077, 253), emptyList()))).map { it.text })
+        // A name plate's second word, that tall and further off, is the name's.
+        assertEquals(2, Blocks.group(listOf(TextLine("ユエ", Box(654, 743, 743, 776), emptyList()), TextLine("彼らを輝かせるために", Box(472, 795, 946, 843), emptyList()))).size)
+        // A row of kana in a paragraph set tight is a row of it.
+        assertEquals("いつくるかわからない", Blocks.group(listOf(row("いつくるかわからない", 140, 800, size = 46), base))[0].text)
         // Small kanji above a line is a caption, not furigana.
         assertEquals(2, Blocks.group(listOf(row("第一章", 140, 832, size = 24), base)).size)
     }

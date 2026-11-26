@@ -69,17 +69,24 @@ object Blocks {
     private const val QUOTES = "「『（(“\""
 
     /**
-     * Whether [small] is furigana for [base]: kana in much smaller type,
-     * sitting tight above (or, for vertical text, to the right of) kanji of
-     * the row it annotates. It is reading aid, not text of the game: left in, it
-     * would be a line of its own in the store and a row of its own on screen to
-     * tap by mistake.
+     * Whether [small] is furigana for [base]: kana in smaller type, sitting
+     * tight above (or, for vertical text, to the right of) kanji of the row it
+     * annotates. It is reading aid, not text of the game: left in, it would be
+     * a line of its own in the store and a row of its own on screen to look up
+     * by mistake. The test is the one GameSentenceMiner's furigana filter
+     * makes (a row with no kanji, smaller than the row with kanji right under
+     * it), which there is a setting and here is always made, with limits
+     * drawn from what the readers measured.
      *
-     * A speaker's name above a line is also small kana, so the limits are
-     * drawn from what the readers measured: furigana came out at 0.33 to 0.41
-     * of its row's height and 0.25 to 0.29 of that height above it; names at
-     * 0.46 and up, and twice as far away. A name that is set as small and as
-     * close as furigana, over a kanji, is still taken for furigana.
+     * A speaker's name above a line is also small kana. On 931 Vita and PSP
+     * screens and an AYN Thor's own (Clannad's 立ち尽くす and 大喧嘩, 桜羽 in
+     * 魔法少女ノ魔女裁判), furigana came out at 0.33 to 0.65 of its row's
+     * height and from 0.1 of that height into the row to 0.3 above it; names at
+     * 0.46 and up, and 0.4 to 0.6 away; and a row of kana in a paragraph set
+     * tight, 0.76. So up to [SMALL] of the row's height it may be [FAR] away,
+     * and the larger it is the nearer it must be, down to [NEAR] at [LARGE]
+     * ([away]). A name that is set as small and as close as furigana, over a
+     * kanji, is still taken for furigana.
      */
     fun isFuriganaOf(small: TextLine, base: TextLine): Boolean {
         if (small === base || small.vertical != base.vertical) return false
@@ -88,11 +95,11 @@ object Blocks {
         val b = base.box
         val beside = if (!base.vertical) {
             val h = b.height.toFloat()
-            s.height <= 0.45f * h && s.bottom >= b.top - 0.4f * h && s.bottom <= b.top + 0.25f * h &&
+            s.height <= LARGE * h && s.bottom >= b.top - away(s.height / h) * h && s.bottom <= b.top + 0.25f * h &&
                 s.left >= b.left - 0.5f * h && s.right <= b.right + 0.5f * h
         } else {
             val w = b.width.toFloat()
-            s.width <= 0.45f * w && s.left >= b.right - 0.25f * w && s.left <= b.right + 0.4f * w &&
+            s.width <= LARGE * w && s.left >= b.right - 0.25f * w && s.left <= b.right + away(s.width / w) * w &&
                 s.top >= b.top - 0.5f * w && s.bottom <= b.bottom + 0.5f * w
         }
         if (!beside) return false
@@ -103,6 +110,15 @@ object Blocks {
         // A reader that gives no box per character cannot say; the geometry then decides alone.
         return base.chars.isEmpty() || under.any { c -> base.text.substring(c.start, c.end).any(::isKanji) }
     }
+
+    /** Furigana no larger than this share of its row's height may be [FAR] of that height from the row; at [LARGE], the largest it comes, [NEAR]. */
+    private const val SMALL = 0.45f
+    private const val LARGE = 0.66f
+    private const val FAR = 0.4f
+    private const val NEAR = 0.12f
+
+    /** How far from its row furigana of [size] (a share of the row's height) may be, as a share of that height. */
+    private fun away(size: Float) = if (size <= SMALL) FAR else FAR - (size - SMALL) / (LARGE - SMALL) * (FAR - NEAR)
 
     private fun isKana(c: Char) = c in '\u3041'..'\u309F' || c in '\u30A0'..'\u30FF' || c == '\u30FC'
     private fun isKanji(c: Char) = c in '\u4E00'..'\u9FFF' || c in '\u3400'..'\u4DBF' || c == '々' || c.isSurrogate()

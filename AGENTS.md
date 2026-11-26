@@ -32,18 +32,18 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 - The workflow takes about a quarter of an hour. `gh run watch` outlives a ten-minute command: ask `gh run view <id> --json status,conclusion` in a loop instead.
 - Build the release at the desk once before tagging when a library was added (`./gradlew :app:assembleRelease`, signed with the debug key when there is no keystore): the shrinker only runs there, and the debug build says nothing about it.
 - Four old branches show as unmerged in the check above and are not: `backup/local-main-526df5f`, `claude/determined-mccarthy-8a0eb3`, `recap-current-game` and `sentence-audio-lower-screen`. Their work is on `main` under other commits (checked 2026-11-26).
-- The workflow's version code is its run number (v0.1.3 is 4).
+- From v0.1.16 a build's version code comes from its version name (`app/build.gradle.kts`): major × 1,000,000 + minor × 1,000 + patch, so 0.1.16 is 1016. The workflow and a desk build of the same tag get the same code. Releases up to v0.1.15 carry the workflow's run number (v0.1.3 is 4). `LFG_VERSION_CODE` still sets a code by hand.
 - The release key lives in `~/.config/lfg-release/` and in the repository's secrets. Never make a new one or overwrite the secrets.
 
 ## The AYN Thor (adb serial `f34c1a3d`)
 
-- **It runs desk builds with a higher version code than the releases**, so a GitHub APK is refused as a downgrade. Install a desk build of the same tag instead, signed with the release key, with a code above the one installed (`adb shell dumpsys package io.github.beesan.lfg | grep versionCode`):
+- **From v0.1.16 a GitHub release installs over what the Thor runs, and LFG updates itself there.** A release's code comes from its version (0.1.16 is 1016), which is above the desk build on the Thor (1015, made for v0.1.15). A release older than v0.1.16 is still refused as a downgrade. A desk build of a tag gets the same code by itself and installs over the same version, signed with the release key:
   ```sh
   cp ~/.config/lfg-release/keystore.properties .
-  LFG_VERSION_CODE=<installed + 1> LFG_VERSION_NAME=vX.Y.Z ./gradlew :app:assembleRelease
+  LFG_VERSION_NAME=vX.Y.Z ./gradlew :app:assembleRelease
   rm keystore.properties
   ```
-  Then check the `.so` list above, and `adb -s f34c1a3d install -r app/build/outputs/apk/release/app-arm64-v8a-release.apk`.
+  Then check the `.so` list above, and `adb -s f34c1a3d install -r app/build/outputs/apk/release/app-arm64-v8a-release.apk`. Android refuses a code below the one installed (`adb shell dumpsys package io.github.beesan.lfg | grep versionCode`): a desk build with no `LFG_VERSION_NAME` is 0.1.0, code 1000.
 - **Never uninstall LFG to get round a signature or version error:** it wipes the user's lines, cards and dictionaries.
 - After `adb install -r` the reading service is off until it is switched off and on again. Keep AYN's Game Assistant in the list:
   ```sh
@@ -65,6 +65,17 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 - Never read `shared_prefs/secrets.xml`. A test that needs an OpenRouter key types a made-up one into the app (`input text`) and deletes it in Settings › Translation afterwards.
 - No internet for a test: `adb shell cmd connectivity airplane-mode enable`, and `disable` after.
 - A new dependency needs one build without `--offline` before `--offline` works again.
+
+## Reading
+
+- **ScreenAI gives a row a word at a time on some pictures**, where the game sets its words apart (Pokémon) or a sentence ends mid-row. `ScreenAi.joined` puts the row together again before anything else sees it. Without it the words of two rows group as columns (`Blocks`), and a word alone is taken for a menu's label and hidden (`InterfaceText`).
+- To see what the readers make of real screens: push PNGs to the app's `ocrbench/` folder and run `OcrBench` (debug build). `-e language ja` reads as the app does, `-e clean false` leaves `TextClean` out, and the `probe` engine is VOCR as the settle detector sees it. The emulator's own corpus is in `ocrbench.vita/`: move it back when done.
+- A backup's `files/frames` are the screens the lines were read from, and `game_lines.box` says where: the way to reproduce a reading bug from the owner's own play.
+- Before Android 14 (the Thor) a picture is of the whole screen, entry and all. While a word is looked up the game is only watched (`ReadingPipeline.watch`), and the entry stands aside for a clean picture when the story's text changes. Only rows where the story is, or as long as a line, count (`telling`): over a picture that moves, the probe reads scraps that differ at each look, and the entry blinked.
+- Lines kept from one look share a `timestamp`. Every query orders by `rowid` after it, and a list sorted by time afterwards starts oldest first, or the top row lands under the bottom one.
+- **Furigana is never text** (`Blocks.isFuriganaOf`, GameSentenceMiner's furigana filter with measured limits, always on): kana smaller than the row under it, tight over a kanji. It comes at up to 0.65 of its row's height; a speaker's name is as small but further off, so the larger it is the nearer it must be. Raising the size limit alone drops names.
+- A picture asked for as a window of ours leaves the screen may still show it: LFG's entry was read as the game's text, headword, reading and all. `OverlayHost.oursGoneAt` says when one last left, and a whole-screen picture from the quarter second after is let go.
+- `Blocks.follows` joins rows up to 0.9 of a row's height apart. Wider was tried for Pokémon's low rows of kana (2026-11-26) and joined a menu's choices and buttons on other games: left as it is.
 
 ## Languages
 
@@ -98,10 +109,21 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 - A field for a key is a password to the keyboard as well (`KeyboardType.Password`), or the keyboard suggests the key and learns it.
 - **ML Kit** translates only when OpenRouter cannot be reached (`OpenRouter.Failure.offline`), never for a wrong key. Its models come by Android's download manager and work without Google Play services (seen on the emulator). Its translations are marked as Google's, which its terms ask for. It brought appcompat with it, and with appcompat lint's `AppCompatCustomView`, which is switched off in `app/build.gradle.kts`.
 
+## Updates
+
+- LFG updates itself from its GitHub releases. `core/Updates.kt` has the three steps, each callable alone: `check` (asks GitHub: once a day as the app opens, and daily from `update/UpdateWorker.kt`), `download` (the APK for this device into `cacheDir/update`, held to GitHub's `digest` when it gives one) and `install` (a `PackageInstaller` session). `Updates.state` is what Home's banner and Settings › Help and diagnostics show. GitHub's address is the one constant `LATEST`.
+- **Installing only ever follows a tap**, on Home's button or in Settings, never the worker: an install ends LFG and stops the game being read. The worker checks and downloads, no more.
+- A debug build never checks (`Updates.asks`): it is signed with another key, so no release goes over it.
+- `update/UpdateReceivers.kt`: `InstallReceiver` hears how the install went and opens Android's question the first time; `UpdatedReceiver` (`MY_PACKAGE_REPLACED`) deletes the download and says "LFG x is installed", only for a version LFG installed itself.
+- Android asks once to let LFG install apps, and once whether to update; after that an update goes in with no question. It ends LFG: the reading service opens LFG's pages again as it starts (`Updates.reopens`), since only an app with such a service may, and reads on (seen on the emulator; not yet on the Thor).
+- Android says nothing when its question is backed out of. The button comes back when LFG's pages are in front again (`Updates.inFront`), and after a minute whatever happens.
+- **To try it on the emulator:** two release builds (`LFG_VERSION_NAME=v0.1.90`, then `v0.1.91`; with no keystore both are signed with the debug key) made with `LATEST` pointed at `http://127.0.0.1:<port>/latest` and `android:usesCleartextTraffic="true"` on `<application>`, both put back straight after building. Serve a folder holding the newer APK and a `latest` file in GitHub's form (`tag_name`, `html_url`, `assets` with `name`, `browser_download_url`, `size`, `digest`) with `python3 -m http.server`, `adb reverse tcp:<port> tcp:<port>`, install the older one. Home's banner is under any other notice (sentence audio's "Start"): Settings › search "version" always shows it. Afterwards a debug build is a lower version: `adb install -r -d`.
+- An update goes in only with a version code above the one installed, which is why the code comes from the version name (see Releases). "Get updates" is `Prefs.updateApp`, the device's and not a profile's.
+
 ## Profiles
 
 - The profile in use **is** the ordinary settings (`Settings`, the `settings` file); one not in use is the same keys in a file of its own (`profile-<id>`), with its Anki target beside it in `profiles`. Changing profile (`Profiles.use`) puts one away and takes the other out, so nothing else in the app knows of profiles.
-- **A new setting is each profile's own** unless it is added to `Prefs.withShared` (set-up, keys, backups, game folders, storage and downloads, the widget's size). Wheels, boxes and dictionaries are not a profile's.
+- **A new setting is each profile's own** unless it is added to `Prefs.withShared` (set-up, keys, backups, game folders, storage and downloads, LFG's own updates, the widget's size). Wheels, boxes and dictionaries are not a profile's.
 - A profile with no name goes by its language's (`ProfileRules.shown`), so it follows a change of language.
 - **Tiles:** six `ProfileTile` services in the manifest, off until there are two profiles (`Profiles.syncTiles`). A tile redraws by watching `profiles.list` while it is listening: `TileService.requestListeningState` does nothing for them while the shade is open. Android 13 leaves the tile of a deleted profile greyed out in the shade until the user drags it away.
 - Changing to another language over a game reads that game's text as the new language. That is the user's to choose, not a bug to guard.
