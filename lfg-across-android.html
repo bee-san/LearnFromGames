@@ -1,0 +1,854 @@
+<title>LFG Across Android</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+/* Layout: a design spec. A working phone demo up top, then the rules it demonstrates, then the plan. Single centred column, demo breaks wider. */
+:root {
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --sunk: #eceef3;
+  --ink: #171a23;
+  --muted: #596073;
+  --line: #d9dde6;
+  --accent: #5b4fc4;         /* LFG lavender, deepened for light ground */
+  --accent-soft: #e9e6fb;
+  --tree: #0c8565;           /* text from the accessibility tree */
+  --ocr: #b86e06;            /* text read from pixels */
+  --sel: #2b67cf;            /* text-selection menu */
+  --stop: #c0392f;           /* secure / sensitive */
+  --device: #1b1e27;
+  --scr-bg: #ffffff;
+  --scr-ink: #1d2130;
+  --scr-muted: #6b7183;
+  --scr-line: #e3e6ee;
+  --f-display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --f-jp: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101219; --surface: #181b24; --sunk: #13161e; --ink: #e7e9f0; --muted: #9ca2b4; --line: #2a2f3d;
+    --accent: #b1a5ee; --accent-soft: #272444;
+    --tree: #3ccb9f; --ocr: #f0b24a; --sel: #74a6ff; --stop: #ff7a70;
+    --device: #05060a; --scr-bg: #1c1f29; --scr-ink: #e6e8ef; --scr-muted: #9096a8; --scr-line: #2c3140;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101219; --surface: #181b24; --sunk: #13161e; --ink: #e7e9f0; --muted: #9ca2b4; --line: #2a2f3d;
+  --accent: #b1a5ee; --accent-soft: #272444;
+  --tree: #3ccb9f; --ocr: #f0b24a; --sel: #74a6ff; --stop: #ff7a70;
+  --device: #05060a; --scr-bg: #1c1f29; --scr-ink: #e6e8ef; --scr-muted: #9096a8; --scr-line: #2c3140;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 400 15px/1.6 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 72px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 64px; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); line-height: 1.04; font-weight: 800; }
+h2 { font-size: 1.6rem; line-height: 1.15; font-weight: 700; }
+h3 { font-size: 1.05rem; font-weight: 700; }
+p { margin: 0; max-width: 66ch; }
+code, .mono { font-family: var(--f-mono); font-size: 0.86em; }
+code { background: var(--sunk); border: 1px solid var(--line); padding: 0 4px; border-radius: 4px; overflow-wrap: anywhere; }
+.jp { font-family: var(--f-jp); }
+.eyebrow { font: 500 12px/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.eyebrow a { color: inherit; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible, input:focus-visible, label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+section { display: grid; gap: 20px; }
+.section-head { display: grid; gap: 8px; }
+.section-head p { color: var(--muted); }
+
+/* ---------- hero ---------- */
+header { display: grid; gap: 18px; }
+.lede { font-size: 1.15rem; color: var(--muted); max-width: 60ch; }
+.rule {
+  display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+  font-size: 1.02rem; padding: 14px 18px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px;
+}
+.rule b { font-family: var(--f-display); }
+.chip { display: inline-flex; align-items: center; gap: 6px; font: 500 12.5px/1 var(--f-mono); padding: 5px 9px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.c-tree { color: var(--tree); } .c-ocr { color: var(--ocr); } .c-sel { color: var(--sel); } .c-stop { color: var(--stop); }
+
+/* ---------- demo ---------- */
+.demo { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 800px) { .demo { grid-template-columns: minmax(0, 1fr); justify-items: center; } .inspector { width: 100%; } }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tab {
+  font: 500 13.5px/1 var(--f-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 999px; padding: 9px 14px; cursor: pointer;
+}
+.tab[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+.phone { width: 310px; max-width: 100%; background: var(--device); border-radius: 34px; padding: 12px; box-shadow: 0 18px 40px -18px rgba(10, 12, 30, .45); }
+.screen {
+  position: relative; height: 560px; border-radius: 24px; overflow: hidden; background: var(--scr-bg); color: var(--scr-ink);
+  display: flex; flex-direction: column; font-family: var(--f-jp);
+}
+.sbar { display: flex; justify-content: space-between; padding: 8px 16px 4px; font: 500 11px/1 var(--f-body); color: var(--scr-muted); }
+.appbar { padding: 6px 14px 8px; border-bottom: 1px solid var(--scr-line); font: 500 12px/1.2 var(--f-body); color: var(--scr-muted); display: flex; gap: 8px; align-items: center; }
+.urlbox { flex: 1; background: var(--sunk); border-radius: 999px; padding: 6px 10px; font-family: var(--f-mono); font-size: 11px; color: var(--scr-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.content { flex: 1; overflow: hidden; position: relative; }
+.navbar { display: flex; justify-content: center; gap: 56px; padding: 8px 0 10px; border-top: 1px solid var(--scr-line); }
+.navbtn { background: none; border: 0; color: var(--scr-muted); font-size: 15px; cursor: pointer; padding: 2px 10px; border-radius: 6px; }
+.fab {
+  position: absolute; right: 10px; top: 46%; z-index: 6; width: 46px; height: 46px; border-radius: 50%; border: 0; cursor: pointer;
+  background: var(--accent); color: var(--bg); font: 800 12px/1 var(--f-display); letter-spacing: .02em;
+  box-shadow: 0 6px 16px -6px rgba(0,0,0,.5);
+}
+.fab[aria-pressed="true"] { outline: 3px solid var(--accent); outline-offset: 3px; }
+.toast {
+  position: absolute; left: 12px; right: 12px; bottom: 54px; z-index: 7; background: var(--ink); color: var(--bg);
+  font: 500 12px/1.35 var(--f-body); padding: 9px 12px; border-radius: 8px; opacity: 0; transform: translateY(6px); transition: opacity .2s, transform .2s; pointer-events: none;
+}
+.toast.show { opacity: 1; transform: none; }
+
+/* lines, words, character boxes */
+.ln { border-radius: 3px; transition: background-color .2s, box-shadow .2s; }
+.w { cursor: default; }
+.c { font-style: normal; }
+.ln[data-on] { cursor: pointer; }
+.ln[data-on][data-src="tree"] { background: color-mix(in srgb, var(--tree) 15%, transparent); box-shadow: inset 0 -2px 0 var(--tree); }
+.ln[data-on][data-src="ocr"]  { background: color-mix(in srgb, var(--ocr) 18%, transparent);  box-shadow: inset 0 -2px 0 var(--ocr); }
+.ln[data-on] .w { cursor: pointer; }
+.ln[data-on] .w:hover { text-decoration: underline 2px; text-underline-offset: 4px; }
+.vert .ln[data-on] .w:hover { text-decoration: none; background: color-mix(in srgb, var(--ocr) 30%, transparent); }
+.boxes .ln[data-on] .c { outline: 1px solid color-mix(in srgb, currentColor 40%, transparent); outline-offset: -1px; }
+.boxes .ln[data-on][data-src="tree"] .c { outline-color: var(--tree); }
+.boxes .ln[data-on][data-src="ocr"] .c { outline-color: var(--ocr); }
+.ln.scan { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ocr) 35%, transparent), transparent) 0 0 / 200% 100%; animation: scan .32s linear; }
+@keyframes scan { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.w.picked { background: color-mix(in srgb, var(--sel) 30%, transparent); border-radius: 2px; }
+
+/* browser scenario */
+.page { padding: 14px 16px; display: grid; gap: 10px; }
+.page .kicker { font: 500 10.5px/1 var(--f-body); color: var(--scr-muted); letter-spacing: .06em; text-transform: uppercase; }
+.page h4 { margin: 0; font-size: 19px; line-height: 1.45; font-weight: 700; }
+.page p { font-size: 13.5px; line-height: 1.8; }
+.photo {
+  position: relative; height: 150px; border-radius: 8px; overflow: hidden;
+  background: linear-gradient(170deg, #c8562e 0%, #e08a3a 38%, #7b3b2a 70%, #3b2a26 100%);
+}
+.photo::after { content: "写真"; position: absolute; right: 8px; bottom: 6px; font: 500 10px/1 var(--f-body); color: #fff; opacity: .7; }
+.sign { position: absolute; left: 18px; top: 48px; background: #f7f2e6; color: #b3241a; border: 3px solid #b3241a; padding: 6px 10px; font-weight: 700; font-size: 17px; transform: rotate(-3deg); letter-spacing: .08em; }
+.noren { position: absolute; right: 22px; top: 18px; width: 64px; height: 92px; background: #1f3c6e; color: #f1ead8; writing-mode: vertical-rl; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; letter-spacing: .2em; }
+.pw { display: grid; gap: 4px; font-size: 11.5px; color: var(--scr-muted); font-family: var(--f-body); }
+.pw .field { position: relative; border: 1px solid var(--scr-line); border-radius: 6px; padding: 7px 10px; font-family: var(--f-mono); color: var(--scr-ink); letter-spacing: .2em; }
+.pw .skipnote { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; border-radius: 6px; font: 600 11px/1 var(--f-body); letter-spacing: 0; color: var(--stop);
+  background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--stop) 14%, var(--scr-bg)) 0 6px, var(--scr-bg) 6px 12px); }
+.reading .pw .skipnote { display: flex; }
+
+/* manga scenario */
+.manga { position: absolute; inset: 0; background: #ebe7de; padding: 10px; display: grid; grid-template-rows: 1.15fr 1fr; gap: 8px; }
+.panel { position: relative; background: #fbfaf6; border: 2.5px solid #111; overflow: hidden; color: #111; }
+.panel .speed { position: absolute; inset: 0; background: repeating-linear-gradient(100deg, transparent 0 14px, rgba(0,0,0,.07) 14px 15px); }
+.bubble { position: absolute; background: #fff; border: 2px solid #111; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 14px 10px; }
+.vert { writing-mode: vertical-rl; font-size: 15px; line-height: 1.5; font-weight: 500; }
+.figure { position: absolute; bottom: -10px; width: 90px; height: 120px; border-radius: 45px 45px 0 0; background: #2a2a2a; }
+
+/* video scenario */
+.video { position: absolute; inset: 0; background: #0b0d12; display: flex; flex-direction: column; }
+.frame { position: relative; flex: 1; background: radial-gradient(120% 80% at 30% 20%, #3c5a7d 0%, #1d2a3b 50%, #0b0d12 100%); overflow: hidden; }
+.frame .rain { position: absolute; inset: 0; background: repeating-linear-gradient(105deg, transparent 0 9px, rgba(200,220,255,.12) 9px 10px); }
+.frame .train { position: absolute; left: -10%; right: -10%; bottom: 120px; height: 70px; background: linear-gradient(#c9ccd2, #8b9099); border-top: 6px solid #2f7a4d; }
+.frame .train::before { content: ""; position: absolute; left: 12%; right: 12%; top: 12px; height: 22px; background: repeating-linear-gradient(90deg, #1a2433 0 46px, #c9ccd2 46px 60px); }
+.subtitle { position: absolute; left: 0; right: 0; bottom: 58px; text-align: center; color: #fff; font-size: 17px; font-weight: 500; text-shadow: 0 0 3px #000, 0 0 3px #000; }
+.region { position: absolute; left: 14px; right: 14px; bottom: 48px; height: 44px; border: 1.5px dashed var(--ocr); border-radius: 6px; display: none; }
+.region::before { content: "region"; position: absolute; top: -9px; left: 8px; background: #0b0d12; color: var(--ocr); font: 500 10px/1 var(--f-mono); padding: 1px 4px; }
+.continuous .region { display: block; }
+.controls { display: flex; gap: 10px; align-items: center; padding: 8px 12px; color: #c9cdd8; font: 500 11px/1 var(--f-body); }
+.controls .bar { flex: 1; height: 3px; background: #333a48; border-radius: 2px; position: relative; }
+.controls .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 38%; background: #e2554a; border-radius: 2px; }
+.capture { display: none; position: absolute; left: 12px; top: 12px; z-index: 5; width: 92px; height: 120px; background: #000; border: 2px solid var(--stop); border-radius: 6px; color: var(--stop); font: 600 10px/1.3 var(--f-body); padding: 6px; }
+.capture.show { display: block; }
+
+/* chat scenario */
+.chat { padding: 12px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.msg { max-width: 82%; padding: 9px 12px; border-radius: 16px; line-height: 1.6; position: relative; }
+.msg.in { background: var(--sunk); border-bottom-left-radius: 4px; }
+.msg.out { align-self: flex-end; background: color-mix(in srgb, var(--sel) 18%, var(--scr-bg)); border-bottom-right-radius: 4px; }
+.who { font: 500 10.5px/1 var(--f-body); color: var(--scr-muted); }
+.selbar { position: absolute; z-index: 7; left: 22px; top: 92px; display: none; background: var(--scr-ink); color: var(--scr-bg); border-radius: 8px; overflow: hidden; box-shadow: 0 8px 20px -8px rgba(0,0,0,.5); font: 500 12.5px/1 var(--f-jp); }
+.selbar.show { display: flex; }
+.selbar span, .selbar button { padding: 10px 11px; }
+.selbar button { background: var(--sel); color: #fff; border: 0; font: 700 12.5px/1 var(--f-display); cursor: pointer; }
+.composer { margin-top: auto; border: 1px solid var(--scr-line); border-radius: 999px; padding: 8px 12px; color: var(--scr-muted); font-size: 12px; }
+
+/* inspector */
+.inspector { display: grid; gap: 14px; min-width: 0; }
+.panelbox { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: grid; gap: 12px; min-width: 0; }
+.status { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; font-size: 13.5px; }
+.status dt { color: var(--muted); font: 500 11.5px/1.9 var(--f-mono); text-transform: uppercase; letter-spacing: .05em; }
+.status dd { margin: 0; }
+.state { font-weight: 600; }
+.state.live { color: var(--accent); }
+.flash { animation: flash .7s; }
+@keyframes flash { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+.toggles { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13.5px; }
+.toggles label { display: inline-flex; gap: 7px; align-items: center; cursor: pointer; border-radius: 4px; }
+.toggles input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.btn { font: 600 13px/1 var(--f-body); border: 1px solid var(--line); background: var(--sunk); color: var(--ink); padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+.hint { font-size: 13px; color: var(--muted); }
+
+.entry-empty { color: var(--muted); font-size: 14px; }
+.entry-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.entry-word { font: 700 34px/1.1 var(--f-jp); }
+.entry-reading { font: 400 15px/1 var(--f-jp); color: var(--muted); }
+.entry-gloss { font-size: 16px; }
+.entry-deinf { font: 400 12.5px/1.4 var(--f-mono); color: var(--muted); }
+.why { font-size: 13.5px; color: var(--muted); border-left: 3px solid var(--src, var(--line)); padding-left: 12px; }
+.cardprev { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; font-size: 13.5px; border-top: 1px dashed var(--line); padding-top: 12px; }
+.cardprev dt { color: var(--muted); font: 500 11.5px/1.9 var(--f-mono); text-transform: uppercase; letter-spacing: .05em; }
+.cardprev dd { margin: 0; overflow-wrap: anywhere; }
+.cardprev b { color: var(--accent); }
+.store { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13.5px; }
+.store li { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.store .tag { font: 500 10.5px/1 var(--f-mono); padding: 3px 6px; border-radius: 4px; border: 1px solid currentColor; }
+.store .empty { color: var(--muted); }
+
+/* ---------- sources ---------- */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+thead th { font: 700 14px/1.2 var(--f-display); }
+thead th .chip { margin-top: 6px; }
+tbody th { font: 500 11.5px/1.5 var(--f-mono); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); width: 120px; }
+
+/* decision flow */
+.flow { display: grid; gap: 0; max-width: 760px; }
+.node { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+.node.q { border-style: dashed; font-weight: 600; }
+.node.end { border-width: 1.5px; }
+.node.end.t { border-color: var(--tree); } .node.end.o { border-color: var(--ocr); } .node.end.s { border-color: var(--stop); }
+.node small { display: block; color: var(--muted); font-weight: 400; margin-top: 2px; }
+.down { height: 22px; width: 2px; background: var(--line); margin-left: 28px; }
+.branch { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.branch > div { display: grid; gap: 8px; align-content: start; }
+.yn { font: 600 11px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+@media (max-width: 560px) { .branch { grid-template-columns: 1fr; } }
+.aside-flow { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 14px; }
+.aside-flow .arrow { color: var(--muted); }
+
+/* modes */
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.mode { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 8px; align-content: start; }
+.mode.new { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.mode .name { font: 500 13px/1 var(--f-mono); }
+.mode .badge { justify-self: start; font: 600 10.5px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .06em; padding: 4px 7px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
+.mode p { font-size: 14px; color: var(--muted); }
+.triggers { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.trigger { padding: 14px 16px; display: grid; gap: 6px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 0 -1px -1px 0; }
+.trigger kbd { font: 600 12px/1 var(--f-mono); background: var(--sunk); border: 1px solid var(--line); border-bottom-width: 2px; padding: 3px 6px; border-radius: 4px; justify-self: start; }
+.trigger p { font-size: 13.5px; color: var(--muted); }
+
+/* OCR modes */
+.ocrmodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.om { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 10px; align-content: start; }
+.om svg { width: 100%; height: auto; max-width: 100%; }
+.om p { font-size: 14px; color: var(--muted); }
+.om .meta { font: 500 12px/1.4 var(--f-mono); color: var(--ink); }
+
+/* roadmap */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.step { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 4px 14px; padding: 16px 18px; border-bottom: 1px solid var(--line); align-items: start; }
+.step:last-child { border-bottom: 0; }
+.step .n { font: 800 22px/1 var(--f-display); color: var(--accent); }
+.step h3 { font-size: 1rem; }
+.step p { font-size: 14px; color: var(--muted); grid-column: 2 / 3; }
+.step .est { font: 500 12px/1 var(--f-mono); padding: 5px 8px; border-radius: 6px; background: var(--sunk); border: 1px solid var(--line); white-space: nowrap; grid-row: 1; grid-column: 3; }
+.step .est.unk { color: var(--muted); border-style: dashed; background: transparent; }
+.step .uses { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 6px; }
+.step .uses span { font: 500 11.5px/1 var(--f-mono); color: var(--muted); padding: 4px 6px; border-radius: 4px; background: var(--sunk); }
+@media (max-width: 560px) { .step { grid-template-columns: 34px minmax(0, 1fr); } .step .est { grid-column: 2; grid-row: auto; justify-self: start; } .step p, .step .uses { grid-column: 2; } }
+
+/* tests + guardrails */
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.checks label { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; padding: 8px 4px; font-size: 14px; cursor: pointer; border-radius: 6px; }
+.checks input { accent-color: var(--accent); width: 16px; height: 16px; margin: 3px 0 0; }
+.checks input:checked + span { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+.progress { font: 500 12px/1 var(--f-mono); color: var(--muted); }
+.guard { display: grid; gap: 14px; }
+.guard h3 { display: flex; gap: 8px; align-items: center; }
+.guard ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+.questions { counter-reset: q; list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.questions li { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14px; display: grid; gap: 4px; }
+.questions li b { font-family: var(--f-display); }
+.questions li span { color: var(--muted); }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 18px; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow"><a href="https://github.com/bee-san/LearnFromGames/issues/8">LearnFromGames · issue 8</a> · design</div>
+  <h1>Read any app,<br>not only games</h1>
+  <p class="lede">LFG reads games by OCR. Browsers, chat, news, ebooks and web visual novels mostly draw real text, and Android will hand that text over exactly. This page shows how LFG picks a source, how a lookup starts in an ordinary app, and the order to build it in.</p>
+  <div class="rule">
+    <b>The rule.</b>
+    <span>If the tree has text where you tapped, use it.</span>
+    <span class="chip c-tree">tree</span>
+    <span>Otherwise read the pixels.</span>
+    <span class="chip c-ocr">OCR</span>
+    <span>Nothing is set per app.</span>
+  </div>
+</header>
+
+<!-- ======================= DEMO ======================= -->
+<section aria-labelledby="demo-h">
+  <div class="section-head">
+    <div class="eyebrow">Try it</div>
+    <h2 id="demo-h">Four apps, one rule</h2>
+    <p>Tap the screen first: the tap goes to the app, as it should. Press <b>LFG</b> to read the screen, then tap a word. Strips show where each line came from.</p>
+  </div>
+  <div class="tabs" role="tablist" aria-label="Example app">
+    <button class="tab" role="tab" id="tab-browser" data-scn="browser" aria-selected="true">Browser page</button>
+    <button class="tab" role="tab" id="tab-manga" data-scn="manga" aria-selected="false">Manga reader</button>
+    <button class="tab" role="tab" id="tab-video" data-scn="video" aria-selected="false">Video subtitles</button>
+    <button class="tab" role="tab" id="tab-chat" data-scn="chat" aria-selected="false">Chat</button>
+  </div>
+  <div class="demo">
+    <div class="phone">
+      <div class="screen" id="screen">
+        <div class="sbar"><span>21:04</span><span id="sbar-app">Chrome</span><span>▲ ▮ 82%</span></div>
+        <div class="appbar" id="appbar"></div>
+        <div class="content" id="content"></div>
+        <div class="navbar"><button class="navbtn" id="back" aria-label="Back">◁</button><button class="navbtn" aria-label="Home" tabindex="-1">○</button><button class="navbtn" aria-label="Recents" tabindex="-1">▢</button></div>
+        <button class="fab" id="fab" aria-pressed="false" title="Read this screen">LFG</button>
+        <div class="toast" id="toast" role="status"></div>
+      </div>
+    </div>
+
+    <div class="inspector">
+      <div class="panelbox">
+        <dl class="status">
+          <dt>App</dt><dd id="st-app">Chrome</dd>
+          <dt>Mode</dt><dd id="st-mode"></dd>
+          <dt>Taps</dt><dd><span class="state" id="st-state">Go to the app</span></dd>
+          <dt>Read</dt><dd id="st-read">Nothing yet</dd>
+        </dl>
+        <div class="toggles">
+          <label><input type="checkbox" id="opt-boxes"> Show character boxes</label>
+          <label><input type="checkbox" id="opt-keep"> Keep lines from apps</label>
+          <label id="secure-wrap" hidden><input type="checkbox" id="opt-secure"> App sets <code>FLAG_SECURE</code></label>
+        </div>
+        <div id="sel-wrap" hidden class="toggles"><button class="btn" id="sel-btn">Long-press 待ち合わせ</button><span class="hint">Opens Android's text-selection menu. LFG is an item in it.</span></div>
+      </div>
+
+      <div class="panelbox" id="entry" aria-live="polite">
+        <p class="entry-empty">The dictionary entry opens here, as it would on the second screen or in the popup.</p>
+      </div>
+
+      <div class="panelbox">
+        <h3>Lines kept</h3>
+        <ul class="store" id="store"><li class="empty">Off by default for apps. Lookups still work. Turn on “Keep lines from apps” to store what LFG reads.</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= SOURCES ======================= -->
+<section aria-labelledby="src-h">
+  <div class="section-head">
+    <div class="eyebrow">Where the text comes from</div>
+    <h2 id="src-h">Three sources, cheapest first</h2>
+    <p>The service already declares <code>canRetrieveWindowContent</code> and <code>flagRetrieveInteractiveWindows</code>. Nothing reads node text yet.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th>
+        <th>Accessibility tree<br><span class="chip c-tree">SOURCE_TREE</span></th>
+        <th>OCR<br><span class="chip c-ocr">SOURCE_OCR</span></th>
+        <th>Text-selection menu<br><span class="chip c-sel">ACTION_PROCESS_TEXT</span></th></tr></thead>
+      <tbody>
+        <tr><th>Text</th><td>Exact</td><td>Model guess, usually right</td><td>Exact, only what was selected</td></tr>
+        <tr><th>Speed</th><td>At once</td><td>~320 ms for a full 1080p screen with ScreenAI on the emulator; a region is faster</td><td>At once</td></tr>
+        <tr><th>Battery</th><td>Almost none, no model</td><td>A model run per reading</td><td>None until used</td></tr>
+        <tr><th>Positions</th><td>Per character, from <code>refreshWithExtraData(EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY, …)</code>, mapped onto <code>TextLine</code> and <code>CharBox</code></td><td>A box for every character, as in games</td><td>None. No screenshot either</td></tr>
+        <tr><th>Covers</th><td><code>TextView</code>s, WebView and Chrome pages</td><td>Games, emulators, Unity, Ren'Py, Kirikiroid2, manga, subtitles, images</td><td>Any app where text can be selected</td></tr>
+        <tr><th>Misses</th><td>Custom-drawn text, Compose without semantics, Flutter in some modes</td><td><code>FLAG_SECURE</code> windows (black capture)</td><td>Everything not selectable; no overlay, no sentence context</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>What happens on a tap</h3>
+  <div class="flow">
+    <div class="node">A tap after the trigger, or the controller cursor landing on a place</div>
+    <div class="down"></div>
+    <div class="node q">Does the accessibility tree have text at this point?</div>
+    <div class="down"></div>
+    <div class="branch">
+      <div>
+        <span class="yn">Yes</span>
+        <div class="node q">Is the node a password or marked sensitive?</div>
+        <div class="branch">
+          <div><span class="yn">Yes</span><div class="node end s">Skip it<small>Never read, never stored</small></div></div>
+          <div><span class="yn">No</span><div class="node end t">Use the tree's text<small>Exact, with character positions. Tree wins where OCR also covers.</small></div></div>
+        </div>
+      </div>
+      <div>
+        <span class="yn">No</span>
+        <div class="node">Screenshot via <code>takeScreenshot</code></div>
+        <div class="node q">All black, and the window is secure?</div>
+        <div class="branch">
+          <div><span class="yn">Yes</span><div class="node end s">Say so<small>“This app blocks screen capture”, not an empty reading</small></div></div>
+          <div><span class="yn">No</span><div class="node end o">OCR<small>ScreenAI or meikiocr, then <code>Blocks</code> into <code>TextLine</code>s</small></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="aside-flow">
+    <span class="chip c-sel">Separately</span>
+    <span>Select text in any app</span><span class="arrow">→</span>
+    <span>“LFG” in the menu</span><span class="arrow">→</span>
+    <span>Lookup with the card button, no overlay. The selected text becomes the card's sentence.</span>
+  </div>
+</section>
+
+<!-- ======================= STARTING A LOOKUP ======================= -->
+<section aria-labelledby="start-h">
+  <div class="section-head">
+    <div class="eyebrow">How a lookup starts</div>
+    <h2 id="start-h">Games read themselves. Apps wait to be asked.</h2>
+    <p>Invisible tap strips over a feed would steal its scrolling and taps. LFG already leaves an app alone while its status bar shows. Ordinary apps get a new on-demand mode as their default; games keep automatic reading.</p>
+  </div>
+  <div class="modes">
+    <div class="mode"><span class="name">READ_AUTO</span><h3>Games</h3><p>Reads when the status bar is hidden. Tap strips stay up. Unchanged.</p></div>
+    <div class="mode new"><span class="badge">New · default for apps</span><span class="name">READ_ON_DEMAND</span><h3>Ordinary apps</h3><p>Nothing is drawn until a trigger. Then the next tap is a lookup, and strips go away after it or on Back.</p></div>
+    <div class="mode"><span class="name">READ_ON</span><h3>Always</h3><p>Forces reading, as today. For an app that behaves like a game.</p></div>
+    <div class="mode"><span class="name">READ_OFF</span><h3>Never</h3><p>LFG ignores the app. Chosen per app in Settings, like the new mode.</p></div>
+  </div>
+  <div class="triggers">
+    <div class="trigger"><kbd>L3 + R3</kbd><h3>Controller lookup mode</h3><p>Already works over any app. Needs lines from the tree as well as OCR.</p></div>
+    <div class="trigger"><kbd>Quick settings</kbd><h3>“Read this screen” tile</h3><p>Pull down, tap. The next tap on the app is a lookup.</p></div>
+    <div class="trigger"><kbd>Floating button</kbd><h3>LFG bubble</h3><p>Same as the tile, one tap closer. The demo above uses it.</p></div>
+    <div class="trigger"><kbd>Select → LFG</kbd><h3>Text-selection menu</h3><p>No overlay at all. The cheapest way to cover the most apps.</p></div>
+  </div>
+</section>
+
+<!-- ======================= OCR MODES ======================= -->
+<section aria-labelledby="ocr-h">
+  <div class="section-head">
+    <div class="eyebrow">OCR for any screen</div>
+    <h2 id="ocr-h">The game pipeline, started by hand</h2>
+    <p>Everything reuses <code>ReadingPipeline</code>, ScreenAI or meikiocr, and <code>Blocks</code>. What is new is how a reading starts and how the result is shown. Where the tree and OCR both cover a place, the tree's text wins; OCR fills in images, canvas text and video frames.</p>
+  </div>
+  <div class="ocrmodes">
+    <div class="om">
+      <svg viewBox="0 0 200 110" role="img" aria-label="Whole screen outlined">
+        <rect x="60" y="4" width="80" height="102" rx="8" fill="none" stroke="var(--line)" stroke-width="2"/>
+        <rect x="66" y="12" width="68" height="86" rx="3" fill="color-mix(in srgb, var(--ocr) 16%, transparent)" stroke="var(--ocr)" stroke-width="1.5"/>
+        <g fill="var(--muted)"><rect x="72" y="22" width="44" height="4" rx="2"/><rect x="72" y="32" width="54" height="4" rx="2"/><rect x="72" y="54" width="36" height="22" rx="2" opacity=".5"/></g>
+      </svg>
+      <h3>Read the whole screen once</h3>
+      <p>One screenshot, read, grouped into lines, strips laid over it until the next tap or Back.</p>
+      <div class="meta">Manga, comics, images, photos of signs and menus, screenshots</div>
+    </div>
+    <div class="om">
+      <svg viewBox="0 0 200 110" role="img" aria-label="A dragged box around one speech bubble">
+        <rect x="60" y="4" width="80" height="102" rx="8" fill="none" stroke="var(--line)" stroke-width="2"/>
+        <ellipse cx="88" cy="38" rx="16" ry="20" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
+        <ellipse cx="114" cy="72" rx="14" ry="18" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
+        <rect x="69" y="15" width="38" height="46" rx="3" fill="color-mix(in srgb, var(--ocr) 16%, transparent)" stroke="var(--ocr)" stroke-width="1.5" stroke-dasharray="4 3"/>
+      </svg>
+      <h3>Read a region</h3>
+      <p>Drag a box; only that part is read. Faster, and it ignores what is around it.</p>
+      <div class="meta">One speech bubble, one subtitle line</div>
+    </div>
+    <div class="om">
+      <svg viewBox="0 0 200 110" role="img" aria-label="A region at the bottom of a video, read on every settled change">
+        <rect x="20" y="14" width="160" height="82" rx="6" fill="none" stroke="var(--line)" stroke-width="2"/>
+        <rect x="40" y="70" width="120" height="16" rx="3" fill="color-mix(in srgb, var(--ocr) 16%, transparent)" stroke="var(--ocr)" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <rect x="64" y="76" width="72" height="4" rx="2" fill="var(--muted)"/>
+        <path d="M92 36 l16 10 l-16 10 z" fill="var(--muted)"/>
+      </svg>
+      <h3>Keep reading</h3>
+      <p><code>SettleDetector</code> limited to a chosen region, a reading per settled change, until turned off. Lines are stored as in a game.</p>
+      <div class="meta">Video subtitles, live streams, slideshows</div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= ROADMAP ======================= -->
+<section aria-labelledby="plan-h">
+  <div class="section-head">
+    <div class="eyebrow">Steps</div>
+    <h2 id="plan-h">Build order</h2>
+    <p>Step 1 ships value alone in a day. Step 2 is what every later step leans on. Only the first two have estimates in the issue.</p>
+  </div>
+  <ol class="steps">
+    <li class="step"><span class="n">1</span><h3>Text-selection menu</h3><span class="est">≈ 1 day</span>
+      <p>An activity takes the selected text, looks it up and shows the entries with the card button. No screenshot, no position: the selected text is the card's sentence.</p>
+      <div class="uses"><span>ACTION_PROCESS_TEXT</span></div></li>
+    <li class="step"><span class="n">2</span><h3>Lines from the accessibility tree</h3><span class="est">≈ 3–5 days</span>
+      <p>Collect visible text nodes in the front window, with character positions, as <code>TextLine</code>s. Group with <code>Blocks</code> where it makes sense. Prefer them over OCR where both cover a place. Feed the controller cursor and the trigger.</p>
+      <div class="uses"><span>AccessibilityNodeInfo</span><span>TextLine</span><span>CharBox</span><span>Blocks</span></div></li>
+    <li class="step"><span class="n">3</span><h3>“Read this screen” trigger</h3><span class="est unk">not estimated</span>
+      <p>A quick settings tile and/or a floating button. Tree where it has text, OCR for the rest, strips until the next tap or Back. Needs step 2.</p>
+      <div class="uses"><span>TileService</span><span>ReadingPipeline</span></div></li>
+    <li class="step"><span class="n">4</span><h3>Read a region</h3><span class="est unk">not estimated</span>
+      <p>Drag a box; only that part is read. Builds on the trigger.</p></li>
+    <li class="step"><span class="n">5</span><h3>Continuous reading in a region</h3><span class="est unk">not estimated</span>
+      <p>For subtitles and streams. Lines stored as in a game. Detect secure screens and say so.</p>
+      <div class="uses"><span>SettleDetector</span><span>FLAG_SECURE</span></div></li>
+    <li class="step"><span class="n">6</span><h3>Per-app reading modes</h3><span class="est unk">not estimated</span>
+      <p>Add the on-demand mode beside <code>READ_AUTO</code>, <code>READ_ON</code> and <code>READ_OFF</code>, the default for ordinary apps, and a per-app choice in Settings.</p>
+      <div class="uses"><span>Game.reading</span></div></li>
+    <li class="step"><span class="n">7</span><h3>Apps in the line store and stats</h3><span class="est unk">not estimated</span>
+      <p>A <code>SOURCE_TREE</code> source beside <code>SOURCE_OCR</code> and <code>SOURCE_PRACTICE</code>. Apps in stats beside games (issue 7), with a way to leave them out of reading time. Sentence audio and the animated picture stay off for apps.</p>
+      <div class="uses"><span>SOURCE_TREE</span><span>Stats</span></div></li>
+  </ol>
+</section>
+
+<!-- ======================= TESTS + GUARDRAILS ======================= -->
+<section aria-labelledby="test-h">
+  <div class="section-head">
+    <div class="eyebrow">Before it ships</div>
+    <h2 id="test-h">Emulator checks and guardrails</h2>
+  </div>
+  <div class="two">
+    <div class="panelbox">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h3>Test on the emulator</h3><span class="progress" id="progress">0 of 8</span></div>
+      <ul class="checks" id="checks">
+        <li><label><input type="checkbox" id="t1"><span>Chrome with a Japanese page: character positions in a WebView or Chrome page</span></label></li>
+        <li><label><input type="checkbox" id="t2"><span>A native app with <code>TextView</code>s: Settings in Japanese, or a test screen in <code>fakegame</code></span></label></li>
+        <li><label><input type="checkbox" id="t3"><span>A WebView app</span></label></li>
+        <li><label><input type="checkbox" id="t4"><span>A Unity or GL app gives no tree text, so OCR is used</span></label></li>
+        <li><label><input type="checkbox" id="t5"><span>Manga in a reader app: vertical text, close irregular speech bubbles</span></label></li>
+        <li><label><input type="checkbox" id="t6"><span>A video with burned-in subtitles in a player without <code>FLAG_SECURE</code></span></label></li>
+        <li><label><input type="checkbox" id="t7"><span>A <code>FLAG_SECURE</code> window gives the secure-screen message, not an empty reading</span></label></li>
+        <li><label><input type="checkbox" id="t8"><span>Scrolling and tapping in an ordinary app work as before until a lookup is started</span></label></li>
+      </ul>
+      <p class="hint">Ticks are saved in this browser only.</p>
+    </div>
+    <div class="guard">
+      <div class="panelbox">
+        <h3><span class="chip c-stop">Privacy</span></h3>
+        <ul>
+          <li>Password fields and anything marked sensitive are never read or stored.</li>
+          <li>Lines from apps can be private (chats, email). Keeping them is its own setting, off by default.</li>
+          <li>Lookups work with that setting off.</li>
+        </ul>
+      </div>
+      <div class="panelbox">
+        <h3><span class="chip c-ocr">Limits</span></h3>
+        <ul>
+          <li><code>FLAG_SECURE</code> apps (most paid video, some banking) give a black capture. Detect it and tell the user.</li>
+          <li>Some apps hide or flatten their text: custom drawing, Compose without semantics, Flutter in some modes. OCR is the fallback.</li>
+          <li>Full-screen OCR costs ~320 ms; a region is the better default for continuous reading.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="q-h">
+  <div class="section-head">
+    <div class="eyebrow">Open questions</div>
+    <h2 id="q-h">What the issue leaves to decide</h2>
+  </div>
+  <ol class="questions">
+    <li><b>Tile, floating button, or both?</b><span>The issue says “and/or”. The tile costs nothing on screen; the bubble is one tap closer but covers part of the app.</span></li>
+    <li><b>Does continuous reading store lines when app storage is off?</b><span>Step 5 says lines are stored as in a game; the privacy note says app lines are off by default. Subtitles are rarely private, so a per-mode exception may make sense.</span></li>
+    <li><b>Leave apps out of reading time by default?</b><span>Scrolling a feed is not reading a game. The issue asks for a way to exclude them, not which way it starts.</span></li>
+    <li><b>Do the strips stay up after one lookup?</b><span>“Until the next tap or Back” suits a single look. Reading a whole article may want them to stay until Back.</span></li>
+  </ol>
+</section>
+
+<footer>From <a href="https://github.com/bee-san/LearnFromGames/issues/8">bee-san/LearnFromGames issue 8</a>. The demo is a mock-up in HTML; the dictionary entries are a small hand-written sample.</footer>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const DICT = {
+    '京都': { r: 'きょうと', g: 'Kyoto' },
+    '紅葉': { r: 'こうよう', g: 'autumn leaves; autumn colours' },
+    '見頃': { r: 'みごろ', g: 'the best time to see' },
+    '迎えました': { base: '迎える', r: 'むかえる', g: 'to reach (a time); to welcome', inf: 'polite past' },
+    '今週末': { r: 'こんしゅうまつ', g: 'this weekend' },
+    '多く': { r: 'おおく', g: 'many; much; a large part' },
+    '観光客': { r: 'かんこうきゃく', g: 'tourist; sightseer' },
+    '訪れる': { r: 'おとずれる', g: 'to visit' },
+    '見込み': { r: 'みこみ', g: 'expectation; prospect' },
+    '立入禁止': { r: 'たちいりきんし', g: 'no entry; keep out' },
+    '営業中': { r: 'えいぎょうちゅう', g: 'open for business' },
+    'まさか': { r: 'まさか', g: 'surely not; no way' },
+    'お前': { r: 'おまえ', g: 'you (familiar, rough)' },
+    '犯人': { r: 'はんにん', g: 'culprit; criminal' },
+    '約束': { r: 'やくそく', g: 'promise; agreement' },
+    '次': { r: 'つぎ', g: 'next' },
+    '駅': { r: 'えき', g: 'station' },
+    '降りよう': { base: '降りる', r: 'おりる', g: 'to get off (a train)', inf: 'volitional' },
+    '雨': { r: 'あめ', g: 'rain' },
+    '降りそう': { base: '降る', r: 'ふる', g: 'to fall (rain, snow)', inf: '〜そう: looks like it will' },
+    '傘': { r: 'かさ', g: 'umbrella' },
+    '持ってきた': { base: '持ってくる', r: 'もってくる', g: 'to bring', inf: 'past' },
+    '明日': { r: 'あした', g: 'tomorrow' },
+    '待ち合わせ': { r: 'まちあわせ', g: 'meeting up; appointment to meet' },
+    '駅前': { r: 'えきまえ', g: 'in front of the station' },
+    '了解': { r: 'りょうかい', g: 'understood; got it' },
+    '遅刻': { r: 'ちこく', g: 'being late' },
+    '十時': { r: 'じゅうじ', g: 'ten o’clock' },
+    '改札': { r: 'かいさつ', g: 'ticket gate' }
+  };
+  const LINES = {
+    b1: { src: 'tree', t: '京都|の|紅葉|が|見頃|を|迎えました' },
+    b2: { src: 'tree', t: '今週末|は|多く|の|観光客|が|訪れる|見込み|です|。' },
+    b3: { src: 'ocr', t: '立入禁止', why: 'This is a photo inside the page, so the tree has no text here. LFG took a screenshot and OCR read the sign. The tree still covers the article around it.' },
+    b4: { src: 'ocr', t: '営業中', why: 'Vertical text on a shop curtain in a photo. OCR handles vertical text the same way it does in games.' },
+    m1: { src: 'ocr', t: 'まさか|…' },
+    m2: { src: 'ocr', t: 'お前|が|犯人|だった|のか' },
+    m3: { src: 'ocr', t: '約束|した|だろ' },
+    v1: { src: 'ocr', t: '次|の|駅|で|降りよう' },
+    v2: { src: 'ocr', t: '雨|が|降りそう|だね' },
+    v3: { src: 'ocr', t: '傘|、|持ってきた|？' },
+    c1: { src: 'tree', t: '明日|の|待ち合わせ|、|駅前|で|いい|？' },
+    c2: { src: 'tree', t: '了解|！|遅刻|しないで|ね' },
+    c3: { src: 'tree', t: 'じゃあ|十時|に|改札|で' }
+  };
+  const WHY = {
+    tree: 'The app exposes this text to accessibility. Positions come from refreshWithExtraData(EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY). Exact and instant; no model ran.',
+    manga: 'The reader draws pages as images, so the tree is empty. One screenshot, read by ScreenAI or meikiocr in about 320 ms. Vertical text and bubbles grouped by Blocks.',
+    video: 'Continuous reading limited to the subtitle region. SettleDetector waits for the line to stop changing, then only the box is read, which is faster than the full screen.',
+    sel: 'Picked from Android’s text-selection menu. No overlay and no screenshot, so there is no position and no surrounding sentence.'
+  };
+  const SUBS = ['v1', 'v2', 'v3'];
+
+  const chars = t => [...t].map(c => `<i class="c">${c}</i>`).join('');
+  const L = id => {
+    const l = LINES[id];
+    return `<span class="ln" data-id="${id}" data-src="${l.src}">` +
+      l.t.split('|').map(p => DICT[p] ? `<span class="w" data-w="${p}">${chars(p)}</span>` : chars(p)).join('') + '</span>';
+  };
+  const plain = id => LINES[id].t.replaceAll('|', '');
+
+  const SCN = {
+    browser: {
+      app: 'Chrome', mode: 'On demand (default for apps)',
+      bar: '<span>◀</span><span class="urlbox">news.example.jp/kyoto-autumn</span><span>⋮</span>',
+      html: () => `<div class="page">
+        <div class="kicker">ニュース · 観光</div>
+        <h4>${L('b1')}</h4>
+        <div class="photo"><span class="sign">${L('b3')}</span><span class="noren">${L('b4')}</span></div>
+        <p>${L('b2')}</p>
+        <div class="pw">ログイン · パスワード<div class="field">••••••••<span class="skipnote">Sensitive · never read</span></div></div>
+      </div>`
+    },
+    manga: {
+      app: 'Manga reader', mode: 'On demand (default for apps)',
+      bar: '<span>◀</span><span style="flex:1">第3話 · 12 / 40</span><span>⋮</span>',
+      html: () => `<div class="manga">
+        <div class="panel"><div class="speed"></div><div class="figure" style="left:18px"></div>
+          <div class="bubble" style="right:14px;top:12px;width:62px;height:104px"><span class="vert">${L('m1')}</span></div>
+          <div class="bubble" style="right:84px;top:30px;width:70px;height:150px"><span class="vert">${L('m2')}</span></div></div>
+        <div class="panel"><div class="figure" style="right:30px;background:#555"></div>
+          <div class="bubble" style="left:20px;top:14px;width:66px;height:118px"><span class="vert">${L('m3')}</span></div></div>
+      </div>`
+    },
+    video: {
+      app: 'Video player', mode: 'On demand · continuous in a region',
+      bar: '<span>◀</span><span style="flex:1">雨の駅 · 第1話</span><span>⋮</span>',
+      html: () => `<div class="video"><div class="frame"><div class="rain"></div><div class="train"></div>
+        <div class="region"></div><div class="subtitle" id="sub">${L(SUBS[subIdx])}</div>
+        <div class="capture" id="capture">What LFG got: a black capture</div></div>
+        <div class="controls"><span>❚❚</span><span>08:12</span><span class="bar"><i></i></span><span>21:40</span></div></div>`
+    },
+    chat: {
+      app: 'Chat', mode: 'On demand (default for apps)',
+      bar: '<span>◀</span><span style="flex:1;font-weight:600;color:var(--scr-ink)">ゆき</span><span>⋮</span>',
+      html: () => `<div class="chat">
+        <span class="who">ゆき · 20:51</span>
+        <div class="msg in">${L('c1')}</div>
+        <div class="msg out">${L('c2')}</div>
+        <div class="msg in">${L('c3')}</div>
+        <div class="composer">メッセージを入力</div>
+        <div class="selbar" id="selbar"><span>コピー</span><span>共有</span><span>すべて選択</span><button id="sel-lfg">LFG</button></div>
+      </div>`
+    }
+  };
+
+  let scn = 'browser', reading = false, continuous = false, subIdx = 0, subTimer = null, toastTimer = null;
+  const store = [];
+  const screen = $('#screen'), content = $('#content'), fab = $('#fab');
+
+  function toast(msg) {
+    const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+  }
+  function setState(text, live) {
+    const s = $('#st-state'); s.textContent = text; s.classList.toggle('live', !!live);
+    s.classList.remove('flash'); void s.offsetWidth; s.classList.add('flash');
+  }
+  function setRead(text) { $('#st-read').textContent = text; }
+
+  function keep(id) {
+    if (!$('#opt-keep').checked) return;
+    const text = plain(id);
+    if (store.some(s => s.text === text)) return;
+    store.unshift({ text, src: LINES[id].src, app: SCN[scn].app });
+    renderStore();
+  }
+  function renderStore() {
+    const ul = $('#store');
+    if (!store.length) {
+      ul.innerHTML = $('#opt-keep').checked
+        ? '<li class="empty">On. Lines LFG reads from now on are kept here.</li>'
+        : '<li class="empty">Off by default for apps. Lookups still work. Turn on “Keep lines from apps” to store what LFG reads.</li>';
+      return;
+    }
+    ul.innerHTML = store.slice(0, 7).map(s =>
+      `<li><span class="tag ${s.src === 'tree' ? 'c-tree' : 'c-ocr'}">${s.src === 'tree' ? 'SOURCE_TREE' : 'SOURCE_OCR'}</span><span class="jp">${s.text}</span><span class="hint">${s.app}</span></li>`).join('');
+  }
+
+  function clearStrips() {
+    reading = false; screen.classList.remove('reading');
+    content.querySelectorAll('.ln').forEach(l => { delete l.dataset.on; l.classList.remove('scan'); });
+    fab.setAttribute('aria-pressed', 'false');
+  }
+
+  function readScreen() {
+    if (scn === 'video') return toggleContinuous();
+    if (reading) { clearStrips(); setState('Go to the app'); setRead('Strips cleared'); return; }
+    reading = true; screen.classList.add('reading'); fab.setAttribute('aria-pressed', 'true');
+    setState('Next tap looks up', true);
+    const lns = [...content.querySelectorAll('.ln')];
+    const tree = lns.filter(l => l.dataset.src === 'tree'), ocr = lns.filter(l => l.dataset.src === 'ocr');
+    tree.forEach(l => { l.dataset.on = ''; keep(l.dataset.id); });
+    const skipped = content.querySelector('.pw') ? 1 : 0;
+    const parts = [];
+    if (tree.length) parts.push(`${tree.length} from the tree, at once`);
+    if (skipped) parts.push(`${skipped} sensitive field skipped`);
+    if (ocr.length) {
+      parts.push(`${ocr.length} by OCR…`); setRead(parts.join(' · '));
+      ocr.forEach(l => l.classList.add('scan'));
+      setTimeout(() => {
+        if (!reading) return;
+        ocr.forEach(l => { l.classList.remove('scan'); l.dataset.on = ''; keep(l.dataset.id); });
+        parts[parts.length - 1] = `${ocr.length} by OCR in ~320 ms`; setRead(parts.join(' · '));
+      }, 320);
+    } else setRead(parts.join(' · '));
+  }
+
+  function toggleContinuous() {
+    const cap = $('#capture');
+    if ($('#opt-secure').checked) {
+      cap.classList.add('show'); setTimeout(() => cap.classList.remove('show'), 2600);
+      toast('This app blocks screen capture, so LFG can’t read it.');
+      setState('Go to the app'); setRead('Black capture from a secure window. Told the user instead of reading nothing.');
+      return;
+    }
+    continuous = !continuous;
+    screen.classList.toggle('continuous', continuous); screen.classList.toggle('reading', continuous);
+    fab.setAttribute('aria-pressed', String(continuous)); reading = continuous;
+    if (continuous) { setState('Taps on subtitles look up', true); setRead('Reading the subtitle region on every settled change'); readSub(); }
+    else { clearStrips(); setState('Go to the app'); setRead('Continuous reading off'); }
+  }
+  function readSub() {
+    const l = content.querySelector('#sub .ln'); if (!l || !continuous) return;
+    l.classList.add('scan');
+    setTimeout(() => { if (!continuous) return; l.classList.remove('scan'); l.dataset.on = ''; keep(l.dataset.id); }, 160);
+  }
+  function nextSub() {
+    subIdx = (subIdx + 1) % SUBS.length;
+    const sub = content.querySelector('#sub'); if (!sub) return;
+    sub.innerHTML = L(SUBS[subIdx]);
+    if (continuous) setTimeout(readSub, 380); // SettleDetector: wait for the line to hold still
+  }
+
+  function lookup(word, lineId, src) {
+    const d = DICT[word], line = LINES[lineId];
+    const kind = src || line.src;
+    const color = kind === 'tree' ? 'var(--tree)' : kind === 'sel' ? 'var(--sel)' : 'var(--ocr)';
+    const label = kind === 'tree' ? 'Accessibility tree' : kind === 'sel' ? 'Text-selection menu' : 'OCR';
+    const why = kind === 'sel' ? WHY.sel : line.why || (kind === 'tree' ? WHY.tree : WHY[scn]);
+    const sentence = kind === 'sel' ? `<b>${word}</b>` : line.t.split('|').map(p => p === word ? `<b>${p}</b>` : p).join('');
+    const pic = kind === 'sel' ? 'None, no screenshot' : 'Screenshot of the app';
+    $('#entry').innerHTML = `
+      <div class="entry-head"><span class="entry-word">${d.base || word}</span><span class="entry-reading">${d.r}</span>
+        <span class="chip ${kind === 'tree' ? 'c-tree' : kind === 'sel' ? 'c-sel' : 'c-ocr'}">${label}</span></div>
+      <div class="entry-gloss">${d.g}</div>
+      ${d.base ? `<div class="entry-deinf"><span class="jp">${word}</span> → <span class="jp">${d.base}</span> · ${d.inf}</div>` : ''}
+      <p class="why" style="--src:${color}">${why}</p>
+      <dl class="cardprev">
+        <dt>Sentence</dt><dd class="jp">${sentence}</dd>
+        <dt>Picture</dt><dd>${pic}</dd>
+        <dt>Audio</dt><dd>Off for apps</dd>
+      </dl>`;
+  }
+
+  // taps on the phone screen
+  content.addEventListener('click', e => {
+    if (e.target.closest('#selbar')) return;
+    const sel = $('#selbar'); if (sel && sel.classList.contains('show')) { sel.classList.remove('show'); content.querySelectorAll('.picked').forEach(p => p.classList.remove('picked')); return; }
+    if (!reading) { setState('Went to the app'); toast('Tap went to the app. Scrolling and links work as normal.'); return; }
+    const w = e.target.closest('.w'), ln = w && w.closest('.ln[data-on]');
+    if (w && ln) {
+      lookup(w.dataset.w, ln.dataset.id);
+      if (!continuous) { clearStrips(); setState('Go to the app'); setRead('Strips cleared after the lookup. Press LFG to read again.'); }
+    } else if (!continuous) {
+      clearStrips(); setState('Go to the app'); setRead('No word there. Strips cleared.');
+    }
+  });
+  fab.addEventListener('click', readScreen);
+  $('#back').addEventListener('click', () => {
+    if (continuous) toggleContinuous();
+    else if (reading) { clearStrips(); setState('Go to the app'); setRead('Back cleared the strips'); }
+    else toast('Back went to the app.');
+  });
+
+  function load(name) {
+    clearStrips(); continuous = false; screen.classList.remove('continuous');
+    clearInterval(subTimer); subTimer = null;
+    scn = name; const s = SCN[name];
+    document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.scn === name)));
+    $('#sbar-app').textContent = s.app; $('#st-app').textContent = s.app; $('#st-mode').textContent = s.mode;
+    $('#appbar').innerHTML = s.bar; content.innerHTML = s.html();
+    $('#secure-wrap').hidden = name !== 'video'; $('#sel-wrap').hidden = name !== 'chat';
+    setState('Go to the app');
+    setRead(name === 'video' ? 'Nothing yet. LFG here turns on continuous reading.' : 'Nothing yet');
+    if (name === 'video') subTimer = setInterval(nextSub, 3200);
+    if (name === 'chat') $('#sel-lfg').addEventListener('click', e => {
+      e.stopPropagation(); $('#selbar').classList.remove('show');
+      content.querySelectorAll('.picked').forEach(p => p.classList.remove('picked'));
+      lookup('待ち合わせ', 'c1', 'sel'); setRead('From the selection menu. No overlay was drawn.');
+    });
+  }
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => load(t.dataset.scn)));
+  $('#sel-btn').addEventListener('click', () => {
+    if (scn !== 'chat') return;
+    const w = content.querySelector('.ln[data-id="c1"] .w[data-w="待ち合わせ"]'); if (w) w.classList.add('picked');
+    $('#selbar').classList.add('show');
+  });
+  $('#opt-boxes').addEventListener('change', e => screen.classList.toggle('boxes', e.target.checked));
+  $('#opt-keep').addEventListener('change', renderStore);
+
+  // emulator checklist, remembered per browser
+  const checks = [...document.querySelectorAll('#checks input')];
+  const KEY = 'lfg-issue8-tests';
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (_) {}
+  const prog = () => { $('#progress').textContent = `${checks.filter(c => c.checked).length} of ${checks.length}`; };
+  checks.forEach(c => {
+    c.checked = !!saved[c.id];
+    c.addEventListener('change', () => { saved[c.id] = c.checked; try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (_) {} prog(); });
+  });
+  prog();
+
+  load('browser');
+})();
+</script>
