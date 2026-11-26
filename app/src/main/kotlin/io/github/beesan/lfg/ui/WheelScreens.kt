@@ -676,7 +676,8 @@ fun WheelEditScreen(
                         Picture(minOf(full, maxWidth, maxHeight))
                     }
                     HorizontalDivider(color = Lfg.Border)
-                    Bar()
+                    // One row, as on a small screen: a bar that wrapped would take the wheel's room as a slice is selected.
+                    Bar(narrow = true)
                 }
                 val pane = Modifier.width(minOf(456.dp, whole * 0.38f)).fillMaxHeight().clip(RoundedCornerShape(10.dp)).background(Lfg.Surface).padding(14.dp)
                 if (iconsOpen) IconsPane(pane) else TilesPane(draggable = true, pane)

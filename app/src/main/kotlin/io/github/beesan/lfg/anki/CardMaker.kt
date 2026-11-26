@@ -156,7 +156,7 @@ class CardMaker(
             trimmed?.delete()
             if (html == null || !anki.setField(noteId, index, html)) return@withContext "AnkiDroid refused the picture."
             db.cards().update(card.copy(pictureName = name))
-            "This screen is on the card of ${card.term.take(12)}"
+            "This screen is on the card of " + if (card.term.length > 12) card.term.take(12) + "…" else card.term
         } catch (e: Exception) {
             android.util.Log.w("LfgCards", "picture to the last card failed", e)
             "AnkiDroid did not answer. Open AnkiDroid once, then try again."

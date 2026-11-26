@@ -282,7 +282,16 @@ class LfgAccessibilityService : AccessibilityService() {
                 }
             }
         }
-        scope.launch { controller.state.collect(overlays::onState) }
+        scope.launch {
+            var wasLookup = false
+            controller.state.collect { state ->
+                overlays.onState(state)
+                // Over a game, a box or the whole screen read once is done with when lookup on it is closed:
+                // the game's own reading comes back, and a stale entry is not left over its next page.
+                if (wasLookup && !state.controllerMode && askedOverGame()) endAsked()
+                wasLookup = state.controllerMode
+            }
+        }
         scope.launch {
             // Enough of every game's newest lines that the lines' screen still has those of the one being played.
             app.database.lines().recent(80).collect(overlays::onHistory)
@@ -384,21 +393,18 @@ class LfgAccessibilityService : AccessibilityService() {
      * ([oneButton]).
      */
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        // A button for the game, over a box or screen of it read once: the game goes on, so what was read is gone.
+        if (event.action == KeyEvent.ACTION_DOWN && KeyEvent.isGamepadButton(event.keyCode) && askedOverGame() &&
+            !controller.state.value.controllerMode && !overlays.wheelUp && event.keyCode !in shortcutKeys().toList()
+        ) {
+            endAsked()
+        }
         // Back first takes away the strips of a reading asked for, before it reaches the app.
         if (event.keyCode == KeyEvent.KEYCODE_BACK && asked?.continuous == false && !controller.state.value.controllerMode) {
             if (event.action == KeyEvent.ACTION_UP) endAsked()
             return true
         }
-        val (first, second) = when (app.settings.prefs.value.shortcut) {
-            Prefs.SHORTCUT_L1_R1 -> KeyEvent.KEYCODE_BUTTON_L1 to KeyEvent.KEYCODE_BUTTON_R1
-            Prefs.SHORTCUT_L2_R2 -> KeyEvent.KEYCODE_BUTTON_L2 to KeyEvent.KEYCODE_BUTTON_R2
-            Prefs.SHORTCUT_SELECT_START -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_START
-            Prefs.SHORTCUT_SELECT -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_SELECT
-            Prefs.SHORTCUT_START -> KeyEvent.KEYCODE_BUTTON_START to KeyEvent.KEYCODE_BUTTON_START
-            Prefs.SHORTCUT_L3 -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBL
-            Prefs.SHORTCUT_R3 -> KeyEvent.KEYCODE_BUTTON_THUMBR to KeyEvent.KEYCODE_BUTTON_THUMBR
-            else -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBR
-        }
+        val (first, second) = shortcutKeys()
         if (first == second && event.keyCode == first) return oneButton(event)
         if (!KeyEvent.isGamepadButton(event.keyCode) && event.keyCode !in DPAD) return false
         if (event.action == KeyEvent.ACTION_DOWN) {
@@ -498,6 +504,24 @@ class LfgAccessibilityService : AccessibilityService() {
     /** Games whose reading is paused from the wheel, until the tile is picked again or the service starts anew. */
     private val paused = HashSet<String>()
 
+    /** A one-off reading (a box, or the whole screen) of the game in front, rather than of an ordinary app. */
+    private fun askedOverGame(): Boolean {
+        val now = asked ?: return false
+        return !now.continuous && front?.game?.packageName == now.packageName
+    }
+
+    /** The two buttons of the lookup shortcut, the same one twice for a shortcut of one button. */
+    private fun shortcutKeys(): Pair<Int, Int> = when (app.settings.prefs.value.shortcut) {
+        Prefs.SHORTCUT_L1_R1 -> KeyEvent.KEYCODE_BUTTON_L1 to KeyEvent.KEYCODE_BUTTON_R1
+        Prefs.SHORTCUT_L2_R2 -> KeyEvent.KEYCODE_BUTTON_L2 to KeyEvent.KEYCODE_BUTTON_R2
+        Prefs.SHORTCUT_SELECT_START -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_START
+        Prefs.SHORTCUT_SELECT -> KeyEvent.KEYCODE_BUTTON_SELECT to KeyEvent.KEYCODE_BUTTON_SELECT
+        Prefs.SHORTCUT_START -> KeyEvent.KEYCODE_BUTTON_START to KeyEvent.KEYCODE_BUTTON_START
+        Prefs.SHORTCUT_L3 -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBL
+        Prefs.SHORTCUT_R3 -> KeyEvent.KEYCODE_BUTTON_THUMBR to KeyEvent.KEYCODE_BUTTON_THUMBR
+        else -> KeyEvent.KEYCODE_BUTTON_THUMBL to KeyEvent.KEYCODE_BUTTON_THUMBR
+    }
+
     /** Whether AnkiDroid is there to ask, looked up at most every few seconds: the wheel asks as it is drawn. */
     private var ankiReady = false
     private var ankiAskedAt = 0L
@@ -539,7 +563,8 @@ class LfgAccessibilityService : AccessibilityService() {
                 // A game read in a box is read on its whole screen this once; one read whole is read again now.
                 val screen = playing?.let { overlays.screen(it.displayId) }
                 if (playing != null && screen != null && dialogueBox(playing.game, playing.displayId) != null) {
-                    ask(screen, thenController = controller.state.value.controllerMode)
+                    // Read once, with lookup on it: closing lookup brings the game's own reading back.
+                    ask(screen, thenController = true)
                 } else {
                     controller.setLines(emptyList())
                     pipeline.forget()
