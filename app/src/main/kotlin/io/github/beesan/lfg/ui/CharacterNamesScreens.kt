@@ -207,29 +207,23 @@ fun VnSearchScreen(
 /** Settings › Character names. */
 @Composable
 fun CharacterNamesScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Character names", onBack) {
-    Text(
-        "For visual novels. LFG finds the game on VNDB and builds a dictionary of its cast on this device. Only that game's lookups use it.",
-        color = Lfg.Dim, fontSize = 14.sp,
-    )
-    Card(
-        "Find visual novels by themselves",
-        "Links a game when its Steam ID matches, or its title, platform and a Japanese release all do. Anything less is asked once, in a lookup, and kept on the game's page.",
-    ) { Switch(prefs.namesAuto) { v -> onChange { it.copy(namesAuto = v) } } }
-    Card("Names with honorifics", "七瀬さん, 湊くん and about 270 more endings look up as one word. Most of a dictionary's size.") {
-        Switch(prefs.namesHonorifics) { v -> onChange { it.copy(namesHonorifics = v) } }
+    Hint("A visual novel's cast from VNDB, for that game's lookups")
+    Group("Visual novels") {
+        Card("Find visual novels by themselves", "By Steam ID, or title, platform and release") {
+            Switch(prefs.namesAuto) { v -> onChange { it.copy(namesAuto = v) } }
+        }
+        Card("Names with honorifics", "七瀬さん as one word · bigger dictionary") {
+            Switch(prefs.namesHonorifics) { v -> onChange { it.copy(namesHonorifics = v) } }
+        }
+        Card("Show spoilers", "As VNDB marks them") {
+            Switch(prefs.namesSpoilers) { v -> onChange { it.copy(namesSpoilers = v) } }
+        }
     }
-    Card("Show spoilers", "Descriptions and traits VNDB marks as spoilers.") {
-        Switch(prefs.namesSpoilers) { v -> onChange { it.copy(namesSpoilers = v) } }
-    }
-    Text(
-        "Changing honorifics or spoilers builds each game's names again the next time it is played. Downloads follow the Wi-Fi only choice of the first set-up.",
-        color = Lfg.Dim, fontSize = 13.sp,
-    )
+    Hint("A change rebuilds names next time you play")
 }
 
 @Composable
-private fun Switch(on: Boolean, onChange: (Boolean) -> Unit) =
-    Choice(listOf("on" to "On", "off" to "Off"), if (on) "on" else "off") { onChange(it == "on") }
+private fun Switch(on: Boolean, onChange: (Boolean) -> Unit) = Toggle(on) { onChange(it) }
 
 /** VNDB's platform codes, as their names. */
 private val PLATFORMS = mapOf(

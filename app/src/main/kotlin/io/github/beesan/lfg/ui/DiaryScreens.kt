@@ -670,12 +670,10 @@ private fun Tick(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
 
 @Composable
 fun DiarySettingsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Diary", onBack) {
-    Card(
-        "Write each day",
-        if (prefs.aiReady) "A title and a few sentences about each day you played, written by the model once the day is over"
-        else "A title and a few sentences about each day you played, written by the model. It needs your OpenRouter key, in Settings › Translation",
-    ) {
-        Choice(listOf(Prefs.DIARY_WITH_RECAP to "With a recap", Prefs.DIARY_EACH_DAY to "After each day"), prefs.diaryWrite) { v -> onChange { it.copy(diaryWrite = v) } }
+    Group("Diary") {
+        Card("Write each day", if (prefs.aiReady) "A title and a few lines per day played" else "Needs an OpenRouter key, in Translation") {
+            Choice(listOf(Prefs.DIARY_WITH_RECAP to "With a recap", Prefs.DIARY_EACH_DAY to "After each day"), prefs.diaryWrite) { v -> onChange { it.copy(diaryWrite = v) } }
+        }
     }
 }
 

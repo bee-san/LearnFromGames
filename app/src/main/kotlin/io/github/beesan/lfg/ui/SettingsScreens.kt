@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -48,6 +49,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.InputMode
@@ -106,52 +108,50 @@ internal fun Page(title: String, onBack: () -> Unit, actions: @Composable () -> 
         }
         HorizontalDivider(color = Lfg.Border)
         Column(
-            Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll).firstFocus().padding(top = 12.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp), content = content,
+            Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll).firstFocus().padding(top = 16.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp), content = content,
         )
     }
 }
 
-/** A row of the app: a name, a line of detail, and whatever it does on the right. */
+/**
+ * A row of the app: a name, a short line of detail, and whatever it does on the
+ * right. In a [Group] it is one row of the group's box; alone, a box of its own.
+ */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 fun Card(name: String, detail: String = "", onClick: (() -> Unit)? = null, modifier: Modifier = Modifier, trailing: @Composable () -> Unit = {}) {
-    val shape = RoundedCornerShape(8.dp)
-    BoxWithConstraints(
-        modifier.fillMaxWidth().then(if (onClick != null) Modifier.focusRing(shape) else Modifier).clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape)
+    val inGroup = LocalInGroup.current
+    val shape = if (inGroup) RoundedCornerShape(0.dp) else RoundedCornerShape(18.dp)
+    Box(
+        modifier.fillMaxWidth().then(if (onClick != null) Modifier.focusRing(shape, inside = inGroup) else Modifier)
+            .then(if (inGroup) Modifier.background(Lfg.Surface) else Modifier.clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .heightIn(min = 64.dp)
             .padding(horizontal = 16.dp, vertical = 12.dp),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        // Narrow, a row of buttons beside the name squeezed it to a letter a line: the buttons go under it.
-        if (maxWidth < NARROW - 32.dp) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column {
-                    Text(name, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    if (detail.isNotEmpty()) Text(detail, color = Lfg.Dim, fontSize = 14.sp)
+        RowOrStack(
+            texts = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(name, color = Lfg.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    if (detail.isNotEmpty()) Text(detail, color = Lfg.Dim, fontSize = 13.sp, lineHeight = 18.sp)
                 }
+            },
+            trailing = {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) { trailing() }
-            }
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(name, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    if (detail.isNotEmpty()) Text(detail, color = Lfg.Dim, fontSize = 14.sp)
-                }
-                Spacer(Modifier.width(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { trailing() }
-            }
-        }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
-/** A choice between a few named options: the current one is filled. */
+/** A choice between a few named options, in a row: the current one is filled. */
 @Composable
-internal fun Choice(options: List<Pair<String, String>>, current: String, onPick: (String) -> Unit) {
-    options.forEach { (value, label) -> LfgButton(label, { onPick(value) }, primary = value == current) }
-}
+internal fun Choice(options: List<Pair<String, String>>, current: String, onPick: (String) -> Unit) = Segmented(options, current, onPick)
 
 @Composable
-internal fun OnOff(on: Boolean, onChange: (Boolean) -> Unit) = Choice(listOf("on" to "On", "off" to "Off"), if (on) "on" else "off") { onChange(it == "on") }
+internal fun OnOff(on: Boolean, onChange: (Boolean) -> Unit) = Toggle(on) { onChange(it) }
 
 /** The page last opened from Settings, where the pad's focus goes back to. */
 private var lastSetting: Page? = null
@@ -174,34 +174,25 @@ fun SettingsScreen(onOpen: (Page) -> Unit, onBack: () -> Unit) = Page("Settings"
         return@Page
     }
     @Composable
-    fun Item(name: String, detail: String, page: Page) = Card(
-        name, detail,
-        onClick = {
-            lastSetting = page
-            onOpen(page)
-        },
-        modifier = if (page == lastSetting) Modifier.focusRequester(back) else Modifier,
-    )
-    Item("Language", "The language you are learning", Page.LANGUAGE)
-    Item("Profiles", "A language and settings of its own for each", Page.PROFILES)
-    Item("Appearance", "Colours, light or dark, and sounds", Page.APPEARANCE)
-    Item("Backup", "Back up, restore, and back up on a schedule", Page.BACKUP)
-    Item("Translation", "Translate and explain lines with your OpenRouter key", Page.TRANSLATION)
-    Item("Diary", "When the model writes each day you played", Page.DIARY_SETTINGS)
-    Item("Dictionaries", "Add, order and remove dictionaries", Page.DICTIONARIES)
-    Item("Anki", "The note type and deck cards go to", Page.ANKI)
-    Item("Controls", "The lookup shortcut, whole words or characters, and where the entry shows", Page.CONTROLS)
-    Item("Wheel", "Its tiles, the wheels inside it, and how it opens and is pointed at", Page.WHEEL)
-    Item("Text recognition", "ScreenAI, which reads the screen", Page.RECOGNITION)
-    Item("Games and apps", "Rename one, choose when it is read", Page.GAMES)
-    Item("Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", Page.GAME_NAMES)
-    Item("Character names", "A visual novel's cast from VNDB, so its names look up as its characters", Page.CHARACTER_NAMES)
-    Item("Sound and pictures", "Sentence audio, spoken lines and animated pictures", Page.MEDIA)
-    Item("Other apps", "Read browsers, chat and ebooks when you ask", Page.APPS)
-    Item("Tutorial", "Practise a lookup, a card and the wheel without a game", Page.PRACTICE)
-    Item("Storage", "What LFG keeps, and how long screens are kept", Page.STORAGE)
-    Item("Help improve LFG", "Keep screens of dialogue, and send them to train a better reader", Page.DIALOGUE)
-    Item("Help and diagnostics", "A report to send with a bug, or after a first run on a new device", Page.HELP)
+    fun GroupOf(group: SettingsGroup) = Group(group.title) {
+        for (entry in group.entries) {
+            SettingsEntryRow(entry, group.tone(), if (entry.page == lastSetting) Modifier.focusRequester(back) else Modifier) {
+                lastSetting = entry.page
+                onOpen(entry.page)
+            }
+        }
+    }
+    // Wide, as on a handheld's top screen, the groups go in two columns.
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth >= NARROW) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(22.dp)) { SETTINGS_GROUPS.take(2).forEach { GroupOf(it) } }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(22.dp)) { SETTINGS_GROUPS.drop(2).forEach { GroupOf(it) } }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(22.dp)) { SETTINGS_GROUPS.forEach { GroupOf(it) } }
+        }
+    }
 }
 
 @Composable
@@ -231,88 +222,75 @@ fun DictionariesScreen(
     onKanjiDictionary: (String) -> Unit,
     onBack: () -> Unit,
 ) = Page("Dictionaries", onBack, actions = { LfgButton(if (busy.busy) "Adding…" else "Add dictionary…", onAdd, primary = true, enabled = !busy.busy) }) {
-    val date = remember { SimpleDateFormat("d MMMM yyyy", Locale.getDefault()) }
-    busy.error?.let { Text(it, color = Lfg.Error, fontSize = 14.sp) }
-    busy.progress?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
+    val date = remember { SimpleDateFormat("d MMM yyyy", Locale.getDefault()) }
+    busy.error?.let { Hint(it, Lfg.Error) }
+    busy.progress?.let { Hint(it) }
     // The rest of the starter set, arriving after the first.
     when (fetching) {
-        is DictState.Downloading -> Text(
+        is DictState.Downloading -> Hint(
             "Downloading ${fetching.name}… " + if (fetching.total > 0) "${fetching.bytes * 100 / fetching.total}%" else "${fetching.bytes / (1024 * 1024)} MB",
-            color = Lfg.Dim, fontSize = 14.sp,
         )
-        is DictState.Installing -> Text("Installing ${fetching.name}…", color = Lfg.Dim, fontSize = 14.sp)
+        is DictState.Installing -> Hint("Installing ${fetching.name}…")
         else -> {}
     }
     val all = (state as? DictState.Ready)?.dictionaries ?: emptyList()
     val list = all.filter { it.vndb == null }
     val names = all.filter { it.vndb != null }
-    if (list.isEmpty()) Text("No dictionary is installed.", color = Lfg.Dim, fontSize = 15.sp)
     if (starterMissing.isNotEmpty() && fetching == null) {
-        Card("Starter set", "Hachidori's five: meanings, names, kanji, frequencies (which put the commoner word first) and grammar. Missing: " + starterMissing.joinToString(", ") + ". About 105 MB in all.") {
-            LfgButton("Download", onStarter, primary = true, enabled = !busy.busy)
-        }
-    }
-    list.forEachIndexed { i, d ->
-        Card(d.title, listOf(d.summary, date.format(Date(d.installedAt))).filter { it.isNotEmpty() }.joinToString(" · ")) {
-            if (i > 0) LfgButton("Move up", { onMove(d.title, true) })
-            if (i < list.size - 1) LfgButton("Move down", { onMove(d.title, false) })
-            LfgButton("Remove", { onRemove(d.title) })
-        }
-    }
-    val kanjiChoices = list.filter { it.terms > 0 }
-    if (kanjiChoices.isNotEmpty()) {
-        val kanji = DictionaryRepository.kanjiDictionary(kanjiChoices, kanjiDictionary)
-        Card(
-            "Kanji",
-            "Tap a kanji in a word's headword for its entry in this dictionary, and mine it with the card button. " +
-                if (kanji == null) "Bee's Ultimate Kanji Dictionary is not installed: until it is, a kanji is looked up in every dictionary." else "",
-        ) {
-            Choice(kanjiChoices.map { it.title to it.title }, kanji?.title ?: "") { title ->
-                onKanjiDictionary(if (DictionaryRepository.DEFAULT_KANJI.title.matches(title)) "" else title)
+        Group("Get started") {
+            Card("Starter set", "Missing: " + starterMissing.joinToString(", ") + " · about 105 MB") {
+                LfgButton("Download", onStarter, primary = true, enabled = !busy.busy)
             }
         }
     }
-    Row {
-        Text("Entries show in this order. ", color = Lfg.Dim, fontSize = 14.sp)
-        Text("Show sources", color = Lfg.Accent, fontSize = 14.sp, modifier = Modifier.focusRing(RoundedCornerShape(4.dp)).clickable(onClick = onSources))
-    }
-    if (list.isNotEmpty()) {
-        Card(
-            "Updates",
-            "A dictionary that says where its next release is, as Jitendex, JMdict and Jiten do, is replaced by it, and keeps its place. " +
-                (if (updates) "Looked for once a day. " else "") +
-                if (updatesCheckedAt > 0) "Last checked ${date.format(Date(updatesCheckedAt))}." else "Not checked yet.",
-        ) {
-            Choice(listOf("on" to "Automatic", "off" to "Off"), if (updates) "on" else "off") { onUpdates(it == "on") }
-            LfgButton("Check now", onCheckUpdates, enabled = !busy.busy && fetching == null)
+    Group("Lookup order") {
+        if (list.isEmpty()) Card("No dictionary yet", "Add one, or download the starter set")
+        list.forEachIndexed { i, d ->
+            Card(d.title, listOf(d.summary, date.format(Date(d.installedAt))).filter { it.isNotEmpty() }.joinToString(" · ")) {
+                if (i > 0) LfgButton("▲", { onMove(d.title, true) }, modifier = Modifier.semantics { contentDescription = "Move up" })
+                if (i < list.size - 1) LfgButton("▼", { onMove(d.title, false) }, modifier = Modifier.semantics { contentDescription = "Move down" })
+                LfgButton("Remove", { onRemove(d.title) })
+            }
         }
+    }
+    Group("Options") {
+        val kanjiChoices = list.filter { it.terms > 0 }
+        if (kanjiChoices.isNotEmpty()) {
+            val kanji = DictionaryRepository.kanjiDictionary(kanjiChoices, kanjiDictionary)
+            Card("Kanji", if (kanji == null) "Bee's kanji dictionary is not installed: all are used" else "Tap a kanji for its entry here") {
+                Choice(kanjiChoices.map { it.title to it.title }, kanji?.title ?: "") { title ->
+                    onKanjiDictionary(if (DictionaryRepository.DEFAULT_KANJI.title.matches(title)) "" else title)
+                }
+            }
+        }
+        if (list.isNotEmpty()) {
+            Card(
+                "Updates",
+                (if (updates) "Daily · " else "") + if (updatesCheckedAt > 0) "Checked ${date.format(Date(updatesCheckedAt))}" else "Not checked yet",
+            ) {
+                Choice(listOf("on" to "Automatic", "off" to "Off"), if (updates) "on" else "off") { onUpdates(it == "on") }
+                LfgButton("Check now", onCheckUpdates, enabled = !busy.busy && fetching == null)
+            }
+        }
+        if (wordAudio == null) {
+            Card("Word audio", "android.db from Local Audio Server") { LfgButton("Add…", onAddAudio, enabled = !busy.busy) }
+        } else {
+            Card("Word audio", wordAudio.summary) {
+                LfgButton("Replace…", onAddAudio, enabled = !busy.busy)
+                LfgButton("Remove", onRemoveAudio, enabled = !busy.busy)
+            }
+        }
+        Card("Sources", "Each dictionary's credits", onClick = onSources)
     }
     if (names.isNotEmpty()) {
-        Text("Character names", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        Text(
-            "From VNDB, one for each visual novel. Each comes first in its own game's lookups and nowhere else. " +
-                "Removing one marks its games as not visual novels, so it is not built again.",
-            color = Lfg.Dim, fontSize = 14.sp,
-        )
-        for (d in names) {
-            Card(d.title, listOf(d.summary, date.format(Date(d.installedAt))).filter { it.isNotEmpty() }.joinToString(" · ")) {
-                LfgButton("Remove", { d.vndb?.let(onRemoveNames) })
+        Group("Character names") {
+            for (d in names) {
+                Card(d.title, listOf(d.summary, date.format(Date(d.installedAt))).filter { it.isNotEmpty() }.joinToString(" · ")) {
+                    LfgButton("Remove", { d.vndb?.let(onRemoveNames) })
+                }
             }
         }
-    }
-    HorizontalDivider(color = Lfg.Border)
-    if (wordAudio == null) {
-        Card(
-            "Word audio",
-            "Words said by people, from the android.db that the Local Audio Server add-on for Anki makes on a computer. " +
-                "Copy it to this device and add it; LFG keeps its own copy, so the one you picked can be deleted after. Entries get a " +
-                "play button, Y says the word in a game, and cards get it in their ExpressionAudio field.",
-        ) { LfgButton("Add android.db…", onAddAudio, enabled = !busy.busy) }
-    } else {
-        Card("Word audio", wordAudio.summary + " · from local-audio-yomichan") {
-            LfgButton("Replace…", onAddAudio, enabled = !busy.busy)
-            LfgButton("Remove", onRemoveAudio, enabled = !busy.busy)
-        }
+        Hint("Removing one marks its games as not visual novels")
     }
 }
 
@@ -341,20 +319,23 @@ fun SourcesScreen(sources: List<DictionarySource>, onBack: () -> Unit) = Page("S
 
 @Composable
 fun AnkiScreen(setup: SetupState, onFindAgain: () -> Unit, onConnect: () -> Unit, onBack: () -> Unit) = Page("Anki", onBack) {
-    when {
-        setup.anki == AnkiStatus.NOT_INSTALLED -> Card("AnkiDroid", "Not installed. Cards wait here until it is.")
-        setup.anki == AnkiStatus.NEEDS_PERMISSION -> Card("AnkiDroid", "Not connected") { LfgButton("Connect", onConnect, primary = true) }
-        else -> {
-            val t = setup.ankiTarget
-            Card("Note type", t?.modelName ?: "Not chosen yet")
-            Card("Deck", t?.deckName ?: "Not chosen yet")
-            Card(
-                "Find again",
-                "Looks for a Kiku, Lapis or Senren note type and the deck holding most of its notes; without one, the app uses its own.",
-            ) { LfgButton(if (setup.ankiBusy) "Looking…" else "Find again", onFindAgain, enabled = !setup.ankiBusy) }
-            setup.ankiError?.let { Text(it, color = Lfg.Error, fontSize = 14.sp) }
-            if (setup.ankiNeverSynced) Text("If you use AnkiWeb, sync AnkiDroid once before the first card.", color = Lfg.Warn, fontSize = 14.sp)
+    Group("AnkiDroid") {
+        when {
+            setup.anki == AnkiStatus.NOT_INSTALLED -> Card("AnkiDroid", "Not installed · cards wait here")
+            setup.anki == AnkiStatus.NEEDS_PERMISSION -> Card("AnkiDroid", "Not connected") { LfgButton("Connect", onConnect, primary = true) }
+            else -> {
+                val t = setup.ankiTarget
+                Card("Note type", t?.modelName ?: "Not chosen yet")
+                Card("Deck", t?.deckName ?: "Not chosen yet")
+                Card("Find again", "Kiku, Lapis or Senren, else LFG's own") {
+                    LfgButton(if (setup.ankiBusy) "Looking…" else "Find again", onFindAgain, enabled = !setup.ankiBusy)
+                }
+            }
         }
+    }
+    setup.ankiError?.let { Hint(it, Lfg.Error) }
+    if (setup.anki != AnkiStatus.NOT_INSTALLED && setup.anki != AnkiStatus.NEEDS_PERMISSION && setup.ankiNeverSynced) {
+        Hint("Using AnkiWeb? Sync AnkiDroid once first.", Lfg.Warn)
     }
 }
 
@@ -376,49 +357,64 @@ fun LanguageScreen(
     onRetry: () -> Unit,
     onBack: () -> Unit,
 ) = Page("Language", onBack) {
-    Text("LFG reads your games in this language and looks its words up.", color = Lfg.Dim, fontSize = 15.sp)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Language.entries.forEach { language ->
-            LfgButton(if (language.ownName == language.title) language.title else "${language.title} · ${language.ownName}", { onPick(language) }, primary = language == learning)
+    Group("Learning") {
+        Plain {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Language.entries.forEach { language -> LanguageChip(language.title, language.ownName, language == learning) { onPick(language) } }
+            }
         }
     }
     val state = fetching ?: dictionary
-    Card(
-        "${learning.title} dictionaries",
-        when (state) {
-            is DictState.Ready -> state.dictionaries.filter { it.vndb == null }.joinToString { it.title }
-            is DictState.Downloading -> "Downloading… ${if (state.total > 0) state.bytes * 100 / state.total else 0}%"
-            is DictState.Installing -> "Setting up…"
-            is DictState.Failed -> state.reason
-            DictState.Missing -> "Waiting for the internet…"
-        },
-    ) {
-        if (state is DictState.Failed) LfgButton("Try again", onRetry)
+    Group("Dictionaries") {
+        Card(
+            "${learning.title} dictionaries",
+            when (state) {
+                is DictState.Ready -> state.dictionaries.count { it.vndb == null }.let { if (it == 1) "1 installed" else "$it installed" }
+                is DictState.Downloading -> "Downloading… ${if (state.total > 0) state.bytes * 100 / state.total else 0}%"
+                is DictState.Installing -> "Setting up…"
+                is DictState.Failed -> state.reason
+                DictState.Missing -> "Waiting for the internet…"
+            },
+        ) {
+            if (state is DictState.Failed) LfgButton("Try again", onRetry)
+        }
     }
-    if (reader !is ModelState.Ready) Text("The screen reader is still downloading.", color = Lfg.Dim, fontSize = 14.sp)
+    if (reader !is ModelState.Ready) Hint("The screen reader is still downloading")
 }
 
 /** The colour scheme, and whether it is light, dark or follows the system. Used by the app, the overlays and the widgets. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppearanceScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Appearance", onBack) {
-    Text("Theme", color = Lfg.Dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Choice(
-            listOf(Palette.THEME_SYSTEM to "Match system", Palette.THEME_LIGHT to "Light", Palette.THEME_DARK to "Dark"),
-            prefs.theme,
-        ) { v -> onChange { it.copy(theme = v) } }
+    val dark = Lfg.palette.dark
+    Group("Theme") {
+        Plain {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val light = Palette.of(prefs.colours, Palette.THEME_LIGHT, systemDark = false)
+                val night = Palette.of(prefs.colours, Palette.THEME_DARK, systemDark = true)
+                listOf(Triple(Palette.THEME_SYSTEM, "Match system", light to night), Triple(Palette.THEME_LIGHT, "Light", light to light), Triple(Palette.THEME_DARK, "Dark", night to night))
+                    .forEach { (value, label, pair) ->
+                        ThemePick(label, pair.first, pair.second, prefs.theme == value, Modifier.weight(1f)) { onChange { it.copy(theme = value) } }
+                    }
+            }
+        }
     }
-    Text("Colours", color = Lfg.Dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Choice(Palette.SCHEMES, prefs.colours) { v -> onChange { it.copy(colours = v) } }
+    Group("Colours") {
+        Plain {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Palette.SCHEMES.forEach { (value, label) ->
+                    val p = Palette.of(value, if (dark) Palette.THEME_DARK else Palette.THEME_LIGHT, systemDark = dark)
+                    Swatch(label, Color(p.fill), Color(p.onFill), prefs.colours == value, Modifier.weight(1f)) { onChange { it.copy(colours = value) } }
+                }
+            }
+        }
     }
-    Card("Button sounds", "Buttons click when you press them.") { OnOff(prefs.buttonSounds) { on -> onChange { it.copy(buttonSounds = on) } } }
-    Card("Wheel and lookup sounds", "A tick as you move, a thock when you pick, a chime for a new card.") {
-        OnOff(prefs.gameSounds) { on -> onChange { it.copy(gameSounds = on) } }
-    }
-    Card("Sound volume", "How loud LFG’s own sounds are.") {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Group("Sounds") {
+        Card("Button sounds") { OnOff(prefs.buttonSounds) { on -> onChange { it.copy(buttonSounds = on) } } }
+        Card("Wheel and lookup sounds", "Tick, thock, chime") {
+            OnOff(prefs.gameSounds) { on -> onChange { it.copy(gameSounds = on) } }
+        }
+        Card("Sound volume") {
             Choice(Prefs.SOUND_VOLUME_STEPS.map { it.toString() }.zip(listOf("Quiet", "Normal", "Loud")), prefs.soundVolume.toString()) { v ->
                 onChange { it.copy(soundVolume = v.toInt()) }
                 // Heard as it is chosen.
@@ -446,46 +442,45 @@ fun BackupScreen(
     onChooseFolder: () -> Unit,
     onBack: () -> Unit,
 ) = Page("Backup", onBack) {
-    message?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
-    Card("Back up now", "Lines, stats, the diary, recaps, waiting cards and settings, in one file") { LfgButton("Back up…", onBackUp, primary = true) }
-    if (pendingRestore == null) {
-        Card("Restore", "Replaces what is here with a backup. What is here is backed up first.") { LfgButton("Restore…", onPickRestore) }
-    } else {
-        Card("Restore from $pendingRestore?", "Lines, the diary and settings here are replaced, and LFG starts again.") {
-            LfgButton("Cancel", onCancelRestore)
-            LfgButton("Restore", onRestore, primary = true)
+    message?.let { Hint(it) }
+    Group("Now") {
+        Card("Back up now", "Everything, in one file") { LfgButton("Back up…", onBackUp, primary = true) }
+        if (pendingRestore == null) {
+            Card("Restore", "What is here is backed up first") { LfgButton("Restore…", onPickRestore) }
+        } else {
+            Card("Restore from $pendingRestore?", "Replaces everything here") {
+                LfgButton("Cancel", onCancelRestore)
+                LfgButton("Restore", onRestore, primary = true)
+            }
+        }
+        Card("Export lines", "A spreadsheet of every line") { LfgButton("Export…", onExport) }
+        Card("Lines file for GSM", if (prefs.gsmFile) "${Backup.LINES_FILE}, with each backup" else "For GameSentenceMiner") {
+            OnOff(prefs.gsmFile) { v -> onChange { it.copy(gsmFile = v) } }
         }
     }
-    Card("Export lines", "A spreadsheet of every line: time, game, text and characters") { LfgButton("Export…", onExport) }
-    Card(
-        "Lines file for GSM",
-        if (prefs.gsmFile) "${Backup.LINES_FILE} in the backup folder, written with each automatic backup. GSM’s ExStatic import adds only lines it hasn’t seen."
-        else "Keeps every line in a file GameSentenceMiner can import",
-    ) {
-        Choice(listOf("off" to "Off", "on" to "On"), if (prefs.gsmFile) "on" else "off") { v -> onChange { it.copy(gsmFile = v == "on") } }
-    }
-    Text("Automatic backup", color = Lfg.Dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp))
     val last = remember(prefs.backupLast) { java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(prefs.backupLast)) }
     val status = when {
         prefs.backupEvery == Prefs.BACKUP_OFF -> "Off"
         prefs.backupFolder.isEmpty() -> "Choose a folder first"
-        prefs.backupLast == 0L -> "No backup yet: the first is at about 04:00"
-        else -> "Last: $last, " + android.text.format.Formatter.formatShortFileSize(LocalContext.current, prefs.backupLastSize)
+        prefs.backupLast == 0L -> "First one at about 04:00"
+        else -> "Last: $last · " + android.text.format.Formatter.formatShortFileSize(LocalContext.current, prefs.backupLastSize)
     }
-    Card("How often", status) {
-        Choice(
-            listOf(Prefs.BACKUP_OFF to "Off", Prefs.BACKUP_DAILY to "Daily", Prefs.BACKUP_WEEKLY to "Weekly"),
-            prefs.backupEvery,
-        ) { v -> onChange { it.copy(backupEvery = v) } }
-    }
-    Card("Folder", Backup.folderName(prefs.backupFolder).ifEmpty { "Not chosen. A folder a sync app keeps in the cloud works too." }) {
-        LfgButton(if (prefs.backupFolder.isEmpty()) "Choose folder…" else "Change folder…", onChooseFolder)
-    }
-    Card("Keep", "Older automatic backups are deleted") {
-        Choice(listOf("7" to "Last 7", "30" to "Last 30", "0" to "All"), "${prefs.backupKeep}") { v -> onChange { it.copy(backupKeep = v.toInt()) } }
-    }
-    Card("Pictures", "Pictures of lines and diary entries") {
-        Choice(listOf("in" to "Include", "out" to "Leave out"), if (prefs.backupPictures) "in" else "out") { v -> onChange { it.copy(backupPictures = v == "in") } }
+    Group("Automatic backup") {
+        Card("How often", status) {
+            Choice(
+                listOf(Prefs.BACKUP_OFF to "Off", Prefs.BACKUP_DAILY to "Daily", Prefs.BACKUP_WEEKLY to "Weekly"),
+                prefs.backupEvery,
+            ) { v -> onChange { it.copy(backupEvery = v) } }
+        }
+        Card("Folder", Backup.folderName(prefs.backupFolder).ifEmpty { "Not chosen · a synced folder works" }) {
+            LfgButton(if (prefs.backupFolder.isEmpty()) "Choose…" else "Change…", onChooseFolder)
+        }
+        Card("Keep", "Older ones are deleted") {
+            Choice(listOf("7" to "Last 7", "30" to "Last 30", "0" to "All"), "${prefs.backupKeep}") { v -> onChange { it.copy(backupKeep = v.toInt()) } }
+        }
+        Card("Pictures", "Of lines and diary entries") {
+            Choice(listOf("in" to "Include", "out" to "Leave out"), if (prefs.backupPictures) "in" else "out") { v -> onChange { it.copy(backupPictures = v == "in") } }
+        }
     }
 }
 
@@ -500,46 +495,56 @@ fun TranslationScreen(
 ) = Page("Translation", onBack) {
     // With a key, every line has Translate and Explain; without one, no line is sent anywhere.
     val every = prefs.translate == Prefs.TRANSLATE_EVERY
-    val detail = when {
-        !prefs.aiReady -> "Add a key below and each line gets Translate and Explain"
-        every -> "Each new line is translated as it is read. Explain is on each line"
-        else -> "Translate and Explain are buttons on each line"
-    }
-    Card("Translate", detail) {
-        Choice(
-            listOf(Prefs.TRANSLATE_ASK to "When asked", Prefs.TRANSLATE_EVERY to "Every line"),
-            if (every) Prefs.TRANSLATE_EVERY else Prefs.TRANSLATE_ASK,
-        ) { v -> onChange { it.copy(translate = v) } }
-    }
-    SettingText("OpenRouter key", "Kept on this device, and never in a backup. Lines you translate or explain, and recaps' lines, go to OpenRouter.", prefs.openRouterKey, secret = true) { v ->
-        onChange { it.copy(openRouterKey = v.trim()) }
-    }
-    Card("Ask", if (prefs.ask) "Questions about a game, its last lines and, if you choose, the screen go to OpenRouter, which searches the web" else "No question is sent anywhere") {
-        OnOff(prefs.ask) { v -> onChange { it.copy(ask = v) } }
-    }
-    SettingText("Model", "Also explains lines, writes recaps and answers questions", prefs.model) { v -> onChange { it.copy(model = v.trim()) } }
-    SettingText("Into", "The language translations, explanations, recaps and answers are in", prefs.translateInto) { v -> onChange { it.copy(translateInto = v) } }
-    Card("Lines before", "Sent with the line, so the answer knows who is speaking") {
-        Stepper(if (prefs.translateContext == 0) "None" else "${prefs.translateContext}", prefs.translateContext, Prefs.CONTEXT_STEPS) { v ->
-            onChange { it.copy(translateContext = v) }
+    Group("OpenRouter") {
+        SettingText("OpenRouter key", "Only on this device · lines you send go to OpenRouter", prefs.openRouterKey, secret = true) { v ->
+            onChange { it.copy(openRouterKey = v.trim()) }
+        }
+        SettingText("Model", "Also writes recaps and answers", prefs.model) { v -> onChange { it.copy(model = v.trim()) } }
+        SettingText("Into", "The language answers are in", prefs.translateInto) { v -> onChange { it.copy(translateInto = v) } }
+        Plain {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                LfgButton("Test the key", onTestKey, primary = true, enabled = prefs.openRouterKey.isNotBlank())
+                keyTest?.let { (ok, text) -> Text(text, color = if (ok) Lfg.Ok else Lfg.Warn, fontSize = 14.sp, modifier = Modifier.weight(1f)) }
+            }
         }
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        LfgButton("Test the key", onTestKey, primary = true, enabled = prefs.openRouterKey.isNotBlank())
-        keyTest?.let { (ok, text) -> Text(text, color = if (ok) Lfg.Ok else Lfg.Warn, fontSize = 14.sp, modifier = Modifier.weight(1f)) }
+    Group("Use") {
+        Card(
+            "Translate",
+            when {
+                !prefs.aiReady -> "Needs a key"
+                every -> "Each new line, as it is read"
+                else -> "A button on each line"
+            },
+        ) {
+            Choice(
+                listOf(Prefs.TRANSLATE_ASK to "When asked", Prefs.TRANSLATE_EVERY to "Every line"),
+                if (every) Prefs.TRANSLATE_EVERY else Prefs.TRANSLATE_ASK,
+            ) { v -> onChange { it.copy(translate = v) } }
+        }
+        Card("Ask", if (prefs.ask) "Questions go to OpenRouter, with web search" else "Off · nothing is sent") {
+            OnOff(prefs.ask) { v -> onChange { it.copy(ask = v) } }
+        }
+        Card("Lines before", "So it knows who is speaking") {
+            Stepper(if (prefs.translateContext == 0) "None" else "${prefs.translateContext}", prefs.translateContext, Prefs.CONTEXT_STEPS) { v ->
+                onChange { it.copy(translateContext = v) }
+            }
+        }
     }
 }
 
-/** A setting typed in: its name and a line of detail over the field. */
+/** A setting typed in: its name and a few words over the field. */
 @Composable
 private fun SettingText(name: String, detail: String, value: String, secret: Boolean = false, onChange: (String) -> Unit) {
-    val shape = RoundedCornerShape(8.dp)
+    val inGroup = LocalInGroup.current
+    val shape = RoundedCornerShape(18.dp)
     Column(
-        Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape).padding(horizontal = 16.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().then(if (inGroup) Modifier.background(Lfg.Surface) else Modifier.clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(name, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        Text(detail, color = Lfg.Dim, fontSize = 14.sp)
+        Text(name, color = Lfg.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        if (detail.isNotEmpty()) Text(detail, color = Lfg.Dim, fontSize = 13.sp, lineHeight = 18.sp)
         BasicTextField(
             value = value,
             onValueChange = onChange,
@@ -549,75 +554,83 @@ private fun SettingText(name: String, detail: String, value: String, secret: Boo
             keyboardOptions = if (secret) KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false) else KeyboardOptions.Default,
             textStyle = TextStyle(color = Lfg.Text, fontSize = 16.sp),
             cursorBrush = SolidColor(Lfg.Accent),
-            modifier = Modifier.fillMaxWidth().padField(RoundedCornerShape(6.dp), singleLine = true).clip(RoundedCornerShape(6.dp)).background(Lfg.Sunken).padding(horizontal = 12.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp).padField(RoundedCornerShape(12.dp), singleLine = true).clip(RoundedCornerShape(12.dp))
+                .background(Lfg.Sunken).border(1.dp, Lfg.Border, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 13.dp),
         )
     }
 }
 
 @Composable
 fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Controls", onBack) {
-    Card("Lookup shortcut", "One button starts and stops lookup. While you play it is kept from the game, so pick one the game can do without.") {
-        Choice(
-            listOf(Prefs.SHORTCUT_L3 to "L3", Prefs.SHORTCUT_R3 to "R3", Prefs.SHORTCUT_SELECT to "Select", Prefs.SHORTCUT_START to "Start"),
-            prefs.shortcut,
-        ) { v -> onChange { it.copy(shortcut = v) } }
-    }
-    Card("Or two buttons together", "The game gets both of these as well, so pick a pair it does nothing with.") {
-        Choice(
-            listOf(Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2", Prefs.SHORTCUT_SELECT_START to "Select + Start"),
-            prefs.shortcut,
-        ) { v -> onChange { it.copy(shortcut = v) } }
-    }
-    Card(
-        "Stick and D-pad",
-        if (prefs.stickWords) "In lookup, the left stick goes word by word and the D-pad a character at a time." else "In lookup, the D-pad goes word by word and the left stick a character at a time.",
-    ) {
-        Choice(listOf("pad" to "D-pad by word", "stick" to "Stick by word"), if (prefs.stickWords) "stick" else "pad") { v -> onChange { it.copy(stickWords = v == "stick") } }
-    }
-    Card(
-        "Tap a word",
-        when (prefs.tapLookup) {
-            Prefs.TAP_ALWAYS -> "A tap on a game's text always looks the word up, so a tap on the game's own menus can too."
-            Prefs.TAP_SHORTCUT -> "Taps are the game's until you press ${shortcutLabel(prefs)}. Press it again, or close the lookup, to give them back."
-            else -> "With a controller, taps are the game's until you press ${shortcutLabel(prefs)}. Without one, a tap always looks the word up."
-        },
-    ) {
-        Choice(listOf(Prefs.TAP_AUTO to "Automatic", Prefs.TAP_SHORTCUT to "After the shortcut", Prefs.TAP_ALWAYS to "Always"), prefs.tapLookup) { v -> onChange { it.copy(tapLookup = v) } }
-    }
-    Card("Add card button", "Which face button adds the card; the other one closes. As Android names them.") {
-        Choice(listOf("a" to "A adds, B closes", "b" to "B adds, A closes"), if (prefs.swapConfirm) "b" else "a") { v -> onChange { it.copy(swapConfirm = v == "b") } }
+    Group("Lookup button") {
+        Card("Lookup shortcut", "Kept from the game while you play") {
+            Choice(
+                listOf(Prefs.SHORTCUT_L3 to "L3", Prefs.SHORTCUT_R3 to "R3", Prefs.SHORTCUT_SELECT to "Select", Prefs.SHORTCUT_START to "Start"),
+                prefs.shortcut,
+            ) { v -> onChange { it.copy(shortcut = v) } }
+        }
+        Card("Or two buttons together", "The game gets these too") {
+            Choice(
+                listOf(Prefs.SHORTCUT_L3_R3 to "L3 + R3", Prefs.SHORTCUT_L1_R1 to "L1 + R1", Prefs.SHORTCUT_L2_R2 to "L2 + R2", Prefs.SHORTCUT_SELECT_START to "Select + Start"),
+                prefs.shortcut,
+            ) { v -> onChange { it.copy(shortcut = v) } }
+        }
     }
     val word = prefs.selection != Prefs.SELECT_CHARACTER
-    Card(
-        "Selection",
-        if (word) "A lookup marks the whole word it found, and ▶ goes past that word." else "A lookup marks the one character it starts from, and ▶ goes one character.",
-    ) {
-        Choice(listOf(Prefs.SELECT_WORD to "Whole word", Prefs.SELECT_CHARACTER to "Character"), if (word) Prefs.SELECT_WORD else Prefs.SELECT_CHARACTER) { v ->
-            onChange { it.copy(selection = v) }
+    Group("In lookup") {
+        Card("Stick and D-pad", if (prefs.stickWords) "Stick: words · D-pad: characters" else "D-pad: words · stick: characters") {
+            Choice(listOf("pad" to "D-pad by word", "stick" to "Stick by word"), if (prefs.stickWords) "stick" else "pad") { v -> onChange { it.copy(stickWords = v == "stick") } }
+        }
+        Card(
+            "Tap a word",
+            when (prefs.tapLookup) {
+                Prefs.TAP_ALWAYS -> "A tap always looks up"
+                Prefs.TAP_SHORTCUT -> "After ${shortcutLabel(prefs)}"
+                else -> "After ${shortcutLabel(prefs)} with a controller"
+            },
+        ) {
+            Choice(listOf(Prefs.TAP_AUTO to "Automatic", Prefs.TAP_SHORTCUT to "After shortcut", Prefs.TAP_ALWAYS to "Always"), prefs.tapLookup) { v -> onChange { it.copy(tapLookup = v) } }
+        }
+        Card("Add card button", "The other one closes") {
+            Choice(listOf("a" to "A adds", "b" to "B adds"), if (prefs.swapConfirm) "b" else "a") { v -> onChange { it.copy(swapConfirm = v == "b") } }
+        }
+        Card("Selection", if (word) "▶ goes a word" else "▶ goes a character") {
+            Choice(listOf(Prefs.SELECT_WORD to "Whole word", Prefs.SELECT_CHARACTER to "Character"), if (word) Prefs.SELECT_WORD else Prefs.SELECT_CHARACTER) { v ->
+                onChange { it.copy(selection = v) }
+            }
+        }
+        if (prefs.learning.japanese) Card("Japanese characters only", "Skips digits and Latin letters") {
+            OnOff(prefs.japaneseOnly) { v -> onChange { it.copy(japaneseOnly = v) } }
         }
     }
-    if (prefs.learning.japanese) Card("Japanese characters only", "The cursor and a tap land only on kana and kanji, never on digits or Latin letters. Punctuation is always passed over.") {
-        OnOff(prefs.japaneseOnly) { v -> onChange { it.copy(japaneseOnly = v) } }
-    }
-    Card("Lines on the other screen", "On a two-screen handheld, the screen the game is not on lists the game's lines as they are read.") {
-        OnOff(prefs.secondScreenPanel) { v -> onChange { it.copy(secondScreenPanel = v) } }
-    }
-    Card("LFG on the second screen", "On a two-screen handheld, LFG's own pages always open on the second screen, so the first is left to the game.") {
-        OnOff(prefs.appOnSecondScreen) { v -> onChange { it.copy(appOnSecondScreen = v) } }
-    }
-    Card("Dictionary entry", "On a two-screen handheld: a popup beside the word over the game, or on the lines' screen. A word picked in the lines always shows there.") {
-        Choice(listOf(Prefs.ENTRY_OVER_GAME to "Over the game", Prefs.ENTRY_OTHER_SCREEN to "Other screen"), prefs.entryPlace) { v -> onChange { it.copy(entryPlace = v) } }
-    }
-    Card("Popup see-through", "How much of the game shows through the popup over it.") {
-        Stepper(if (prefs.popupSeeThrough == 0) "Solid" else "${prefs.popupSeeThrough}%", prefs.popupSeeThrough, Prefs.SEE_THROUGH_STEPS) { v ->
-            onChange { it.copy(popupSeeThrough = v) }
+    Group("Two screens") {
+        Card("Lines on the other screen", "As they are read") {
+            OnOff(prefs.secondScreenPanel) { v -> onChange { it.copy(secondScreenPanel = v) } }
+        }
+        Card("LFG on the second screen", "Leaves the first to the game") {
+            OnOff(prefs.appOnSecondScreen) { v -> onChange { it.copy(appOnSecondScreen = v) } }
+        }
+        Card("Dictionary entry", "Where it opens") {
+            Choice(listOf(Prefs.ENTRY_OVER_GAME to "Over the game", Prefs.ENTRY_OTHER_SCREEN to "Other screen"), prefs.entryPlace) { v -> onChange { it.copy(entryPlace = v) } }
+        }
+        Card("Popup see-through", "How much game shows through") {
+            Stepper(if (prefs.popupSeeThrough == 0) "Solid" else "${prefs.popupSeeThrough}%", prefs.popupSeeThrough, Prefs.SEE_THROUGH_STEPS) { v ->
+                onChange { it.copy(popupSeeThrough = v) }
+            }
         }
     }
-    Text(
-        "In lookup: D-pad ◀ ▶ " + (if (word) "word" else "character") + ", ▲ ▼ row. Left stick: the same four ways, one character at a time, " +
-            "faster while held. L1 R1 entry, Y listen to the word, right stick scroll.",
-        color = Lfg.Dim, fontSize = 14.sp,
-    )
+    Group("Buttons in lookup") {
+        Plain {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                KeyChip("◀ ▶", if (word) "Word" else "Character")
+                KeyChip("▲ ▼", "Row")
+                KeyChip("L stick", "Character")
+                KeyChip("L1 R1", "Entry")
+                KeyChip("Y", "Listen")
+                KeyChip("R stick", "Scroll")
+            }
+        }
+    }
 }
 
 private fun modelStatus(state: ModelState, ready: String) = when (state) {
@@ -636,21 +649,19 @@ fun RecognitionScreen(
     onInterfaceApart: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) = Page("Text recognition", onBack) {
-    Card(
-        "ScreenAI",
-        if (!screenAiBuilt) "Not in this build of the app." else modelStatus(screenAi, "Installed") +
-            if (screenAi is ModelState.Missing) ". Its files come from the package Google publishes for Chromium." else "",
-    ) {
-        if (screenAiBuilt && (screenAi is ModelState.Missing || screenAi is ModelState.Failed)) LfgButton(if (screenAi is ModelState.Failed) "Try again" else "Download", onDownloadScreenAi)
+    Group("Reader") {
+        Card(
+            "ScreenAI",
+            if (!screenAiBuilt) "Not in this build" else modelStatus(screenAi, "Installed") +
+                if (screenAi is ModelState.Missing) " · from Google's Chromium files" else "",
+        ) {
+            if (screenAiBuilt && (screenAi is ModelState.Missing || screenAi is ModelState.Failed)) LfgButton(if (screenAi is ModelState.Failed) "Try again" else "Download", onDownloadScreenAi)
+        }
+        Card("Leave out menus and labels", "Still tappable · kept out of Lines and stats") {
+            OnOff(interfaceApart, onInterfaceApart)
+        }
     }
-    Text("VOCR watches every picture for new text; ScreenAI then reads it once it has stopped moving.", color = Lfg.Dim, fontSize = 14.sp)
-    Card(
-        "Leave out menus and labels",
-        "Text that arrives as a menu does, six pieces or more at once, and short text that stays put while the lines change " +
-            "or keeps coming back, is still tappable, but stays out of Lines, the stats, recaps and the lines file. Off puts every line back.",
-    ) {
-        OnOff(interfaceApart, onInterfaceApart)
-    }
+    Hint("VOCR spots new text, then ScreenAI reads it")
 }
 
 @Composable
@@ -665,14 +676,14 @@ fun GamesScreen(
     namesActions: NamesRowActions? = null,
 ) = Page("Games and apps", onBack) {
     val list = games.filter { it.packageName != ownPackage }
-    if (list.isEmpty()) Text("Nothing has been read yet. A game is the app in front when it is fullscreen; other apps are listed once you ask for one to be read.", color = Lfg.Dim, fontSize = 15.sp)
+    if (list.isEmpty()) Hint("Nothing read yet · games show here once played")
     val apps = list.filter { it.detected.isEmpty() }.associate { it.packageName to it.title }
     for (game in list) {
         var title by remember(game.id) { mutableStateOf(game.title) }
-        val shape = RoundedCornerShape(8.dp)
+        val shape = RoundedCornerShape(18.dp)
         Column(
-            Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape).padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().clip(shape).background(Lfg.Surface).border(1.dp, Lfg.Border, shape).padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 BasicTextField(
@@ -681,7 +692,7 @@ fun GamesScreen(
                     singleLine = true,
                     textStyle = TextStyle(color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                     cursorBrush = SolidColor(Lfg.Accent),
-                    modifier = Modifier.weight(1f).padField(RoundedCornerShape(4.dp), singleLine = true).clip(RoundedCornerShape(4.dp)).background(Lfg.Sunken).padding(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier.weight(1f).padField(RoundedCornerShape(12.dp), singleLine = true).clip(RoundedCornerShape(12.dp)).background(Lfg.Sunken).padding(horizontal = 12.dp, vertical = 10.dp),
                 )
                 Spacer(Modifier.width(8.dp))
                 LfgButton("Rename", { onUpdate(game.copy(title = title.trim())) }, enabled = title.trim().isNotEmpty() && title.trim() != game.title)
@@ -690,9 +701,14 @@ fun GamesScreen(
                 Text(game.packageName, color = Lfg.Dim, fontSize = 13.sp)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Column(Modifier.weight(1f)) {
-                        Text(if (game.app) "Read this app (not a game)" else "Read this app", color = Lfg.Text, fontSize = 15.sp)
+                        Text(if (game.app) "Read this app (not a game)" else "Read this app", color = Lfg.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "Automatic reads it while it is fullscreen, and otherwise when you ask. On demand only when you ask. Always reads it whenever it is in front; Never leaves it alone.",
+                            when (game.reading) {
+                                Game.READ_ON_DEMAND -> "Only when you ask"
+                                Game.READ_ON -> "Whenever it is in front"
+                                Game.READ_OFF -> "Never"
+                                else -> "When fullscreen, or when you ask"
+                            },
                             color = Lfg.Dim, fontSize = 13.sp,
                         )
                     }
@@ -736,94 +752,90 @@ fun GameNamesScreen(
     onBack: () -> Unit,
 ) = Page("Game names", onBack) {
     LaunchedEffect(Unit) { onCheck() }
-    Text(
-        "An emulator runs many games, and Android only says which app is in front. Choose what you launch games from, " +
-            "and lines, stats and recaps go to the game itself instead of to RetroArch or Eden.",
-        color = Lfg.Dim, fontSize = 14.sp,
-    )
+    Hint("Which game is running inside an emulator")
     val folders = listOf(
-        Triple(CocoonLog.SOURCE, "Cocoon", "The folder with Cocoon's files, which has launch_debug.log in it or one folder down."),
-        Triple(EsdeLog.SOURCE, "ES-DE", "The ES-DE folder, with logs/es_log.txt in it."),
-        Triple(RetroArchHistory.SOURCE, "RetroArch", "The RetroArch folder, with playlists in it. For games started from RetroArch itself."),
-        Triple(Eden.SOURCE, "Eden", "In the file picker's side menu, choose Eden. For Switch games started from Eden itself."),
+        Triple(CocoonLog.SOURCE, "Cocoon", "Folder with launch_debug.log"),
+        Triple(EsdeLog.SOURCE, "ES-DE", "Folder with logs/es_log.txt"),
+        Triple(RetroArchHistory.SOURCE, "RetroArch", "Folder with playlists"),
+        Triple(Eden.SOURCE, "Eden", "Pick Eden in the side menu"),
     )
-    for ((source, name, help) in folders) {
-        val chosen = GameNameSources.folder(prefs, source).isNotEmpty()
-        Card(name, if (chosen) status[source] ?: "Looking…" else help) {
-            if (chosen) LfgButton("Forget", { onForget(source) })
-            LfgButton(if (chosen) "Change…" else "Choose…", { onChoose(source) }, primary = !chosen)
+    Group("Launchers") {
+        for ((source, name, help) in folders) {
+            val chosen = GameNameSources.folder(prefs, source).isNotEmpty()
+            Card(name, if (chosen) status[source] ?: "Looking…" else help) {
+                if (chosen) LfgButton("Forget", { onForget(source) })
+                LfgButton(if (chosen) "Change…" else "Choose…", { onChoose(source) }, primary = !chosen)
+            }
         }
     }
-    Text("Steam", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-    Text(
-        "For DroidDeck, GameNative and Winlator: Steam is asked what you are playing every 30 seconds while one is in front. " +
-            "Your profile's game details must be public, or the key must be your own account's.",
-        color = Lfg.Dim, fontSize = 14.sp,
-    )
-    SettingText("Steam profile", "Your SteamID64, profile link, or custom profile name", prefs.steamAccount) { v ->
-        onChange { it.copy(steamAccount = v.trim()) }
+    Group("Steam") {
+        SettingText("Steam profile", "SteamID64, profile link or name", prefs.steamAccount) { v ->
+            onChange { it.copy(steamAccount = v.trim()) }
+        }
+        SettingText("Web API key", "steamcommunity.com/dev/apikey · only on this device", prefs.steamKey, secret = true) { v ->
+            onChange { it.copy(steamKey = v.trim()) }
+        }
+        Plain {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                LfgButton("Ask Steam", onTestSteam, primary = true, enabled = prefs.steamKey.isNotBlank() && prefs.steamAccount.isNotBlank())
+                steamTest?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp, modifier = Modifier.weight(1f)) }
+            }
+        }
     }
-    SettingText("Web API key", "From steamcommunity.com/dev/apikey. Kept on this device, and never in a backup.", prefs.steamKey, secret = true) { v ->
-        onChange { it.copy(steamKey = v.trim()) }
-    }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        LfgButton("Ask Steam", onTestSteam, primary = true, enabled = prefs.steamKey.isNotBlank() && prefs.steamAccount.isNotBlank())
-        steamTest?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp, modifier = Modifier.weight(1f)) }
-    }
+    Hint("For DroidDeck, GameNative and Winlator · game details must be public")
 }
 
 @Composable
 fun MediaScreen(prefs: Prefs, recording: Boolean, onChange: ((Prefs) -> Prefs) -> Unit, onStartRecording: () -> Unit, onBack: () -> Unit) = Page("Sound and pictures", onBack) {
-    Card("Sentence audio", "The voice in the game’s sound between a line and the next, added to the card. Android asks to let LFG record when you open a game, once a session.") {
-        OnOff(prefs.sentenceAudio) { v -> onChange { it.copy(sentenceAudio = v) } }
-    }
-    if (prefs.sentenceAudio) {
-        Card("This session", if (recording) "Listening to game sound" else "Not listening yet. Open a game, or start it here.") {
-            if (!recording) LfgButton("Start", onStartRecording, primary = true)
+    Group("Audio") {
+        Card("Sentence audio", "The game's voice · Android asks once a session") {
+            OnOff(prefs.sentenceAudio) { v -> onChange { it.copy(sentenceAudio = v) } }
+        }
+        if (prefs.sentenceAudio) {
+            Card("This session", if (recording) "Listening to game sound" else "Not listening yet") {
+                if (!recording) LfgButton("Start", onStartRecording, primary = true)
+            }
+        }
+        Card("Spoken line", "Android's voice, when the game has none") {
+            OnOff(prefs.spokenLines) { v -> onChange { it.copy(spokenLines = v) } }
         }
     }
-    Card("Spoken line", "Android’s voice reads the line onto cards with no voice from the game.") {
-        OnOff(prefs.spokenLines) { v -> onChange { it.copy(spokenLines = v) } }
-    }
-    Card("Animated picture", "The moments around the line as a short moving picture, instead of a still.") {
-        OnOff(prefs.animatedPicture) { v -> onChange { it.copy(animatedPicture = v) } }
-    }
-    Card("Trim black bars", "A card’s picture is cut to the game, without the black an emulator puts round it.") {
-        OnOff(prefs.trimBars) { v -> onChange { it.copy(trimBars = v) } }
+    Group("Pictures") {
+        Card("Animated picture", "A moving picture, not a still") {
+            OnOff(prefs.animatedPicture) { v -> onChange { it.copy(animatedPicture = v) } }
+        }
+        Card("Trim black bars", "Cut to the game") {
+            OnOff(prefs.trimBars) { v -> onChange { it.copy(trimBars = v) } }
+        }
     }
 }
 
 /** Ordinary apps: how a reading is asked for, and what is kept from it. */
 @Composable
 fun AppsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Other apps", onBack) {
-    Text(
-        "LFG leaves an app alone while its status bar shows, so its scrolling and taps stay its own. Ask, and it reads what is on " +
-            "screen: the app's own text where it shares it, which is exact and instant, and text recognition for pictures, video and anything drawn.",
-        color = Lfg.Dim, fontSize = 14.sp,
-    )
-    Text("Ways to ask", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-    Text(
-        "• Select text in any app and choose LFG in the menu.\n" +
-            "• Add the Read screen and Read region tiles to quick settings. Read region can keep reading a box, for subtitles.\n" +
-            "• Press the lookup shortcut on the controller.\n" +
-            "• Turn on the LFG button below.\n" +
-            "Then tap a word. A tap anywhere else, or Back, takes the strips away.",
-        color = Lfg.Text, fontSize = 14.sp,
-    )
-    Card("LFG button", "A small button over other apps. Tap to read the screen, hold to drag out a region, drag to move it.") {
-        OnOff(prefs.readButton) { v -> onChange { it.copy(readButton = v) } }
+    Hint("LFG reads an app only when you ask")
+    Group("Ways to ask") {
+        Plain {
+            listOf(
+                "Select text › LFG",
+                "Quick settings › Read screen or Read region",
+                "The lookup shortcut",
+                "The LFG button below",
+            ).forEach { Text("•  $it", color = Lfg.Text, fontSize = 15.sp) }
+        }
     }
-    Card(
-        "Keep lines from apps",
-        "Off: chats and mail can be private, so a lookup leaves nothing behind but the line a card is made from. " +
-            "A region kept reading is always stored, as a game's lines are. Password fields are never read.",
-    ) {
-        OnOff(prefs.keepAppLines) { v -> onChange { it.copy(keepAppLines = v) } }
+    Group("Other apps") {
+        Card("LFG button", "Tap: read · hold: region · drag: move") {
+            OnOff(prefs.readButton) { v -> onChange { it.copy(readButton = v) } }
+        }
+        Card("Keep lines from apps", "Off keeps chats private · passwords never read") {
+            OnOff(prefs.keepAppLines) { v -> onChange { it.copy(keepAppLines = v) } }
+        }
+        Card("Apps in reading time", "Count towards goals and widgets") {
+            OnOff(prefs.appsInReadingTime) { v -> onChange { it.copy(appsInReadingTime = v) } }
+        }
     }
-    Card("Apps in reading time", "Lines kept from apps count towards reading time, the goals and the widgets, beside games.") {
-        OnOff(prefs.appsInReadingTime) { v -> onChange { it.copy(appsInReadingTime = v) } }
-    }
-    Text("Cards from apps get no sentence audio and no moving picture: an app's sound is not its text's voice.", color = Lfg.Dim, fontSize = 14.sp)
+    Hint("Cards from apps get no audio or moving picture")
 }
 
 internal fun duration(seconds: Double): String {
@@ -841,43 +853,40 @@ private fun goalTime(minutes: Int) = when {
 /** The daily goals the stats screen measures against. */
 @Composable
 fun GoalsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Reading goals", onBack) {
-    Card("Time per day", "Reading time, as Stats counts it.") {
-        Stepper(if (prefs.goalMinutes == 0) "Off" else goalTime(prefs.goalMinutes), prefs.goalMinutes, ReadingGoals.MINUTE_STEPS) { v ->
-            onChange { it.copy(goalMinutes = v) }
+    Group("Each day") {
+        Card("Time per day", "As Stats counts it") {
+            Stepper(if (prefs.goalMinutes == 0) "Off" else goalTime(prefs.goalMinutes), prefs.goalMinutes, ReadingGoals.MINUTE_STEPS) { v ->
+                onChange { it.copy(goalMinutes = v) }
+            }
+        }
+        Card("Characters per day", "No punctuation or spaces") {
+            Stepper(if (prefs.goalChars == 0) "Off" else "%,d".format(prefs.goalChars), prefs.goalChars, ReadingGoals.CHAR_STEPS) { v ->
+                onChange { it.copy(goalChars = v) }
+            }
+        }
+        Card("Cards per day", "Made, added or waiting") {
+            Stepper(if (prefs.goalCards == 0) "Off" else "${prefs.goalCards}", prefs.goalCards, ReadingGoals.CARD_STEPS) { v ->
+                onChange { it.copy(goalCards = v) }
+            }
         }
     }
-    Card("Characters per day", "Characters read, as Stats counts them: no punctuation or spaces.") {
-        Stepper(if (prefs.goalChars == 0) "Off" else "%,d".format(prefs.goalChars), prefs.goalChars, ReadingGoals.CHAR_STEPS) { v ->
-            onChange { it.copy(goalChars = v) }
+    Group("Widget") {
+        Card("Today widget", "Auto follows its size") {
+            Choice(listOf("auto" to "Auto", "small" to "Small", "wide" to "Wide", "large" to "Large"), prefs.widgetSize) { v ->
+                onChange { it.copy(widgetSize = v) }
+            }
         }
     }
-    Card("Cards per day", "Cards made, added or waiting for AnkiDroid. A third ring on the Today widget.") {
-        Stepper(if (prefs.goalCards == 0) "Off" else "${prefs.goalCards}", prefs.goalCards, ReadingGoals.CARD_STEPS) { v ->
-            onChange { it.copy(goalCards = v) }
-        }
-    }
-    Card("Today widget", "Auto follows the widget's size; some launchers never pass it on, so the layout can be chosen here.") {
-        Choice(listOf("auto" to "Auto", "small" to "Small", "wide" to "Wide", "large" to "Large"), prefs.widgetSize) { v ->
-            onChange { it.copy(widgetSize = v) }
-        }
-    }
-    Text(
-        "A day runs from 4:00 to 4:00, so reading after midnight counts towards the day before. Stats shows today against each goal, " +
-            "the days that met it, and a line on the chart of each day.",
-        color = Lfg.Dim, fontSize = 14.sp, lineHeight = 20.sp,
-    )
+    Hint("A day runs from 4:00 to 4:00")
 }
 
 /** − and + through [steps], the current value between them. Both stay enabled, so the pad never loses its place at an end. */
 @Composable
-internal fun Stepper(label: String, value: Int, steps: List<Int>, onPick: (Int) -> Unit) {
-    LfgButton("−", { onPick(ReadingGoals.step(steps, value, up = false)) })
-    Text(
-        label, color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 1,
-        modifier = Modifier.widthIn(min = 112.dp),
-    )
-    LfgButton("+", { onPick(ReadingGoals.step(steps, value, up = true)) })
-}
+internal fun Stepper(label: String, value: Int, steps: List<Int>, onPick: (Int) -> Unit) = StepperPill(
+    label,
+    onLess = { onPick(ReadingGoals.step(steps, value, up = false)) },
+    onMore = { onPick(ReadingGoals.step(steps, value, up = true)) },
+)
 
 /**
  * Reading time, characters, speed and streak over a period, today's sessions,
@@ -1164,29 +1173,25 @@ fun StorageScreen(
 ) = Page("Storage", onBack) {
     fun mb(bytes: Long) = if (bytes < 1_048_576) "${(bytes + 1023) / 1024} KB" else "${(bytes + 524_288) / 1_048_576} MB"
     if (usage == null) {
-        Text("Measuring…", color = Lfg.Dim, fontSize = 15.sp)
+        Hint("Measuring…")
     } else {
-        Card("Screens", "${mb(usage.screens)} · ${usage.screenCount} pictures, ${usage.keptScreens} kept for good")
-        Card("Line pictures", "${mb(usage.crops)} · each line cut from its screen, kept for good")
-        Card("Cards and notes", "${mb(usage.cards + usage.notes)} · pictures and sound made for cards, and diary entries' own copies")
-        Card("Dictionaries", mb(usage.dictionaries))
-        Card("Text recognition", mb(usage.reader))
-        Card("Lines and stats", mb(usage.database))
-        Text("${mb(usage.total)} in all", color = Lfg.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-    }
-    HorizontalDivider(color = Lfg.Border)
-    Card(
-        "Keep screens",
-        "The whole screen saved with each line. A line, its text and its own picture are never deleted, and neither is " +
-            "a screen a card was made from or a recap chose as a moment, and one a day for the diary.",
-    ) {
-        Choice(listOf("7" to "A week", "14" to "Two weeks", "30" to "A month", "90" to "Three months", "0" to "Always"), keepDays.toString()) {
-            onKeepDays(it.toInt())
+        Group("Space used") {
+            Card("Screens", "${mb(usage.screens)} · ${usage.screenCount} pictures, ${usage.keptScreens} kept")
+            Card("Line pictures", mb(usage.crops))
+            Card("Cards and notes", mb(usage.cards + usage.notes))
+            Card("Dictionaries", mb(usage.dictionaries))
+            Card("Text recognition", mb(usage.reader))
+            Card("Lines and stats", mb(usage.database))
+            Card("In all") { Text(mb(usage.total), color = Lfg.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
         }
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        LfgButton("Clean up now", onCleanUp)
-        message?.let { Text("  $it", color = Lfg.Dim, fontSize = 14.sp) }
+    Group("Screens") {
+        Card("Keep screens", "Lines and card pictures are always kept") {
+            Choice(listOf("7" to "Week", "14" to "2 weeks", "30" to "Month", "90" to "3 months", "0" to "Always"), keepDays.toString()) {
+                onKeepDays(it.toInt())
+            }
+        }
+        Card("Clean up now", message ?: "") { LfgButton("Clean up", onCleanUp) }
     }
 }
 
@@ -1200,45 +1205,40 @@ fun DialogueScreen(
     onDiscord: () -> Unit,
     onBack: () -> Unit,
 ) = Page("Help improve LFG", onBack) {
-    Text(KEEP_DIALOGUE_ASK, color = Lfg.Text, fontSize = 15.sp, lineHeight = 22.sp)
-    Card("Save full dialogue", "Every new line of a game's dialogue: its whole screen, and the text LFG read from it. Never an ordinary app's.") {
-        OnOff(keep, onKeep)
-    }
+    Hint("Saved screens help train a better reader")
     val kept = state.kept
     fun mb(bytes: Long) = if (bytes < 1_048_576) "${(bytes + 1023) / 1024} KB" else "${(bytes + 524_288) / 1_048_576} MB"
-    Card(
-        "Saved so far",
-        if (kept == null) "Counting…" else "${kept.screens} screen${if (kept.screens == 1) "" else "s"} · ${mb(kept.bytes)}. Kept until you delete them.",
-    )
-    Text(
-        "Send opens your mail app with every saved screen in one zip, addressed to ${io.github.beesan.lfg.capture.DialogueSamples.EMAIL}. " +
-            "Look before you send: a screen holds whatever the game showed. Many mail services refuse attachments over 25 MB; " +
-            "if yours does, join the LFG Discord and send it there, or post a Drive or other share link to it.",
-        color = Lfg.Dim, fontSize = 14.sp, lineHeight = 20.sp,
-    )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        LfgButton(if (state.busy) "Zipping…" else "Send…", onSend, primary = true, enabled = !state.busy && (kept?.screens ?: 0) > 0)
-        LfgButton("Join the Discord", onDiscord)
-        LfgButton("Delete all", onClear, enabled = !state.busy && (kept?.screens ?: 0) > 0)
+    Group("Dialogue") {
+        Card("Save full dialogue", "Games only · each screen and its text") {
+            OnOff(keep, onKeep)
+        }
+        Card("Saved so far", if (kept == null) "Counting…" else "${kept.screens} screen${if (kept.screens == 1) "" else "s"} · ${mb(kept.bytes)}")
     }
-    state.message?.let { Text(it, color = Lfg.Dim, fontSize = 14.sp) }
+    Group("Send") {
+        Plain {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LfgButton(if (state.busy) "Zipping…" else "Send…", onSend, primary = true, enabled = !state.busy && (kept?.screens ?: 0) > 0)
+                LfgButton("Join the Discord", onDiscord)
+                LfgButton("Delete all", onClear, enabled = !state.busy && (kept?.screens ?: 0) > 0)
+            }
+        }
+    }
+    Hint("Mails a zip to ${io.github.beesan.lfg.capture.DialogueSamples.EMAIL} · look first · over 25 MB? Use Discord")
+    state.message?.let { Hint(it) }
 }
 
 @Composable
 fun HelpScreen(report: String?, onCopy: () -> Unit, onShare: () -> Unit, onBack: () -> Unit) = Page("Help and diagnostics", onBack) {
-    Text(
-        "If something goes wrong, or after a first run on a new handheld, send this report with what happened " +
-            "(github.com/bee-san/LearnFromGames/issues). It has the device, what LFG has installed, how much it keeps, and " +
-            "LFG's own recent log with its timings. It has no key and none of the text LFG read. Read it before you send it.",
-        color = Lfg.Text, fontSize = 15.sp, lineHeight = 22.sp,
-    )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        LfgButton("Copy", onCopy, primary = true, enabled = report != null)
-        LfgButton("Share…", onShare, enabled = report != null)
+    Group("Report") {
+        Card("Diagnostics", "No keys, none of the text LFG read") {
+            LfgButton("Copy", onCopy, primary = true, enabled = report != null)
+            LfgButton("Share…", onShare, enabled = report != null)
+        }
     }
+    Hint("Send it with what happened: github.com/bee-san/LearnFromGames/issues")
     Text(
         report ?: "Gathering…",
         color = Lfg.Dim, fontSize = 12.sp, lineHeight = 16.sp, fontFamily = FontFamily.Monospace,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Lfg.Surface).padding(10.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Lfg.Surface).border(1.dp, Lfg.Border, RoundedCornerShape(14.dp)).padding(12.dp),
     )
 }

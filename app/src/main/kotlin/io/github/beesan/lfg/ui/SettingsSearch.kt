@@ -68,7 +68,7 @@ object SettingsIndex {
         page(Page.LANGUAGE, "Language", "The language you are learning", "japanese chinese korean spanish french german study learn"),
         page(Page.PROFILES, "Profiles", "A language and settings of its own for each", "second language two languages switch change user account person share") {
             setting("New profile", "Another language, starting with the settings you have now", "add create make")
-            setting("Add to quick settings", "A tile for each profile, to change to it from anywhere", "tile shade notification quick switch")
+            setting("Quick tile", "A tile for each profile, to change to it from anywhere", "add to quick settings tile shade notification quick switch")
             setting("Rename", "Call a profile what you like", "name")
         },
         page(Page.APPEARANCE, "Appearance", "Colours, light or dark, and sounds", "look style display") {
@@ -106,7 +106,7 @@ object SettingsIndex {
             setting("Move up, Move down", "Entries show in the dictionaries' order", "sort priority first")
             setting("Remove", "Takes a dictionary off this device", "delete uninstall")
             setting("Kanji", "The dictionary a tapped kanji is looked up in", "character hanzi")
-            setting("Show sources", "Who made each dictionary, and where it comes from", "credits attribution licence license about")
+            setting("Sources", "Who made each dictionary, and where it comes from", "show sources credits attribution licence license about")
             setting("Updates", "A dictionary's next release replaces it, and keeps its place", "automatic auto update check now new version")
             setting("Word audio", "Words said by people, from the Local Audio Server add-on for Anki", "pronunciation sound voice android.db yomichan")
         },
@@ -246,7 +246,7 @@ object SettingsIndex {
 /** Where a setting is searched for: one line, with a button that empties it once something is typed. */
 @Composable
 fun SettingsSearchField(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier) {
-    val shape = RoundedCornerShape(6.dp)
+    val shape = RoundedCornerShape(14.dp)
     val keyboard = LocalSoftwareKeyboardController.current
     val input = LocalInputModeManager.current
     val field = remember { FocusRequester() }
@@ -286,12 +286,12 @@ fun SettingsSearchField(query: String, onQuery: (String) -> Unit, modifier: Modi
 @Composable
 fun SettingsSearchResults(hits: List<SettingHit>, onOpen: (Page) -> Unit) {
     if (hits.isEmpty()) {
-        Text("No setting matches.", color = Lfg.Dim, fontSize = 15.sp)
+        Hint("No setting matches")
         return
     }
     for (hit in hits) {
         // A page says what is on it; a setting says which page it is on first.
-        val detail = if (hit.name == hit.pageName) hit.detail else listOf(hit.pageName, hit.detail).filter { it.isNotEmpty() }.joinToString(" · ")
-        Card(hit.name, detail, onClick = { onOpen(hit.page) })
+        // Kept short: a setting says only which page it is on.
+        Card(hit.name, if (hit.name == hit.pageName) "Page" else hit.pageName, onClick = { onOpen(hit.page) })
     }
 }

@@ -61,26 +61,28 @@ fun ProfilesScreen(
     BackHandler(adding) { adding = false }
     if (adding) {
         Page("New profile", { adding = false }) {
-            Text("Which language is it for?", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Text("It starts with the settings you have now.", color = Lfg.Dim, fontSize = 15.sp)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Language.entries.forEach { language ->
-                    LfgButton(if (language.ownName == language.title) language.title else "${language.title} · ${language.ownName}", {
-                        onNew(language)
-                        adding = false
-                    })
+            Group("Which language?") {
+                Plain {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Language.entries.forEach { language ->
+                            LanguageChip(language.title, language.ownName, false) {
+                                onNew(language)
+                                adding = false
+                            }
+                        }
+                    }
                 }
             }
+            Hint("Starts with the settings you have now")
         }
         return
     }
     Page("Profiles", onBack) {
-        Text("Each profile has its own language and settings. Keys, backups and game folders are shared.", color = Lfg.Dim, fontSize = 15.sp)
         val several = profiles.size > 1
-        profiles.forEach { profile ->
+        Group("Profiles") { profiles.forEach { profile ->
             val named = profile.name.isNotBlank()
             when (profile.id) {
-                renaming -> Card("Name", "Empty, it is called ${profile.language.title}.") {
+                renaming -> Card("Name", "Empty: ${profile.language.title}") {
                     NameField(typed, { typed = it.take(ProfileRules.NAME_LENGTH) }, profile.language.title) {
                         onRename(profile.id, typed)
                         renaming = null
@@ -90,7 +92,7 @@ fun ProfilesScreen(
                         renaming = null
                     }, primary = true)
                 }
-                removing -> Card("Delete ${profile.shown}?", "Its settings go. Your lines, cards and dictionaries stay.") {
+                removing -> Card("Delete ${profile.shown}?", "Lines, cards and dictionaries stay") {
                     LfgButton("Delete", {
                         onRemove(profile.id)
                         removing = null
@@ -105,7 +107,7 @@ fun ProfilesScreen(
                         renaming = profile.id
                     })
                     if (several) {
-                        LfgButton("Add to quick settings", { onTile(profile) })
+                        LfgButton("Quick tile", { onTile(profile) })
                         LfgButton("Delete", {
                             renaming = null
                             removing = profile.id
@@ -113,9 +115,10 @@ fun ProfilesScreen(
                     }
                 }
             }
-        }
-        if (message != null) Text(message, color = Lfg.Dim, fontSize = 14.sp)
-        if (profiles.size < ProfileRules.MAX) LfgButton("New profile", { adding = true })
+        } }
+        Hint("Each has its own language and settings · keys and backups are shared")
+        if (message != null) Hint(message)
+        if (profiles.size < ProfileRules.MAX) LfgButton("New profile", { adding = true }, primary = true)
         // A language new to the device: its dictionary comes as soon as the profile is made.
         when (val state = fetching ?: dictionary) {
             is DictState.Downloading -> Text("Downloading the dictionary… ${if (state.total > 0) state.bytes * 100 / state.total else 0}%", color = Lfg.Dim, fontSize = 14.sp)

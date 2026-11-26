@@ -59,6 +59,7 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 - Never run `uiautomator dump` while testing: it suspends accessibility services.
 - **Right after `adb install -r` the service is connected but sees no windows**, even once it is switched off and on: nothing is read, and `LfgPerf` in logcat shows only `front` at about 0.1 ms with no `shot`. Force-stop the app, switch the service off and on again, and test from the second start. A failure seen only on the first run after an install is this, not the code.
 - `am force-stop` switches the service off. A running app writes its settings back over a `settings.xml` pushed under it, so stop it first.
+- LFG opening on the second screen is `toSecondScreen()` in `MainActivity`: only on a start from out of sight. Moved while showing (the Thor's swap-screens), it stays where it is put.
 - The app's pages are on the second screen (`input -d 2 tap`, `adb emu screenrecord screenshot --display 1`); games, and the tutorial, on the first. A row's place differs between the two: the second is narrow, so take a picture before tapping by coordinates.
 - `tools/virtual_pad.py` talks to plain `adb`: set `ANDROID_SERIAL=emulator-5560`. The pad it makes counts as a connected controller, and goes when the script ends.
 - Never read `shared_prefs/secrets.xml`. A test that needs an OpenRouter key types a made-up one into the app (`input text`) and deletes it in Settings › Translation afterwards.
@@ -88,6 +89,7 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 
 ## Settings, sounds and translation
 
+- **Settings pages are built from `ui/SettingsKit.kt`**: rows (`Card`, `SettingText`, `Plain`) go in a `Group("Title")`; on/off is `OnOff` (a switch), a few options `Choice` (a segmented row), numbers `Stepper`. Names are a few words and details a short phrase, never a sentence; anything longer is a `Hint` under the group, or left out. A new page gets an entry in `SETTINGS_GROUPS` with its icon.
 - **Settings › search is a list kept by hand** (`SettingsIndex.ALL` in `ui/SettingsSearch.kt`): a setting added, renamed or moved gets its row there, with the words people would type for it. `SettingsSearchTest` checks that every row points at a page Settings can open by itself.
 - A new setting is a field of `Prefs` and a line in both `Settings.read()` and `Settings.update()`. One whose default must differ for people already set up is read from a setting they have (`setupDone` from `keepDialogueAsked`), not migrated.
 - **Button sounds** play as `USAGE_ASSISTANCE_SONIFICATION`, which game-sound capture never records; a sound played as media would end up on cards. Material's `Button` ignores `LocalIndication`, so `LfgButton` clicks through `rememberClickSource()`, and only inside `ClickSounds { }`: the overlays over a game stay silent.

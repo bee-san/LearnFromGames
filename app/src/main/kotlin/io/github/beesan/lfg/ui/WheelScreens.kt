@@ -95,8 +95,6 @@ import kotlin.math.sin
 
 // ── Settings › Wheel ─────────────────────────────────────────────────────────
 
-@Composable
-private fun Heading(text: String) = Text(text, color = Lfg.Dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
 
 private fun tiles(count: Int) = if (count == 1) "1 tile" else "$count tiles"
 
@@ -126,77 +124,82 @@ fun WheelSettingsScreen(
     val game = games.firstOrNull { it.id == chosen }?.takeIf { prefs.wheelPerGame }
     val own = game != null && game.id in sets
     val set = (if (own) sets[chosen] else null) ?: sets[Wheels.SHARED] ?: WheelSet.DEFAULT
-    Heading("Wheel")
-    Card("Wheel for", "A game can have its own wheel. Others use the shared one.") {
-        Choice(listOf("all" to "All games", "each" to "Each game its own"), if (prefs.wheelPerGame) "each" else "all") { v ->
-            onChange { it.copy(wheelPerGame = v == "each") }
+    Group("Wheel") {
+        Card("Wheel for", "Or one per game") {
+            Choice(listOf("all" to "All games", "each" to "Each game its own"), if (prefs.wheelPerGame) "each" else "all") { v ->
+                onChange { it.copy(wheelPerGame = v == "each") }
+            }
+        }
+        if (prefs.wheelPerGame) {
+            val ids = listOf(Wheels.SHARED) + games.map { it.id }
+            val at = ids.indexOf(game?.id ?: Wheels.SHARED).coerceAtLeast(0)
+            Card(
+                "Whose wheel",
+                when {
+                    game == null -> "Every game without its own"
+                    own -> "Its own wheel"
+                    else -> "Shared until changed"
+                },
+            ) {
+                LfgButton("◀", { onChoose(ids[Math.floorMod(at - 1, ids.size)]) }, modifier = Modifier.semantics { contentDescription = "The wheel before" })
+                Text(
+                    game?.title ?: "Shared", color = Lfg.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(min = 96.dp, max = 200.dp),
+                )
+                LfgButton("▶", { onChoose(ids[Math.floorMod(at + 1, ids.size)]) }, modifier = Modifier.semantics { contentDescription = "The next wheel" })
+            }
+        }
+        Card("Edit wheel…", tiles(set.top.slices.size) + (set.wheels.size - 1).let { if (it > 0) ", and " + (if (it == 1) "1 wheel" else "$it wheels") + " inside" else "" }, onClick = onEdit)
+        Card("Copy wheel", message ?: "Save to a file, or load one") {
+            LfgButton("Save as…", onSave)
+            LfgButton("Load…", onLoad)
+        }
+        Card("Reset wheel", if (game != null) "Back to the shared wheel" else "Back to the start") {
+            LfgButton("Reset", onReset, enabled = if (game != null) own else Wheels.SHARED in sets)
         }
     }
-    if (prefs.wheelPerGame) {
-        val ids = listOf(Wheels.SHARED) + games.map { it.id }
-        val at = ids.indexOf(game?.id ?: Wheels.SHARED).coerceAtLeast(0)
-        Card(
-            "Whose wheel",
-            when {
-                game == null -> "The shared wheel, of every game without its own."
-                own -> "${game.title} has its own wheel."
-                else -> "${game.title} uses the shared wheel until its own is changed."
-            },
-        ) {
-            LfgButton("◀", { onChoose(ids[Math.floorMod(at - 1, ids.size)]) }, modifier = Modifier.semantics { contentDescription = "The wheel before" })
-            Text(
-                game?.title ?: "Shared", color = Lfg.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(min = 112.dp, max = 220.dp),
-            )
-            LfgButton("▶", { onChoose(ids[Math.floorMod(at + 1, ids.size)]) }, modifier = Modifier.semantics { contentDescription = "The next wheel" })
+
+    Group("Opening") {
+        Card("Lookup shortcut", "Tap: lookup · hold: wheel") { LfgButton(shortcutLabel(prefs), onControls) }
+        Card("Hold for the wheel", "How long to hold") {
+            Stepper("${prefs.wheelHoldMs} ms", prefs.wheelHoldMs, Prefs.WHEEL_HOLD_STEPS) { v -> onChange { it.copy(wheelHoldMs = v) } }
+        }
+        Card("Open wheels while held", "Letting go picks inside") {
+            OnOff(prefs.wheelOpenHeld) { v -> onChange { it.copy(wheelOpenHeld = v) } }
         }
     }
-    Card("Edit wheel…", tiles(set.top.slices.size) + (set.wheels.size - 1).let { if (it > 0) ", and " + (if (it == 1) "1 wheel" else "$it wheels") + " inside" else "" }, onClick = onEdit)
-    Card("Copy wheel", message ?: "Save the wheel as a file, or load one saved before.") {
-        LfgButton("Save as…", onSave)
-        LfgButton("Load…", onLoad)
-    }
-    Card("Reset wheel", if (game != null) "Back to the shared wheel." else "Back to the wheel LFG starts with.") {
-        LfgButton("Reset", onReset, enabled = if (game != null) own else Wheels.SHARED in sets)
-    }
 
-    Heading("Opening")
-    Card("Lookup shortcut", "Tap for lookup, hold for the wheel. Set in Controls.") { LfgButton(shortcutLabel(prefs), onControls) }
-    Card("Hold for the wheel", "How long the shortcut is held before the wheel opens.") {
-        Stepper("${prefs.wheelHoldMs} ms", prefs.wheelHoldMs, Prefs.WHEEL_HOLD_STEPS) { v -> onChange { it.copy(wheelHoldMs = v) } }
-    }
-    Card("Open wheels while held", "Pointing at a wheel tile opens it at once, so letting go picks inside it.") {
-        OnOff(prefs.wheelOpenHeld) { v -> onChange { it.copy(wheelOpenHeld = v) } }
-    }
-
-    Heading("Pointing")
-    Card("D-pad", "Point: each way is a slice, up to 8. Step: ◀ ▶ go round a wheel of any size.") {
-        Choice(listOf(Prefs.WHEEL_POINT to "Point", Prefs.WHEEL_STEP to "Step round"), prefs.wheelDpad) { v -> onChange { it.copy(wheelDpad = v) } }
-    }
-    Card("Stick reach", "How far the stick is pushed before it points.") {
-        Stepper("${prefs.wheelReach}%", prefs.wheelReach, Prefs.WHEEL_REACH_STEPS) { v -> onChange { it.copy(wheelReach = v) } }
-    }
-    Card("Vibrate on each slice") { OnOff(prefs.wheelTick) { v -> onChange { it.copy(wheelTick = v) } } }
-    Card("Start on the last pick", "Each wheel opens pointing at the slice picked last.") {
-        OnOff(prefs.wheelStartLast) { v -> onChange { it.copy(wheelStartLast = v) } }
-    }
-
-    Heading("After picking")
-    Card("Wheel after a pick", "Stay open is handy for Keep or Copy several times.") {
-        Choice(listOf("close" to "Close", "stay" to "Stay open"), if (prefs.wheelStay) "stay" else "close") { v -> onChange { it.copy(wheelStay = v == "stay") } }
-    }
-
-    Heading("Look")
-    Card("Slices") {
-        Choice(listOf("names" to "Names and icons", "icons" to "Icons only"), if (prefs.wheelIconsOnly) "icons" else "names") { v ->
-            onChange { it.copy(wheelIconsOnly = v == "icons") }
+    Group("Pointing") {
+        Card("D-pad", "Point: a slice each way · Step: ◀ ▶ round") {
+            Choice(listOf(Prefs.WHEEL_POINT to "Point", Prefs.WHEEL_STEP to "Step round"), prefs.wheelDpad) { v -> onChange { it.copy(wheelDpad = v) } }
+        }
+        Card("Stick reach", "How far before it points") {
+            Stepper("${prefs.wheelReach}%", prefs.wheelReach, Prefs.WHEEL_REACH_STEPS) { v -> onChange { it.copy(wheelReach = v) } }
+        }
+        Card("Vibrate on each slice") { OnOff(prefs.wheelTick) { v -> onChange { it.copy(wheelTick = v) } } }
+        Card("Start on the last pick", "Opens on the slice picked last") {
+            OnOff(prefs.wheelStartLast) { v -> onChange { it.copy(wheelStartLast = v) } }
         }
     }
-    Card("Wheel size", "The wheel grows with its tiles. This scales the whole of it.") {
-        Stepper("${prefs.wheelSize}%", prefs.wheelSize, Prefs.WHEEL_SIZE_STEPS) { v -> onChange { it.copy(wheelSize = v) } }
+
+    Group("After picking") {
+        Card("Wheel after a pick", "Stay open: Keep or Copy again") {
+            Choice(listOf("close" to "Close", "stay" to "Stay open"), if (prefs.wheelStay) "stay" else "close") { v -> onChange { it.copy(wheelStay = v == "stay") } }
+        }
     }
-    Card("Dim the game") {
-        Stepper("${prefs.wheelDim}%", prefs.wheelDim, Prefs.WHEEL_DIM_STEPS) { v -> onChange { it.copy(wheelDim = v) } }
+
+    Group("Look") {
+        Card("Slices") {
+            Choice(listOf("names" to "Names and icons", "icons" to "Icons only"), if (prefs.wheelIconsOnly) "icons" else "names") { v ->
+                onChange { it.copy(wheelIconsOnly = v == "icons") }
+            }
+        }
+        Card("Wheel size", "Scales the whole wheel") {
+            Stepper("${prefs.wheelSize}%", prefs.wheelSize, Prefs.WHEEL_SIZE_STEPS) { v -> onChange { it.copy(wheelSize = v) } }
+        }
+        Card("Dim the game") {
+            Stepper("${prefs.wheelDim}%", prefs.wheelDim, Prefs.WHEEL_DIM_STEPS) { v -> onChange { it.copy(wheelDim = v) } }
+        }
     }
 }
 

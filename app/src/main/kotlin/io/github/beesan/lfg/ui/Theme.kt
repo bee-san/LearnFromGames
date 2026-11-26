@@ -88,6 +88,9 @@ object Lfg {
     val OkSoft get() = Color(palette.okSoft)
     val Warn get() = Color(palette.warn)
     val Error get() = Color(palette.error)
+    /** The Today widget's rings, lent to Settings' icons as a few more colours of the scheme. */
+    val RingChars get() = Color(palette.ringChars)
+    val RingCards get() = Color(palette.ringCards)
 }
 
 /** The palette for these settings, with the system's light or dark setting for "Match system". */
@@ -239,8 +242,8 @@ fun LfgButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.focusRing(RoundedCornerShape(5.dp)).defaultMinSize(minHeight = if (compact) 36.dp else 44.dp),
-        shape = RoundedCornerShape(5.dp),
+        modifier = modifier.focusRing(RoundedCornerShape(10.dp)).defaultMinSize(minHeight = if (compact) 36.dp else 44.dp),
+        shape = RoundedCornerShape(10.dp),
         border = BorderStroke(1.dp, if (!enabled) Lfg.Soft else if (primary) Lfg.Fill else Lfg.BorderStrong),
         contentPadding = if (compact) PaddingValues(horizontal = 12.dp, vertical = 4.dp) else PaddingValues(horizontal = 18.dp, vertical = 8.dp),
         // Material's button draws its own press, so the click of [ClickSounds] is asked for here.
