@@ -712,7 +712,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        toSecondScreen()
+        // Asked onto a screen while already on one: that is the person moving LFG, as the Thor's
+        // swap-screens does, so it stays where it is put. Only a start from out of sight goes to the second.
+        if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) toSecondScreen()
         take(intent)
     }
 
@@ -720,6 +722,7 @@ class MainActivity : ComponentActivity() {
      * On a two-screen handheld the app's pages belong on the second screen:
      * the first is the game's. Started on the first (a launcher there, a
      * widget), the app starts itself again on the other and this one goes.
+     * Moved while showing (the handheld's swap-screens), it is left where it is put.
      */
     private fun toSecondScreen(): Boolean {
         // Asked once for each start: if the other screen sends it back here, here it stays.
