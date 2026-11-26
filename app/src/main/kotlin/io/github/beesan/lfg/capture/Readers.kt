@@ -34,8 +34,14 @@ interface ChangeProbe {
     suspend fun look(frame: Frame): Look = Look(signature(frame), null)
 }
 
-/** What a probe made of a frame: its signature, and the boxes it found text in, for reading only there ([Bands]). */
-class Look(val signature: String, val found: List<Box>?)
+/**
+ * What a probe made of a frame: its signature, the boxes it found text in, for reading only there ([Bands]),
+ * and the rows its signature is made of, one to a line of it, with where each is; null from a probe that cannot say.
+ */
+class Look(val signature: String, val found: List<Box>?, val rows: List<Seen>? = null)
+
+/** One row of a probe's signature, and where on the frame it is. */
+class Seen(val text: String, val box: Box)
 
 /** VOCR as the probe: the signature is the text it reads. */
 class VocrProbe(private val vocr: Vocr) : ChangeProbe {
@@ -44,7 +50,8 @@ class VocrProbe(private val vocr: Vocr) : ChangeProbe {
     /** Every box the spotter gave counts as found, the faint ones too: a box too many only makes a band taller. */
     override suspend fun look(frame: Frame): Look = withContext(Dispatchers.Default) {
         val lines = vocr.read(frame)
-        Look(Vocr.signature(lines), lines.map { it.box })
+        val rows = Vocr.text(lines).map { Seen(Vocr.mark(it), it.box) }
+        Look(rows.joinToString("\n") { it.text }, lines.map { it.box }, rows)
     }
 }
 
@@ -87,7 +94,7 @@ class ReaderProbe(private val reader: TextReader) : ChangeProbe {
 
     override suspend fun look(frame: Frame): Look {
         val lines = reader.read(frame)
-        return Look(lines.joinToString("\n") { it.text }, lines.map { it.box })
+        return Look(lines.joinToString("\n") { it.text }, lines.map { it.box }, lines.map { Seen(it.text, it.box) })
     }
 }
 

@@ -67,9 +67,11 @@ class Vocr private constructor(private var handle: Long) : AutoCloseable {
          * (a vertical column) counts by its rough place instead. What a
          * moving picture makes of the spotter is left out ([text]).
          */
-        fun signature(lines: List<VocrLine>): String = text(lines).joinToString("\n") {
-            it.text.ifEmpty { "[${it.box.left / 32},${it.box.top / 32},${it.box.width / 32},${it.box.height / 32}]" }
-        }
+        fun signature(lines: List<VocrLine>): String = text(lines).joinToString("\n", transform = ::mark)
+
+        /** What one row is in the signature: its text, or its rough place when it has none. */
+        fun mark(line: VocrLine): String =
+            line.text.ifEmpty { "[${line.box.left / 32},${line.box.top / 32},${line.box.width / 32},${line.box.height / 32}]" }
 
         /**
          * The boxes that are text to follow. A bird flying across the top of

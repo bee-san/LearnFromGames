@@ -212,6 +212,10 @@ class ReadingPipeline(
      * nothing either way; when ours move, the clean picture is painted afresh. A picture taken as they
      * moved has them in two places and looks changed: the next look does not agree with it, and it is
      * let go.
+     *
+     * Only the story's text is watched ([telling]): what the probe makes of a picture that moves (a
+     * floor of water, people walking by) is a few characters, other ones at each look, and taken for
+     * a change it had the entry blink away and back every few seconds.
      */
     suspend fun watch(
         hash: Long, picture: () -> Bitmap?, offsetX: Int = 0, offsetY: Int = 0, area: Box? = null, ours: List<Box>,
@@ -224,10 +228,15 @@ class ReadingPipeline(
         val pixels = watchBuffer?.takeIf { it.size == size } ?: IntArray(size).also { watchBuffer = it }
         val whole = Frame(bitmap.width, bitmap.height, pixels)
         val cut = area?.let { DialogueBox.reading(it.moved(-offsetX, -offsetY), bitmap.width, bitmap.height) }
+        // Where the lines being looked up are: those of the last clean picture that are lines, not a menu's text.
+        val story = _latest.value?.let { reading ->
+            reading.lines.filterIndexed { i, _ -> reading.saved.getOrNull(i)?.interfaceText != true }
+        }.orEmpty()
         suspend fun signature(): String {
             for (box in ours) blank(whole, box.moved(-offsetX, -offsetY))
             val frame = if (cut == null) whole else whole.cut(cut.left, cut.top, cut.width, cut.height, cutBuffer).also { cutBuffer = it.argb }
-            return Perf.measure("watch") { probe().signature(frame) }
+            val look = Perf.measure("watch") { probe().look(frame) }
+            return telling(look, story, offsetX + (cut?.left ?: 0), offsetY + (cut?.top ?: 0))
         }
         if (moved || watchFirst == null) {
             watchOurs = ours
@@ -635,6 +644,26 @@ class ReadingPipeline(
 }
 
 private const val TAG = "LfgLines"
+
+/**
+ * What of [look] says whether the story's text has changed, while the lines in [story] (display pixels) are
+ * being looked up; the look's frame starts at ([dx], [dy]) of the display. A row counts when it is where
+ * the story is, within a row's height of one of its lines (the line itself, the row typed under it, the
+ * name over it), or when it is as long as a line is ([LineSorter.LONG] characters). A short row anywhere
+ * else is a label, or what the probe makes of the picture, and is read when the entry is put away.
+ * Everything counts when there is no story to go by, or the probe cannot say where its rows are.
+ */
+internal fun telling(look: Look, story: List<TextLine>, dx: Int, dy: Int): String {
+    val rows = look.rows ?: return look.signature
+    if (story.isEmpty()) return look.signature
+    val places = story.map { line ->
+        val room = line.rows.minOf { if (line.vertical) it.width else it.height }.coerceAtLeast(0)
+        Box(line.box.left - room, line.box.top - room, line.box.right + room, line.box.bottom + room)
+    }
+    return rows.filter { row ->
+        row.text.codePointCount(0, row.text.length) >= LineSorter.LONG || row.box.moved(dx, dy).let { box -> places.any(box::intersects) }
+    }.joinToString("\n") { it.text }
+}
 
 /** Whether a line is long enough to be told from a label by its length alone. */
 private fun long(line: TextLine) = line.text.codePointCount(0, line.text.length) >= LineSorter.LONG

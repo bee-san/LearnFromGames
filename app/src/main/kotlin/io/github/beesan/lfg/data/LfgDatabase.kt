@@ -22,7 +22,7 @@ interface LineDao {
     @Query("SELECT * FROM game_lines WHERE id = :id")
     suspend fun byId(id: String): GameLine?
 
-    @Query("SELECT * FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC, rowid DESC LIMIT :limit")
     fun recent(limit: Int): Flow<List<GameLine>>
 
     /** A game's last lines, newest first, its interface text left out: what a piece just read is held against. */
@@ -30,11 +30,11 @@ interface LineDao {
     suspend fun lastLines(gameId: String, limit: Int): List<GameLine>
 
     /** The newest picture of a game's screen kept with one of its lines: what its boxes are drawn on in Settings. */
-    @Query("SELECT screenshot_path FROM game_lines WHERE game_id = :gameId AND screenshot_path IS NOT NULL ORDER BY created_at DESC LIMIT 1")
+    @Query("SELECT screenshot_path FROM game_lines WHERE game_id = :gameId AND screenshot_path IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1")
     suspend fun lastPicture(gameId: String): String?
 
     /** The newest line of exactly this text in a game, however long ago it was kept. */
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND line_text = :text AND interface_text = 0 ORDER BY created_at DESC LIMIT 1")
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND line_text = :text AND interface_text = 0 ORDER BY created_at DESC, rowid DESC LIMIT 1")
     suspend fun lineOf(gameId: String, text: String): GameLine?
 
     /** A line that was read half typed is the whole of it now, with the picture that shows the whole of it. */
@@ -42,15 +42,15 @@ interface LineDao {
     suspend fun grow(id: String, text: String, chars: Int, box: String, picture: String?, now: Long)
 
     /** The line read next after a given moment in the same game: where the earlier line's sound ends. */
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND created_at > :afterMs ORDER BY created_at LIMIT 1")
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND created_at > :afterMs ORDER BY created_at, rowid LIMIT 1")
     suspend fun nextAfter(gameId: String, afterMs: Long): GameLine?
 
     /** The text too: stats count its letters, not every code point as `char_count` does. */
-    @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp")
+    @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp, rowid")
     fun stamps(): Flow<List<LineStamp>>
 
     /** The same, from [since] on: the lines a session still going can be made of. */
-    @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' AND interface_text = 0 AND timestamp >= :since ORDER BY timestamp")
+    @Query("SELECT timestamp, line_text AS text, game_id AS gameId FROM game_lines WHERE source != 'practice' AND interface_text = 0 AND timestamp >= :since ORDER BY timestamp, rowid")
     suspend fun stampsSince(since: Double): List<LineStamp>
 
     /** Pictures no card was made from, older than [before] (milliseconds). */
@@ -61,14 +61,14 @@ interface LineDao {
     suspend fun keptPictures(): List<String>
 
     /** The lines read before [before] (milliseconds) whose screens are still kept, in the order read: what the diary picks a day's picture from. */
-    @Query("SELECT * FROM game_lines WHERE screenshot_path IS NOT NULL AND created_at < :before AND source != 'practice' AND interface_text = 0 ORDER BY timestamp")
+    @Query("SELECT * FROM game_lines WHERE screenshot_path IS NOT NULL AND created_at < :before AND source != 'practice' AND interface_text = 0 ORDER BY timestamp, rowid")
     suspend fun withPicturesBefore(before: Long): List<GameLine>
 
     /** The line of a game read just before [before]: the picture before, for a diary entry. */
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp < :before AND screenshot_path IS NOT NULL AND source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC LIMIT 1")
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp < :before AND screenshot_path IS NOT NULL AND source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC, rowid DESC LIMIT 1")
     suspend fun pictureBefore(gameId: String, before: Double): GameLine?
 
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp > :after AND screenshot_path IS NOT NULL AND source != 'practice' AND interface_text = 0 ORDER BY timestamp LIMIT 1")
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp > :after AND screenshot_path IS NOT NULL AND source != 'practice' AND interface_text = 0 ORDER BY timestamp, rowid LIMIT 1")
     suspend fun pictureAfter(gameId: String, after: Double): GameLine?
 
     /** The screens of these lines that are still kept. */
@@ -92,15 +92,15 @@ interface LineDao {
     suspend fun setTranslation(id: String, text: String)
 
     /** The lines of a game read before [before], newest first: what a translation is given as context. */
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp < :before AND source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC LIMIT :count")
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp < :before AND source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC, rowid DESC LIMIT :count")
     suspend fun before(gameId: String, before: Double, count: Int): List<GameLine>
 
     /** A game's lines in the order they were read. */
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND source != 'practice' AND interface_text = 0 ORDER BY timestamp")
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND source != 'practice' AND interface_text = 0 ORDER BY timestamp, rowid")
     suspend fun ofGame(gameId: String): List<GameLine>
 
     /** Every line in the order it was read: for a lines file. */
-    @Query("SELECT * FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp")
+    @Query("SELECT * FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp, rowid")
     suspend fun all(): List<GameLine>
 
     @Query("UPDATE game_lines SET note_ids = :noteIds, last_modified = :now WHERE id = :id")

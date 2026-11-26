@@ -74,6 +74,47 @@ class EnginesTest {
         assertEquals(listOf("横", "右", "左"), ScreenAi.ordered(mixed).map { it.text })
     }
 
+    @Test
+    fun aRowCutAtItsSpacesIsOneRowAgain() {
+        fun line(text: String, left: Int, top: Int, right: Int, bottom: Int): io.github.beesan.lfg.core.TextLine {
+            // Each character in a cell of its own, as wide as the others.
+            val cell = (right - left) / text.length
+            val chars = text.indices.map { io.github.beesan.lfg.core.CharBox(it, it + 1, io.github.beesan.lfg.core.Box(left + it * cell, top, left + (it + 1) * cell, bottom)) }
+            return io.github.beesan.lfg.core.TextLine(text, io.github.beesan.lfg.core.Box(left, top, right, bottom), chars)
+        }
+        fun read(vararg found: io.github.beesan.lfg.core.TextLine) = ScreenAi.joined(ScreenAi.ordered(found.toList()))
+        // Pokémon Let's Go on an AYN Thor, a word at a time: two rows, not columns of words.
+        val words = read(
+            line("タイプの", 395, 884, 593, 935), line("相性を", 665, 884, 808, 933),
+            line("知っている", 395, 974, 640, 1020), line("トレーナー", 707, 974, 956, 1016), line("でないと", 1022, 968, 1218, 1016),
+        )
+        assertEquals(listOf("タイプの 相性を", "知っている トレーナー でないと"), words.map { it.text })
+        assertEquals(io.github.beesan.lfg.core.Box(395, 968, 1218, 1020), words[1].box)
+        // Each character keeps its place, after the space.
+        assertEquals("ト", words[1].text.substring(words[1].chars[5].start, words[1].chars[5].end))
+        assertEquals(707, words[1].chars[5].box.left)
+        assertEquals(listOf("タイプの 相性を知っている トレーナー でないと"), Blocks.group(words).map { it.text })
+        // A word of small kana is lower than its row, and still of it.
+        assertEquals(listOf("いつ 来ても"), read(line("いつ", 403, 893, 495, 929), line("来ても", 558, 885, 702, 932)).map { it.text })
+        assertEquals(listOf("あのう…… この 森に"), read(line("あのう……", 397, 891, 654, 931), line("この", 724, 888, 812, 931), line("森に", 880, 885, 979, 933)).map { it.text })
+        // A sentence that ends in the middle of a row.
+        assertEquals(listOf("「え? あの男って理事長の息子なの?」"), read(line("「え?", 343, 865, 454, 914), line("あの男って理事長の息子なの?」", 522, 864, 1258, 916)).map { it.text })
+        // A menu's buttons are further apart than words are.
+        assertEquals(listOf("ポケモン", "バッグ"), read(line("ポケモン", 1538, 946, 1684, 986), line("バッグ", 1756, 945, 1868, 983)).map { it.text })
+        // A speaker's name beside what is said stays a piece of its own.
+        assertEquals(listOf("果音", "「仕方ないなぁ。私が手伝ってあげるよ」"), read(line("果音", 184, 781, 343, 837), line("「仕方ないなぁ。私が手伝ってあげるよ」", 434, 781, 1566, 845)).map { it.text })
+        assertEquals(listOf("【純夏】", "「まだ言ってる……」"), read(line("【純夏】", 624, 973, 768, 1023), line("「まだ言ってる……」", 828, 980, 1289, 1029)).map { it.text })
+        // A piece begun on the end of the one before it, its first character read twice.
+        assertEquals(
+            listOf("ふたりで 冒険を 楽しもう!"),
+            read(line("ふたりで", 402, 858, 590, 906), line("冒険を", 660, 857, 807, 905), line("を 楽しもう!", 773, 857, 1101, 907)).map { it.text },
+        )
+        // Two pieces over one another that are not the same text stay two.
+        assertEquals(listOf("冒険を", "に 楽しもう!"), read(line("冒険を", 660, 857, 807, 905), line("に 楽しもう!", 773, 857, 1101, 907)).map { it.text })
+        // Small print beside a line is not the line's.
+        assertEquals(listOf("とても大きい", "注"), read(line("とても大きい", 200, 800, 500, 850), line("注", 530, 820, 550, 840)).map { it.text })
+    }
+
     /** A ScreenAI line: each symbol with its left edge and width, all [height] tall at y=100. */
     private fun read(vararg symbols: Pair<String, IntRange>, height: Int = 50): Pair<String, List<io.github.beesan.lfg.core.CharBox>> {
         val text = StringBuilder()

@@ -22,7 +22,7 @@ import java.util.zip.ZipInputStream
 class ScreenAi private constructor() {
     fun read(frame: Frame): List<TextLine> {
         val bytes = nativeRead(frame.argb, frame.width, frame.height) ?: error("ScreenAI could not read the frame.")
-        return ordered(decode(bytes))
+        return joined(ordered(decode(bytes)))
     }
 
     companion object {
@@ -76,6 +76,95 @@ class ScreenAi private constructor() {
             }
             out += columns.sortedWith(compareBy({ -it.box.right }, { it.box.top }))
             return out
+        }
+
+        /**
+         * How wide a space between two pieces of one row may be, in characters of their type, for them to be
+         * one row: on 260 screens of Pokémon Let's Go kept on an AYN Thor the space between two words was 1.0 to
+         * 1.55, and from one button of a menu to the next 1.8 and more.
+         */
+        private const val SPACE = 1.65f
+
+        /** The least one piece's height may be of the other's for both to be the same type: a row of small kana is 0.75 of one with kanji. */
+        private const val SAME_TYPE = 0.7f
+
+        private const val OPENS = "「『（(【“\""
+
+        /**
+         * The rows the library cut at a space, whole again. A game that sets its words apart, as Pokémon
+         * does, is given back whole on one picture and a word at a time on the next (「タイプの」「相性を」), and
+         * a line in which a sentence ends, cut after its ! or ?. A word alone is no line: under one
+         * another, the words of two rows read as columns, and a short one is taken for a menu's label.
+         *
+         * [lines] are in reading order ([ordered]). A piece goes on the one before it when both are on one
+         * row in the same type and no more than a space apart ([SPACE]); they are joined with the space the
+         * library itself puts after a word. A speaker's name stays apart from what is said beside it: speech
+         * that opens with a bracket the piece before has none of, or a name in 【】.
+         */
+        internal fun joined(lines: List<TextLine>): List<TextLine> {
+            val out = ArrayList<TextLine>(lines.size)
+            for (line in lines) {
+                val last = out.lastOrNull()
+                val from = if (last == null) -1 else goesOn(last, line)
+                if (last == null || from < 0) {
+                    out += line
+                    continue
+                }
+                // Whole, it follows a space; what is left of a piece whose first characters were read twice follows as it is.
+                val head = if (from == 0) last.text + " " else last.text
+                val offset = head.length - from
+                out[out.lastIndex] = TextLine(
+                    head + line.text.substring(from), last.box.union(line.box),
+                    last.chars + line.chars.filter { it.start >= from }.map { CharBox(it.start + offset, it.end + offset, it.box) },
+                )
+            }
+            return out
+        }
+
+        /**
+         * Whether [next] is the rest of [line]'s row: beside it, in the same type, a space away at most. -1 when
+         * it is not; else where in its text what it adds begins: 0, but for a piece the library began on the end
+         * of the one before, reading a character or two twice (「冒険を」 and then 「を　楽しもう!」).
+         */
+        private fun goesOn(line: TextLine, next: TextLine): Int {
+            if (line.vertical || next.vertical) return -1
+            val a = line.box
+            val b = next.box
+            val low = minOf(a.height, b.height)
+            val tall = maxOf(a.height, b.height)
+            if (low <= 0 || low < SAME_TYPE * tall) return -1
+            if (minOf(a.bottom, b.bottom) - maxOf(a.top, b.top) < 0.6f * low) return -1
+            val size = maxOf(pitch(line, next, tall), tall.toFloat())
+            val gap = b.left - a.right
+            if (gap > SPACE * size) return -1
+            val opens = next.text.trimStart().firstOrNull()
+            if (opens != null && opens in OPENS && line.text.none { it in OPENS }) return -1
+            val name = line.text.trim()
+            if (name.startsWith('【') && name.endsWith('】')) return -1
+            if (gap >= -0.25f * size) return 0
+            val twice = next.chars.sortedBy { it.start }.takeWhile { it.box.left + it.box.right < 2 * a.right }
+            if (twice.isEmpty() || twice.size == next.chars.size || twice[0].start != 0) return -1
+            val end = twice.last().end
+            return if (line.text.endsWith(next.text.substring(0, end))) end else -1
+        }
+
+        /**
+         * From one character to the next in [a] and [b], middle to middle: the cell their type is set in, which a
+         * row of small kana is as wide as any other though it is not as tall. 0 when it cannot be told, or is
+         * nothing like the [height] of the rows (letters, which are narrow).
+         */
+        private fun pitch(a: TextLine, b: TextLine, height: Int): Float {
+            val steps = ArrayList<Float>()
+            for (line in listOf(a, b)) {
+                line.chars.sortedBy { it.start }.zipWithNext { c, d ->
+                    val step = (d.box.left + d.box.right - c.box.left - c.box.right) / 2f
+                    if (c.end == d.start && step > 0) steps += step
+                }
+            }
+            val least = steps.minOrNull() ?: return 0f
+            val near = steps.filter { it <= 1.5f * least }.sorted()
+            val pitch = near[near.size / 2]
+            return if (pitch >= 0.6f * height && pitch <= 1.6f * height) pitch else 0f
         }
 
         /**

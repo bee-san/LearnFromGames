@@ -128,6 +128,10 @@ class LfgAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         app = application as App
+        // LFG has just updated itself, which closed its pages: they open again, as only an app with a service like this may.
+        if (io.github.beesan.lfg.core.Updates.reopens(this)) {
+            packageManager.getLaunchIntentForPackage(packageName)?.let { runCatching { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+        }
         pipeline = ReadingPipeline(
             app.lines, File(filesDir, "frames"),
             apart = { app.settings.prefs.value.interfaceApart },
@@ -1313,6 +1317,14 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** When they last stood aside for nothing: the clean picture had the same text. Not tried again for a while. */
     private var asideForNothing = 0L
+        set(value) {
+            // Twice as long after each time in a row, until something is read: a screen that keeps looking changed blinks less and less.
+            asideWait = if (value == 0L) ASIDE_AGAIN_MS else if (field == 0L) asideWait else (asideWait * 2).coerceAtMost(ASIDE_AGAIN_MOST_MS)
+            field = value
+        }
+
+    /** How long after standing aside for nothing they do not again. */
+    private var asideWait = ASIDE_AGAIN_MS
 
     /** The reading the readings over the text were over when they last stood aside. */
     private var marksAsideFrom: Reading? = null
@@ -1384,6 +1396,7 @@ class LfgAccessibilityService : AccessibilityService() {
             // text the entry should be on (LookupController.setLines moves it there).
             val windowShot = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
             val shotAt = System.nanoTime()
+            val shotAtMs = android.os.SystemClock.uptimeMillis()
             val window = if (windowShot) uncopiedShot(now.windowId, null) else null
             val whole = window == null
             // No picture of the whole screen is any use while a box is being drawn on it, or the wheel is over it.
@@ -1396,6 +1409,12 @@ class LfgAccessibilityService : AccessibilityService() {
             // before Android 14) shows our mark and entry, and cannot be read: it is only watched for the text
             // around them changing. When it has, they stand aside for one clean picture, read as any other.
             val drawn = if (whole) overlays.drawnOn(now.displayId) else emptyList()
+            // Ours left the screen as this picture was taken, or a moment before: it may show them still (an
+            // entry closed that instant was read as the game's text, furigana and all). The next one will not.
+            if (whole && drawn.isEmpty() && shotAtMs - overlays.oursGoneAt < OURS_GONE_MS) {
+                frame.close()
+                continue
+            }
             if (drawn.isNotEmpty()) {
                 stillLooks = 0
                 try {
@@ -1406,7 +1425,7 @@ class LfgAccessibilityService : AccessibilityService() {
                         )
                     }
                     // A game whose picture never matches its last clean one would have them blink for ever.
-                    val lately = asideForNothing != 0L && android.os.SystemClock.uptimeMillis() - asideForNothing < ASIDE_AGAIN_MS
+                    val lately = asideForNothing != 0L && android.os.SystemClock.uptimeMillis() - asideForNothing < asideWait
                     if (changed && !lately && overlays.onlyTextMarks) {
                         // Furigana and the known words' strokes alone: they go until the new text is read,
                         // however long it takes to hold still, and are worked out again for it.
@@ -1855,8 +1874,14 @@ class LfgAccessibilityService : AccessibilityService() {
         /** The longest the mark and the entry stay off the screen for a clean picture of it. */
         private const val ASIDE_MS = 2_000L
 
+        /** How long after a window of ours left the screen a picture of the whole of it may still show it. */
+        private const val OURS_GONE_MS = 250L
+
         /** After standing aside for a picture that had nothing new, how long before they do again. */
         private const val ASIDE_AGAIN_MS = 10_000L
+
+        /** The longest that wait grows to, when they stand aside for nothing time after time. */
+        private const val ASIDE_AGAIN_MOST_MS = 160_000L
 
         /** How long a region read waits through a black screen before taking it for an app that blocks pictures. */
         private const val BLACK_GIVE_UP_MS = 15_000L

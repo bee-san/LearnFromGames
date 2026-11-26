@@ -210,6 +210,14 @@ class OverlayHost(
     /** True while the game's screen is covered by a box being drawn, the wheel or its card: a picture of the whole screen is no use. */
     val covering: Boolean get() = picker != null || wheelUp
 
+    /**
+     * When a window of ours last left a screen (uptime). The screen shows it a frame or two longer, and a
+     * picture asked for about then may have it still: the entry, read as the game's text.
+     */
+    @Volatile
+    var oursGoneAt = 0L
+        private set
+
     /** Where the mark and the entry are on the game's screen, in display pixels: what a picture of it shows of ours. */
     fun drawnOn(displayId: Int): List<Box> = if (displayId != gameDisplay) emptyList() else
         (marks + listOfNotNull(shade, popup)).filter { it.shown }.map { Box(it.x, it.y, it.x + it.width, it.y + it.height) } +
@@ -285,6 +293,7 @@ class OverlayHost(
         fun hide() {
             if (!shown) return
             shown = false
+            oursGoneAt = android.os.SystemClock.uptimeMillis()
             if (!added) return
             lp.x = 0
             lp.y = 0
@@ -333,6 +342,7 @@ class OverlayHost(
                 Log.w(TAG, "removing an overlay window failed", e)
             }
             added = false
+            if (shown) oursGoneAt = android.os.SystemClock.uptimeMillis()
             shown = false
         }
     }
@@ -1404,7 +1414,8 @@ class OverlayHost(
             val game = screen.firstOrNull()?.value?.gameName ?: state.lines.firstOrNull()?.gameName ?: session?.first
             val kept = history.filter { it.gameName == game }.take(HISTORY_SHOWN)
             val out = ArrayList<Row>()
-            for (line in kept) {
+            // Oldest first before sorting by time: pieces kept from one look at the screen share a time, and stay top to bottom.
+            for (line in kept.asReversed()) {
                 val at = screen.firstOrNull { it.value.lineId == line.id }
                 // On screen: its text as the screen has it, which the picked word's place is counted in.
                 out += Row(line.id, line.createdAt, at?.value?.text ?: line.lineText, saved = line, onScreen = at?.index ?: -1)

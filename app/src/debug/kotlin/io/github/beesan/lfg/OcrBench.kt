@@ -22,6 +22,10 @@ import java.io.File
  *
  *     adb shell am instrument -w -e engines screenai,vocr io.github.beesan.lfg/.OcrBench
  *
+ * `-e language ja` opens ScreenAI told the language, as the app does; without it each line's script is guessed.
+ * `-e clean false` leaves TextClean out, to see what a reader gave before it.
+ * `probe` is VOCR as the settle detector sees it (Vocr.text); run it with `-e clean false`.
+ *
  * `screenai-bands` is ScreenAI as the app reads with it: only the rows around what VOCR found (Bands), with
  * the stacking and the moving back in its time, but not VOCR's own look, which the app has made already.
  */
@@ -50,15 +54,17 @@ class OcrBench : Instrumentation() {
         val dir = File(context.getExternalFilesDir(null), "ocrbench")
         val wanted = (arguments?.getString("engines") ?: "screenai,vocr").split(',').map { it.trim() }
         val models = ModelStore(context)
+        val language = arguments?.getString("language") ?: ""
+        val clean = arguments?.getString("clean") != "false"
         val engines = LinkedHashMap<String, (Frame) -> List<TextLine>>()
         // What an engine is given before its clock starts.
         val prepare = HashMap<String, (Frame) -> Unit>()
         if ("screenai" in wanted) {
-            val engine = models.screenAiDir()?.let { ScreenAi.open(it) } ?: error("ScreenAI is not installed")
+            val engine = models.screenAiDir()?.let { ScreenAi.open(it, language) } ?: error("ScreenAI is not installed")
             engines["screenai"] = engine::read
         }
         if ("screenai-bands" in wanted) {
-            val engine = models.screenAiDir()?.let { ScreenAi.open(it) } ?: error("ScreenAI is not installed")
+            val engine = models.screenAiDir()?.let { ScreenAi.open(it, language) } ?: error("ScreenAI is not installed")
             val vocr = Vocr.open(context) ?: error("VOCR could not open")
             var found: List<Box>? = null
             var of: Frame? = null
@@ -75,6 +81,11 @@ class OcrBench : Instrumentation() {
             val vocr = Vocr.open(context) ?: error("VOCR could not open")
             engines["vocr"] = { frame -> vocr.read(frame).map { TextLine(it.text, it.box, emptyList()) } }
         }
+        if ("probe" in wanted) {
+            // What the settle detector is given: VOCR's rows less what a moving picture makes of the spotter.
+            val vocr = Vocr.open(context) ?: error("VOCR could not open")
+            engines["probe"] = { frame -> Vocr.text(vocr.read(frame)).map { TextLine(it.text, it.box, emptyList()) } }
+        }
         val files = dir.listFiles { f -> f.name.endsWith(".png") }!!.sortedBy { it.name }
         val out = File(dir, "results.jsonl").bufferedWriter()
         // One untimed read each first, so loading the models is not counted against the first picture.
@@ -84,7 +95,7 @@ class OcrBench : Instrumentation() {
             for ((name, read) in engines) {
                 prepare[name]?.invoke(frame)
                 val start = System.nanoTime()
-                val lines = read(frame).mapNotNull(TextClean::line)
+                val lines = read(frame).let { rows -> if (clean) rows.mapNotNull(TextClean::line) else rows }
                 val ms = (System.nanoTime() - start) / 1e6
                 out.write("{\"file\":${json(file.name)},\"engine\":\"$name\",\"ms\":${"%.2f".format(ms)},\"lines\":${dump(lines)}}\n")
             }
