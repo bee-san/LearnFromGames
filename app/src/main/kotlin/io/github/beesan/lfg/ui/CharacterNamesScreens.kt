@@ -204,10 +204,34 @@ fun VnSearchScreen(
     if (game != null && game.vndb != Game.VNDB_NONE) LfgButton("Not a visual novel", onDecline)
 }
 
-/** Settings › Character names. */
+/** Settings › Character names: each game's visual novel, chosen here by hand, and how names are built. */
 @Composable
-fun CharacterNamesScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: () -> Unit) = Page("Character names", onBack) {
+fun CharacterNamesScreen(
+    prefs: Prefs,
+    games: List<Game>,
+    title: (String) -> String?,
+    builds: Map<String, CharacterNames.Build>,
+    onChoose: (Game) -> Unit,
+    onChange: ((Prefs) -> Prefs) -> Unit,
+    onBack: () -> Unit,
+) = Page("Character names", onBack) {
     Hint("A visual novel's cast from VNDB, for that game's lookups")
+    Group("Your games") {
+        if (games.isEmpty()) Hint("Games show here once played")
+        for (game in games) {
+            val vn = game.linkedVn
+            val detail = when {
+                vn != null && builds[vn] is CharacterNames.Build.Running -> "${title(vn) ?: vn} · building"
+                vn != null && builds[vn] is CharacterNames.Build.Failed -> "${title(vn) ?: vn} · not built"
+                vn != null -> title(vn) ?: vn
+                game.vndb == Game.VNDB_NONE -> "Not a visual novel"
+                else -> "No visual novel chosen"
+            }
+            Card(game.title, detail) {
+                LfgButton(if (vn != null) "Change…" else "Choose…", { onChoose(game) })
+            }
+        }
+    }
     Group("Visual novels") {
         Card("Find visual novels by themselves", "By Steam ID, or title, platform and release") {
             Switch(prefs.namesAuto) { v -> onChange { it.copy(namesAuto = v) } }

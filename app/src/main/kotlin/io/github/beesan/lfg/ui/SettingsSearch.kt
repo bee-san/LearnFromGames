@@ -170,6 +170,7 @@ object SettingsIndex {
             setting("Ask Steam", "Asks Steam what you are playing now", "test check try")
         },
         page(Page.CHARACTER_NAMES, "Character names", "A visual novel's cast from VNDB, so its names look up as its characters", "vn people") {
+            setting("Your games", "Choose the visual novel you are reading by hand", "vn manual link search choose pick add vndb")
             setting("Find visual novels by themselves", "Links a game when its Steam ID matches, or its title, platform and a Japanese release all do", "automatic auto link")
             setting("Names with honorifics", "さん, くん and about 270 more endings look up as one word", "san kun chan sama suffix")
             setting("Show spoilers", "Descriptions and traits VNDB marks as spoilers", "hide")
@@ -250,7 +251,7 @@ object SettingsIndex {
 
 /** Where a setting is searched for: one line, with a button that empties it once something is typed. */
 @Composable
-fun SettingsSearchField(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier) {
+fun SettingsSearchField(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier, placeholder: String = "Search settings") {
     val shape = RoundedCornerShape(14.dp)
     val keyboard = LocalSoftwareKeyboardController.current
     val input = LocalInputModeManager.current
@@ -268,7 +269,7 @@ fun SettingsSearchField(query: String, onQuery: (String) -> Unit, modifier: Modi
                 .padding(horizontal = 12.dp, vertical = 12.dp),
             decorationBox = { inner ->
                 Box {
-                    if (query.isEmpty()) Text("Search settings", color = Lfg.Dim, fontSize = 16.sp)
+                    if (query.isEmpty()) Text(placeholder, color = Lfg.Dim, fontSize = 16.sp)
                     inner()
                 }
             },

@@ -143,6 +143,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val games: StateFlow<List<Game>> =
         app.database.games().all().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Every game and app, the one read last first; those never read after, by name. */
+    val recentGames: StateFlow<List<Game>> = combine(games, app.database.lines().gamesByLastRead()) { all, order ->
+        val rank = order.withIndex().associate { (i, id) -> id to i }
+        all.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val stats: StateFlow<StatsState> = combine(
         app.database.lines().stamps(), app.database.cards().madeByGame(), app.database.games().appIds(),
         app.settings.prefs.map { it.appsInReadingTime }.distinctUntilChanged(),
@@ -906,6 +912,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val error: String? = null,
         val searched: Boolean = false,
     )
+
+    /** Games that can have a visual novel (not ordinary apps), the one read last first. */
+    val namesGames: StateFlow<List<Game>> = recentGames.map { all -> all.filter { !it.app && it.packageName != app.packageName } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _vnSearch = MutableStateFlow(VnSearch())
     val vnSearch: StateFlow<VnSearch> = _vnSearch

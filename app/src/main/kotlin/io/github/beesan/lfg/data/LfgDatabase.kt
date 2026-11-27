@@ -25,6 +25,10 @@ interface LineDao {
     @Query("SELECT * FROM game_lines WHERE source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC, rowid DESC LIMIT :limit")
     fun recent(limit: Int): Flow<List<GameLine>>
 
+    /** Every game with lines, the one read last first. */
+    @Query("SELECT game_id FROM game_lines WHERE source != 'practice' GROUP BY game_id ORDER BY MAX(timestamp) DESC")
+    fun gamesByLastRead(): Flow<List<String>>
+
     /** A game's last lines, newest first, its interface text left out: what a piece just read is held against. */
     @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND interface_text = 0 AND source != 'practice' ORDER BY created_at DESC, rowid DESC LIMIT :limit")
     suspend fun lastLines(gameId: String, limit: Int): List<GameLine>

@@ -163,6 +163,8 @@ class MainActivity : ComponentActivity() {
             var statsGamePeriod by rememberSaveable { mutableStateOf(StatsPeriod.DAYS_30) }
             // Where an entry's writing page was opened from, so leaving it returns there.
             var writeFrom by rememberSaveable { mutableStateOf(Page.DIARY) }
+            // Where a visual novel's search was opened from, a game's card or Character names, so it returns there.
+            var vnSearchFrom by rememberSaveable { mutableStateOf(Page.GAMES) }
             val openDiary = {
                 model.diary.load()
                 page = Page.DIARY
@@ -229,7 +231,8 @@ class MainActivity : ComponentActivity() {
                     Page.DIARY_WRITE -> writeFrom
                     Page.DIARY_SHARE -> Page.DIARY_ENTRY
                     Page.SOURCES -> Page.DICTIONARIES
-                    Page.VN_SEARCH, Page.BOX_DRAW -> Page.GAMES
+                    Page.VN_SEARCH -> vnSearchFrom
+                    Page.BOX_DRAW -> Page.GAMES
                     Page.GOALS, Page.GAME_STATS -> Page.STATS
                     Page.HOME -> Page.HOME
                     else -> Page.SETTINGS
@@ -659,8 +662,9 @@ class MainActivity : ComponentActivity() {
                         page == Page.GAMES -> {
                             val allProfiles by model.profiles.collectAsStateWithLifecycle()
                             val gameProfiles by model.gameProfiles.collectAsStateWithLifecycle()
+                            val recentGames by model.recentGames.collectAsStateWithLifecycle()
                             GamesScreen(
-                                games, packageName, { model.updateGame(it) }, ::back,
+                                recentGames, packageName, { model.updateGame(it) }, ::back,
                                 boxes = dialogueBoxes, extraBoxes = extraBoxes, picture = model::lastPicture,
                                 onDrawBox = { game, slot ->
                                     model.startBoxDraw(game, slot)
@@ -674,6 +678,7 @@ class MainActivity : ComponentActivity() {
                                     title = model::vnTitle,
                                     onSearch = { game ->
                                         model.startVnSearch(game)
+                                        vnSearchFrom = Page.GAMES
                                         page = Page.VN_SEARCH
                                     },
                                     onAccept = { model.acceptVn(it) },
@@ -704,16 +709,27 @@ class MainActivity : ComponentActivity() {
                                 game, vnSearch, model::searchVn,
                                 onPick = {
                                     model.pickVn(it)
-                                    page = Page.GAMES
+                                    page = vnSearchFrom
                                 },
                                 onDecline = {
                                     game?.let(model::declineVn)
-                                    page = Page.GAMES
+                                    page = vnSearchFrom
                                 },
                                 onBack = ::back,
                             )
                         }
-                        page == Page.CHARACTER_NAMES -> CharacterNamesScreen(prefs, model::updatePrefs, ::back)
+                        page == Page.CHARACTER_NAMES -> {
+                            val namesGames by model.namesGames.collectAsStateWithLifecycle()
+                            CharacterNamesScreen(
+                                prefs, namesGames, model::vnTitle, nameBuilds,
+                                onChoose = { game ->
+                                    model.startVnSearch(game)
+                                    vnSearchFrom = Page.CHARACTER_NAMES
+                                    page = Page.VN_SEARCH
+                                },
+                                onChange = model::updatePrefs, onBack = ::back,
+                            )
+                        }
                         page == Page.GAME_NAMES -> GameNamesScreen(
                             prefs = prefs,
                             status = gameNameStatus,

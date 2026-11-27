@@ -688,9 +688,17 @@ fun GamesScreen(
     /** The profile a game changes to ([GameProfileRow]), under how it is read. */
     profileRow: @Composable (Game) -> Unit = {},
 ) = Page("Games and apps", onBack) {
-    val list = games.filter { it.packageName != ownPackage }
-    if (list.isEmpty()) Hint("Nothing read yet · games show here once played")
-    val apps = list.filter { it.detected.isEmpty() }.associate { it.packageName to it.title }
+    val all = games.filter { it.packageName != ownPackage }
+    if (all.isEmpty()) Hint("Nothing read yet · games show here once played")
+    val apps = all.filter { it.detected.isEmpty() }.associate { it.packageName to it.title }
+    var query by rememberSaveable { mutableStateOf("") }
+    if (all.size > 1) SettingsSearchField(query, { query = it }, placeholder = "Search games and apps")
+    val words = query.trim()
+    val list = if (words.isEmpty()) all else all.filter { game ->
+        game.title.contains(words, ignoreCase = true) || game.packageName.contains(words, ignoreCase = true) ||
+            apps[game.packageName]?.contains(words, ignoreCase = true) == true
+    }
+    if (all.isNotEmpty() && list.isEmpty()) Hint("Nothing by that name")
     for (game in list) {
         var title by remember(game.id) { mutableStateOf(game.title) }
         val shape = RoundedCornerShape(18.dp)
