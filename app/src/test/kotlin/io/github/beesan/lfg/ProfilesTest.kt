@@ -2,6 +2,7 @@
 package io.github.beesan.lfg
 
 import io.github.beesan.lfg.backup.Backup
+import io.github.beesan.lfg.core.GameArrivals
 import io.github.beesan.lfg.core.KeptProfile
 import io.github.beesan.lfg.core.ProfileRules
 import org.junit.Assert.assertEquals
@@ -105,5 +106,73 @@ class ProfilesTest {
         assertFalse(Backup.profiles("profile-.xml"))
         assertFalse(Backup.profiles("profile-2.xml.bak"))
         assertFalse(Backup.profiles("../profile-2.xml"))
+    }
+
+    private val three = listOf(KeptProfile("1", 1), KeptProfile("2", 2), KeptProfile("5", 3))
+
+    @Test
+    fun `a game changes to its profile, and leaves the one in use when it has none`() {
+        val links = mapOf("vn" to "2", "rpg" to "1")
+        assertEquals("2", ProfileRules.forGame(links, "vn", null, three, "1"))
+        assertNull(ProfileRules.forGame(links, "vn", null, three, "2"))
+        assertNull(ProfileRules.forGame(links, "other", null, three, "1"))
+        assertEquals("1", ProfileRules.forGame(links, "rpg", null, three, "5"))
+    }
+
+    @Test
+    fun `a game named in an emulator has its own profile, else the emulator's`() {
+        val links = mapOf("retroarch" to "5", "named" to "2")
+        assertEquals("2", ProfileRules.forGame(links, "named", "retroarch", three, "1"))
+        assertEquals("5", ProfileRules.forGame(links, "unnamed", "retroarch", three, "1"))
+        assertNull(ProfileRules.forGame(links, "unnamed", "other", three, "1"))
+    }
+
+    @Test
+    fun `a deleted profile, or only one, changes nothing`() {
+        assertNull(ProfileRules.forGame(mapOf("vn" to "9"), "vn", null, three, "1"))
+        // Its own is gone: the emulator's still counts.
+        assertEquals("5", ProfileRules.forGame(mapOf("vn" to "9", "host" to "5"), "vn", "host", three, "1"))
+        assertNull(ProfileRules.forGame(mapOf("vn" to "1"), "vn", null, listOf(ProfileRules.FIRST), "2"))
+    }
+
+    @Test
+    fun `games' profiles are read from beside the list, and nothing else is`() {
+        val kept = mapOf("list" to "[]", "active" to "2", "anki.2" to "deck", "game.abc-1" to "2", "game." to "1", "game.x" to "", "game.y" to 3)
+        assertEquals(mapOf("abc-1" to "2"), ProfileRules.links(kept))
+    }
+
+    @Test
+    fun `a game counts as come once, until another has come`() {
+        val arrivals = GameArrivals()
+        assertFalse(arrivals.arrived(null))
+        assertTrue(arrivals.arrived("a"))
+        assertFalse(arrivals.arrived("a"))
+        // Gone behind LFG's pages and back: still the same game, and a profile picked by hand meanwhile stays.
+        assertFalse(arrivals.arrived(null))
+        assertFalse(arrivals.arrived("a"))
+        assertTrue(arrivals.arrived("b"))
+        assertTrue(arrivals.arrived("a"))
+    }
+
+    @Test
+    fun `a game named in an emulator losing its name is not a new game`() {
+        val arrivals = GameArrivals()
+        assertTrue(arrivals.arrived("retroarch", "retroarch"))
+        assertTrue(arrivals.arrived("retroarch:pokemon", "retroarch"))
+        // The name is lost for a look, then found: neither changes the profile again.
+        assertFalse(arrivals.arrived("retroarch", "retroarch"))
+        assertTrue(arrivals.arrived("retroarch:pokemon", "retroarch"))
+        // Another app, then the emulator again: that is a change.
+        assertTrue(arrivals.arrived("eden", "eden"))
+        assertTrue(arrivals.arrived("retroarch", "retroarch"))
+    }
+
+    @Test
+    fun `a game given a profile takes it up as it next comes, though it was the last played`() {
+        val arrivals = GameArrivals()
+        assertTrue(arrivals.arrived("a", "a"))
+        assertFalse(arrivals.arrived("a", "a"))
+        arrivals.forget()
+        assertTrue(arrivals.arrived("a", "a"))
     }
 }

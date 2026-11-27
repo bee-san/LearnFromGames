@@ -214,42 +214,135 @@ class AnkiBridge(private val context: Context) {
         return api.updateNoteFields(noteId, fields)
     }
 
+    /** What [knowing] found, by where it looked and the word ([knowingKey]), with when. */
     private val knowings = HashMap<String, Pair<Long, Knowing>>()
 
+    private fun knowingKey(everywhere: Boolean, target: AnkiTarget?, expression: String) =
+        (if (everywhere) "*" else target?.modelId.toString()) + '\u0000' + expression
+
+    private val _added = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    /** Goes up each time a note is added here, so Known words marks its word again at once. */
+    val added: kotlinx.coroutines.flow.StateFlow<Int> = _added
+
     /**
-     * How well Anki knows each of [expressions], by the notes of the note type
-     * cards go to: mature once a card of it has an interval of three weeks,
-     * learning while it has a card that has not, new with none. Remembered for
-     * a few minutes, as a line is asked about again each time it is read.
+     * How well Anki knows each of [expressions]: mature once a card has an
+     * interval of three weeks, learning while it has a card that has not, new
+     * with none. [everywhere], by every note in Anki whose first field, or else
+     * any field, holds the word ([AnkiWords]); otherwise by the first field of
+     * the notes of [target]'s note type, the one cards go to. Remembered for a
+     * few minutes, as a line is asked about again each time it is read; all the
+     * words not remembered are asked about together.
      */
-    fun knowing(target: AnkiTarget, expressions: Collection<String>): Map<String, Knowing> {
+    fun knowing(target: AnkiTarget?, expressions: Collection<String>, everywhere: Boolean): Map<String, Knowing> {
+        if (!everywhere && target == null) return emptyMap()
         val now = android.os.SystemClock.uptimeMillis()
-        return expressions.associateWith { expression ->
-            synchronized(knowings) { knowings[expression]?.takeIf { now - it.first < KNOWING_MS }?.second } ?: run {
-                val note = api.findDuplicateNotes(target.modelId, expression)?.firstOrNull()?.id
-                val found = when {
-                    note == null -> Knowing.NEW
-                    hasNotes("nid:$note prop:ivl>=$MATURE_DAYS") -> Knowing.MATURE
-                    else -> Knowing.LEARNING
-                }
-                synchronized(knowings) { knowings[expression] = now to found }
-                found
+        val known = HashMap<String, Knowing>()
+        val asking = ArrayList<String>()
+        synchronized(knowings) {
+            for (expression in expressions.distinct()) {
+                val kept = knowings[knowingKey(everywhere, target, expression)]?.takeIf { now - it.first < KNOWING_MS }?.second
+                if (kept != null) known[expression] = kept else asking += expression
             }
         }
+        if (asking.isEmpty()) return known
+        val notes = if (everywhere) notesAnywhere(asking) else notesOf(target!!, asking)
+        val mature = matureOf(notes.values.flatten())
+        synchronized(knowings) {
+            for (expression in asking) {
+                val ids = notes[expression]
+                val found = when {
+                    ids.isNullOrEmpty() -> Knowing.NEW
+                    ids.any { it in mature } -> Knowing.MATURE
+                    else -> Knowing.LEARNING
+                }
+                knowings[knowingKey(everywhere, target, expression)] = now to found
+                known[expression] = found
+            }
+        }
+        return known
     }
 
-    private fun hasNotes(search: String): Boolean =
-        context.contentResolver.query(FlashCardsContract.Note.CONTENT_URI, arrayOf(FlashCardsContract.Note._ID), search, null, null)
-            ?.use { it.moveToFirst() } == true
+    /** The notes of [target]'s note type whose first field is each of [words], as AnkiDroid's duplicate check finds them. */
+    private fun notesOf(target: AnkiTarget, words: List<String>): Map<String, List<Long>> {
+        val out = HashMap<String, List<Long>>()
+        for (chunk in words.chunked(KNOWING_BATCH)) {
+            val found = api.findDuplicateNotes(target.modelId, chunk) ?: continue
+            for (i in 0 until found.size()) {
+                val word = chunk.getOrNull(found.keyAt(i)) ?: continue
+                out[word] = found.valueAt(i).mapNotNull { it?.id }
+            }
+        }
+        return out
+    }
 
-    /** Adds the note and returns its id, or null when AnkiDroid refuses it. */
+    /**
+     * The notes of any note type holding each of [words]: first by their first
+     * field's checksum, which Anki indexes; then, for the words that found none,
+     * in any field, with one search over every note ([AnkiWords.anyField]).
+     */
+    private fun notesAnywhere(words: List<String>): Map<String, MutableSet<Long>> {
+        val out = HashMap<String, MutableSet<Long>>()
+        val projection = arrayOf(FlashCardsContract.Note._ID, FlashCardsContract.Note.FLDS)
+        for (chunk in words.chunked(KNOWING_BATCH)) {
+            val byKey = chunk.associateBy { it.lowercase() }
+            context.contentResolver.query(FlashCardsContract.Note.CONTENT_URI_V2, projection, AnkiWords.byChecksum(chunk), null, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    // A checksum can be shared: the field itself must be the word.
+                    val word = cursor.getString(1)?.let { byKey[AnkiWords.firstField(it).lowercase()] }
+                    if (word != null) out.getOrPut(word) { HashSet() } += cursor.getLong(0)
+                }
+            }
+        }
+        for (chunk in words.filter { it !in out }.chunked(KNOWING_BATCH)) {
+            val byKey = chunk.associateBy { it.lowercase() }
+            // Null when nothing matches, as AnkiDroid answers a search that finds no note. An AnkiDroid that cannot
+            // take the search leaves these words to their first fields alone.
+            val cursor = try {
+                context.contentResolver.query(FlashCardsContract.Note.CONTENT_URI, projection, AnkiWords.anyField(chunk), null, null)
+            } catch (e: RuntimeException) {
+                android.util.Log.w("AnkiBridge", "searching every field failed", e)
+                null
+            }
+            cursor?.use { notes ->
+                while (notes.moveToNext()) {
+                    val id = notes.getLong(0)
+                    for (field in AnkiWords.fields(notes.getString(1).orEmpty())) {
+                        byKey[field.lowercase()]?.let { out.getOrPut(it) { HashSet() } += id }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /** Those of [noteIds] with a card of three weeks' interval or more. */
+    private fun matureOf(noteIds: Collection<Long>): Set<Long> {
+        val mature = HashSet<Long>()
+        for (chunk in noteIds.distinct().chunked(KNOWING_BATCH)) {
+            context.contentResolver.query(
+                FlashCardsContract.Note.CONTENT_URI, arrayOf(FlashCardsContract.Note._ID), AnkiWords.mature(chunk, MATURE_DAYS), null, null,
+            )?.use { cursor -> while (cursor.moveToNext()) mature += cursor.getLong(0) }
+        }
+        return mature
+    }
+
+    /** Adds the note and returns its id, or null when AnkiDroid refuses it. Its words are no longer remembered as new. */
     fun addNote(target: AnkiTarget, fields: Array<String>, tags: Set<String>): Long? =
-        api.addNote(target.modelId, target.deckId, fields, tags)
+        api.addNote(target.modelId, target.deckId, fields, tags)?.also {
+            // Which field holds the word depends on the note type: every field's text is forgotten, which is the word's among them.
+            val words = fields.mapTo(HashSet()) { AnkiWords.plain(it) }
+            synchronized(knowings) { knowings.keys.removeAll { it.substringAfter('\u0000') in words } }
+            _added.value++
+        }
 
     companion object {
         private const val KEY_TARGET = "target"
         private const val DECK_SAMPLE = 60
         private const val KNOWING_MS = 5 * 60_000L
+
+        /** Words asked about in one query: a screen's words fit in one. */
+        private const val KNOWING_BATCH = 50
         private const val MATURE_DAYS = 21
         const val PERMISSION = AddContentApi.READ_WRITE_PERMISSION
         const val ANKIDROID_PACKAGE = "com.ichi2.anki"

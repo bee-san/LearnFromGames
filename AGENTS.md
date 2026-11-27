@@ -23,7 +23,7 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 - `git submodule update --init --recursive`. Without `--recursive`, hoshidicts' own submodules (glaze, zstd, libdeflate…) are empty and CMake fails.
 - Copy `local.properties` from the main checkout (it points at the SDK in `~/.local/share/chimahon-android-sdk`).
 - **ScreenAI is not in git.** `app/src/main/jniLibs/<abi>/libchromescreenai.so` is ignored and made by `tools/build_screenai.sh`. Without it the APK builds fine but has no ScreenAI, and the app has no reader. Copy it from the main checkout, take it out of the release APK of the same tag, or run the script.
-- **Check every APK before installing it:** `unzip -l <apk> | grep '\.so'` must list `libchromescreenai.so`, `liblfg.so` and `libandroidx.graphics.path.so` (and ML Kit's `libtranslate_jni.so`, which Gradle brings by itself).
+- **Check every APK before installing it:** `unzip -l <apk> | grep '\.so'` must list `libchromescreenai.so`, `liblfg.so`, `liblfg_avif.so` and `libandroidx.graphics.path.so` (and ML Kit's `libtranslate_jni.so`, which Gradle brings by itself).
 
 ## Releases
 
@@ -72,6 +72,9 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 - To see what the readers make of real screens: push PNGs to the app's `ocrbench/` folder and run `OcrBench` (debug build). `-e language ja` reads as the app does, `-e clean false` leaves `TextClean` out, and the `probe` engine is VOCR as the settle detector sees it. The emulator's own corpus is in `ocrbench.vita/`: move it back when done.
 - A backup's `files/frames` are the screens the lines were read from, and `game_lines.box` says where: the way to reproduce a reading bug from the owner's own play.
 - Before Android 14 (the Thor) a picture is of the whole screen, entry and all. While a word is looked up the game is only watched (`ReadingPipeline.watch`), and the entry stands aside for a clean picture when the story's text changes. Only rows where the story is, or as long as a line, count (`telling`): over a picture that moves, the probe reads scraps that differ at each look, and the entry blinked.
+- **Card pictures are AVIF** (`anki/Avif.kt`, libavif and libaom in `liblfg_avif.so`, loaded only when a card is made); a WebP frame is kept when the AVIF is no smaller, and a moving picture stays animated WebP. Frames are WebP: encoding AVIF on the reading path would slow it.
+- Known words: your own list is a file a language (`files/known-words/<tag>.txt`, in every backup); "Look in all of Anki" (`Prefs.knownAllAnki`, off by default) asks AnkiDroid by first-field checksum, then a `*:re:` search of every field for what that missed. Not yet timed on the Thor with a big collection.
+- A frequency dictionary that counts words (`frequencyMode: occurrence-based`) takes no part in a word's average rank; one that says so but holds ranks (yomitanfrequencies.org) is marked as ranks when imported (Hachidori #684). Bee's Ultimate Kanji Dictionary's ranks are characters', used only for a tapped kanji (#724).
 - Lines kept from one look share a `timestamp`. Every query orders by `rowid` after it, and a list sorted by time afterwards starts oldest first, or the top row lands under the bottom one.
 - **Furigana is never text** (`Blocks.isFuriganaOf`, GameSentenceMiner's furigana filter with measured limits, always on): kana smaller than the row under it, tight over a kanji. It comes at up to 0.65 of its row's height; a speaker's name is as small but further off, so the larger it is the nearer it must be. Raising the size limit alone drops names.
 - A picture asked for as a window of ours leaves the screen may still show it: LFG's entry was read as the game's text, headword, reading and all. `OverlayHost.oursGoneAt` says when one last left, and a whole-screen picture from the quarter second after is let go.
@@ -128,6 +131,7 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 - **Tiles:** six `ProfileTile` services in the manifest, off until there are two profiles (`Profiles.syncTiles`). A tile redraws by watching `profiles.list` while it is listening: `TileService.requestListeningState` does nothing for them while the shade is open. Android 13 leaves the tile of a deleted profile greyed out in the shade until the user drags it away.
 - Changing to another language over a game reads that game's text as the new language. That is the user's to choose, not a bug to guard.
 - A backup carries `profiles.xml` and each `profile-*.xml`; one made before profiles puts back only `settings.xml`.
+- A game can have a profile (Settings › Games and apps), kept as `game.<id>` in the `profiles` store. The service changes to it once as the game comes to the front (`GameArrivals`): not again after LFG's pages or a lost emulator name, so a profile changed by hand mid-game stays; a link changed starts that afresh.
 
 ## Words the user reads
 

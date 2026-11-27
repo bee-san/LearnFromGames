@@ -65,6 +65,7 @@ class App : Application() {
     val dictionaries by lazy { DictionaryRepository(this) { Language.of(settings.prefs.value.language) } }
     val wordAudio by lazy { WordAudio(this) }
     val anki by lazy { AnkiBridge(this) }
+    val knownWords by lazy { KnownWords(this) }
     val settings by lazy { Settings(this) }
     val dialogueBoxes by lazy { DialogueBoxes(this) }
     val extraBoxes by lazy { ExtraBoxes(this) }

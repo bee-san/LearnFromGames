@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import io.github.beesan.lfg.Profile
 import io.github.beesan.lfg.core.Language
 import io.github.beesan.lfg.core.ProfileRules
+import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.dict.DictState
 
 /**
@@ -128,6 +131,24 @@ fun ProfilesScreen(
             is DictState.Ready -> {}
         }
     }
+}
+
+/**
+ * Settings › Games and apps: the profile a game changes to as it comes to the
+ * front, or none, to leave the one in use as it is. Only with two profiles to
+ * choose from, and not for an ordinary app, which is read only when asked.
+ */
+@Composable
+fun GameProfileRow(game: Game, profiles: List<Profile>, linked: String?, onPick: (String?) -> Unit) {
+    if (profiles.size < 2 || game.app) return
+    // A link to a profile since deleted is none.
+    val current = profiles.firstOrNull { it.id == linked }
+    HorizontalDivider(color = Lfg.Border)
+    Column {
+        Text("Profile", color = Lfg.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text(if (current == null) "Left as it is" else "Changes to it when played", color = Lfg.Dim, fontSize = 13.sp)
+    }
+    Choice(listOf("" to "Any") + profiles.map { it.id to it.shown }, current?.id.orEmpty()) { onPick(it.ifEmpty { null }) }
 }
 
 /** The one-line field a profile is named in. */

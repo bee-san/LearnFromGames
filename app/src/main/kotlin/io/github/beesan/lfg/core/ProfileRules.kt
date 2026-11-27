@@ -57,6 +57,29 @@ object ProfileRules {
         return profiles[(at + 1) % profiles.size]
     }
 
+    /** What a game's profile is kept under, beside the profiles' list. */
+    const val GAME_PREFIX = "game."
+
+    /** Each game given a profile, and the profile's id, from all that is kept beside the list. */
+    fun links(kept: Map<String, *>): Map<String, String> = buildMap {
+        for ((key, value) in kept) {
+            if (key.startsWith(GAME_PREFIX) && key.length > GAME_PREFIX.length && value is String && value.isNotEmpty()) put(key.removePrefix(GAME_PREFIX), value)
+        }
+    }
+
+    /**
+     * The profile to change to as the game [gameId] comes to the front: its
+     * own, else that of the app it runs in ([hostId], for a game named inside
+     * an emulator). Null leaves the one in use ([active]): when it already is,
+     * when neither has one, when it was deleted, or with only one profile.
+     */
+    fun forGame(links: Map<String, String>, gameId: String, hostId: String?, profiles: List<KeptProfile>, active: String): String? {
+        if (profiles.size < 2) return null
+        fun kept(id: String?) = id?.takeIf { p -> profiles.any { it.id == p } }
+        val wanted = kept(links[gameId]) ?: kept(hostId?.let { links[it] }) ?: return null
+        return wanted.takeIf { it != active }
+    }
+
     fun encode(profiles: List<KeptProfile>): String = buildJsonArray {
         for (p in profiles) addJsonObject {
             put("id", p.id)
@@ -81,5 +104,40 @@ object ProfileRules {
         found.takeIf { it.isNotEmpty() }
     } catch (_: Exception) {
         null
+    }
+}
+
+/**
+ * When a game has come to the front, to choose its profile once then and not
+ * again each look: not as it comes back after a window passed over it, nor
+ * after LFG's own pages, so a profile changed by hand while it is played
+ * stays. Another game coming first, it counts again.
+ */
+class GameArrivals {
+    private var last: String? = null
+    private var lastHost: String? = null
+
+    /**
+     * Whether [gameId], the game in front now (null for none), has just come
+     * there. [hostId] is the app it is played in, the same as [gameId] for a
+     * game that is an app of its own. A game named inside an emulator whose
+     * name is lost again, so the emulator itself is in front, has not changed:
+     * the name may come and go as the screen does, and the profile would go
+     * back and forth with it.
+     */
+    @Synchronized
+    fun arrived(gameId: String?, hostId: String? = null): Boolean {
+        if (gameId == null || gameId == last) return false
+        val nameLost = hostId == gameId && lastHost == hostId
+        last = gameId
+        lastHost = hostId
+        return !nameLost
+    }
+
+    /** The games' profiles were changed: whatever is in front next has come anew, and takes up its profile. */
+    @Synchronized
+    fun forget() {
+        last = null
+        lastHost = null
     }
 }

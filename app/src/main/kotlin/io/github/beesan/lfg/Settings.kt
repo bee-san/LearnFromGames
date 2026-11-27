@@ -152,6 +152,11 @@ data class Prefs(
     val furigana: Boolean = false,
     /** Words of a game's text are marked by their Anki card: Known words on the wheel. */
     val knownWords: Boolean = false,
+    /**
+     * Known words look in every note in Anki, of any deck or note type, for the word in a field
+     * of its own ([io.github.beesan.lfg.anki.AnkiWords]); off, only in the first field of the note type cards go to.
+     */
+    val knownAllAnki: Boolean = false,
     /** A game can have a wheel of its own ([Wheels]); the others use the shared one. */
     val wheelPerGame: Boolean = false,
     /** How long the shortcut is held before the wheel opens, in milliseconds. */
@@ -323,6 +328,7 @@ class Settings(context: Context) {
             language = store.getString("language", null) ?: if (store.getBoolean("keepDialogueAsked", false)) Language.JAPANESE.tag else d.language,
             furigana = store.getBoolean("furigana", d.furigana),
             knownWords = store.getBoolean("knownWords", d.knownWords),
+            knownAllAnki = store.getBoolean("knownAllAnki", d.knownAllAnki),
             wheelPerGame = store.getBoolean("wheelPerGame", d.wheelPerGame),
             wheelHoldMs = store.getInt("wheelHoldMs", d.wheelHoldMs),
             wheelOpenHeld = store.getBoolean("wheelOpenHeld", d.wheelOpenHeld),
@@ -415,6 +421,7 @@ class Settings(context: Context) {
             .putString("language", next.language)
             .putBoolean("furigana", next.furigana)
             .putBoolean("knownWords", next.knownWords)
+            .putBoolean("knownAllAnki", next.knownAllAnki)
             .putBoolean("wheelPerGame", next.wheelPerGame)
             .putInt("wheelHoldMs", next.wheelHoldMs)
             .putBoolean("wheelOpenHeld", next.wheelOpenHeld)

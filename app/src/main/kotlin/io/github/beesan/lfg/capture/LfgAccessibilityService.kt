@@ -38,8 +38,11 @@ import io.github.beesan.lfg.core.Ruby
 import io.github.beesan.lfg.core.WheelAction
 import io.github.beesan.lfg.core.WheelSlice
 import io.github.beesan.lfg.core.WordMark
+import io.github.beesan.lfg.core.Knowing
+import io.github.beesan.lfg.core.KnownWordList
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.GameLine
@@ -109,6 +112,9 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** The game in front, for the panel's heading; null when none is. */
     private val frontGame = MutableStateFlow<Game?>(null)
+
+    /** Which game came to the front last, so its profile ([io.github.beesan.lfg.Profiles.forGame]) is taken up once as it comes. */
+    private val arrivals = io.github.beesan.lfg.core.GameArrivals()
 
     /** The screens this app's own pages are in front on: the lines' screen gives way to them there. */
     private var ownAppOn: Set<Int> = emptySet()
@@ -233,12 +239,16 @@ class LfgAccessibilityService : AccessibilityService() {
                 }
             },
         )
-        // Furigana and Known words: worked out again for each new text on screen, and when either is switched.
+        // A game just given a profile takes it up as it is next in front, though it was the last game played.
+        scope.launch { app.profiles.games.drop(1).collect { arrivals.forget() } }
+        // Furigana and Known words: worked out again for each new text on screen, and when either is switched,
+        // where Known words looks changes, a card is made, or the list of known words is changed.
         scope.launch {
             combine(
                 controller.state.map { it.lines }.distinctUntilChanged(),
-                app.settings.prefs.map { it.furigana to it.knownWords }.distinctUntilChanged(),
-            ) { lines, (furigana, known) -> Triple(lines, furigana, known) }.collectLatest { (lines, furigana, known) ->
+                app.settings.prefs.map { Triple(it.furigana, it.knownWords, it.knownAllAnki to it.learning) }.distinctUntilChanged(),
+                combine(app.anki.added, app.knownWords.changed) { card, list -> card to list },
+            ) { lines, (furigana, known, _), _ -> Triple(lines, furigana, known) }.collectLatest { (lines, furigana, known) ->
                 overlays.onTextMarks(if (furigana || known) textMarks(lines, furigana, known) else emptyList())
             }
         }
@@ -560,7 +570,10 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun tileWhyNot(slice: WheelSlice, line: LookupLine?): String? = when (slice.action) {
         WheelAction.CARD, WheelAction.HEAR, WheelAction.ALOUD, WheelAction.COPY, WheelAction.LOOKUP ->
             "Nothing read on this screen yet".takeIf { line == null }
-        WheelAction.KNOWN -> "Connect AnkiDroid in Settings › Anki".takeIf { !app.settings.prefs.value.knownWords && !ankiConnected() }
+        // Your own list of known words marks words with no AnkiDroid.
+        WheelAction.KNOWN -> "Connect AnkiDroid in Settings › Anki".takeIf {
+            !app.settings.prefs.value.knownWords && !ankiConnected() && app.knownWords.keys(app.settings.prefs.value.learning.tag).isEmpty()
+        }
         WheelAction.PROFILE -> "Make a second profile in Settings › Profiles".takeIf { app.profiles.list.value.size < 2 }
         else -> null
     }
@@ -766,16 +779,30 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** What is drawn over each line on screen: readings for its kanji, and each word's Anki card. */
     private suspend fun textMarks(lines: List<LookupLine>, furigana: Boolean, known: Boolean): List<LineMarks> = try {
-        val target = if (known && ankiConnected()) app.anki.target else null
-        lines.filter { it.geometry != null }.map { line ->
-            val words = words(line)
+        val prefs = app.settings.prefs.value
+        val ankiOn = known && ankiConnected()
+        val target = if (ankiOn) app.anki.target else null
+        val everywhere = ankiOn && prefs.knownAllAnki
+        // Your own list: a word on it is known whatever Anki says, and with it words are marked with no AnkiDroid at all.
+        val list = if (known) withContext(Dispatchers.IO) { app.knownWords.keys(prefs.learning.tag) } else emptySet()
+        val marking = known && (target != null || everywhere || list.isNotEmpty())
+        val split = lines.filter { it.geometry != null }.map { line -> line to words(line) }
+        // For each line, its words worth marking, each with whether it is on the list.
+        val worth = if (!marking) emptyList() else split.map { (line, words) ->
+            words.filter { Furigana.worthKnowing(line.text.substring(it.start, it.end)) }
+                .map { it to KnownWordList.knows(list, it.expression, it.reading, line.text.substring(it.start, it.end)) }
+        }
+        // Anki is asked about the words of every line at once, but for those on the list.
+        val asked = worth.flatten().filter { !it.second }.map { it.first.expression }.toSet()
+        val fromAnki = if (asked.isEmpty() || (target == null && !everywhere)) emptyMap() else {
+            withContext(Dispatchers.IO) { app.anki.knowing(target, asked, everywhere) }
+        }
+        split.mapIndexed { i, (line, words) ->
             val rubies = if (!furigana) emptyList() else words.flatMap { word ->
                 Furigana.of(line.text.substring(word.start, word.end), word.expression, word.reading).map { Ruby(it.start + word.start, it.end + word.start, it.reading) }
             }
-            val marked = if (target == null) emptyList() else {
-                val worth = words.filter { Furigana.worthKnowing(line.text.substring(it.start, it.end)) }
-                val knowing = withContext(Dispatchers.IO) { app.anki.knowing(target, worth.map { it.expression }.toSet()) }
-                worth.mapNotNull { word -> knowing[word.expression]?.let { WordMark(word.start, word.end, it) } }
+            val marked = worth.getOrNull(i).orEmpty().map { (word, onList) ->
+                WordMark(word.start, word.end, if (onList) Knowing.MATURE else fromAnki[word.expression] ?: Knowing.NEW)
             }
             LineMarks(line.text, rubies, marked)
         }
@@ -1385,6 +1412,12 @@ class LfgAccessibilityService : AccessibilityService() {
                 // Not the tutorial's screen, which makes none.
                 else if (prefs.sentenceAudio && !now.game.app && now.game.packageName != packageName) SoundCapture.askOnce(this, now.displayId)
                 overlays.onScreen(now?.displayId ?: reading?.displayId ?: Display.INVALID_DISPLAY, true, now != null)
+                // A game given a profile has come: that profile is the one in use, as the wheel's Profile tile makes
+                // it. Once as it comes, so one changed by hand while it is played stays; never the tutorial's screen.
+                val host = now?.let { games[it.game.packageName]?.id }
+                if (now != null && now.game.packageName != packageName && arrivals.arrived(now.game.id, host)) {
+                    app.profiles.forGame(now.game.id, host)?.let { overlays.say("Profile: ${it.shown}") }
+                }
             }
             // No reader, no picture: nothing is captured until something can read it.
             if (now == null || Readers.reader == null) continue

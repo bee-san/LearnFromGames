@@ -110,11 +110,13 @@ object SettingsIndex {
             setting("Updates", "A dictionary's next release replaces it, and keeps its place", "automatic auto update check now new version")
             setting("Word audio", "Words said by people, from the Local Audio Server add-on for Anki", "pronunciation sound voice android.db yomichan")
         },
-        page(Page.ANKI, "Anki", "The note type and deck cards go to", "flashcards ankidroid srs mining") {
+        page(Page.ANKI, "Anki", "The note type and deck cards go to, and known words", "flashcards ankidroid srs mining") {
             setting("AnkiDroid", "Connect LFG to AnkiDroid, where cards go", "connect install permission flashcards")
             setting("Note type", "The kind of note a card is made as", "model template fields kiku lapis senren")
             setting("Deck", "The deck cards go to", "flashcards deck")
             setting("Find again", "Looks for a Kiku, Lapis or Senren note type and the deck with most of its notes", "detect search refresh")
+            setting("Look in all of Anki", "Known words finds a word in any deck or note type", "known words mature learning colour every all decks note types")
+            setting("Your known words", "Words you know, pasted in, show as known with or without Anki", "known words list paste import vocabulary mature")
         },
         page(Page.CONTROLS, "Controls", "The lookup shortcut, whole words or characters, and where the entry shows", "controller gamepad pad buttons") {
             setting("Lookup shortcut", "One button starts and stops lookup", "hotkey button l3 r3 select start bind")
@@ -154,6 +156,7 @@ object SettingsIndex {
         page(Page.GAMES, "Games and apps", "Rename one, choose when it is read", "game app list") {
             setting("Rename", "Give a game or an app another name", "title name")
             setting("Read this app", "Automatic, on demand, always or never", "stop ignore off disable block")
+            setting("Profile", "The profile LFG changes to when a game is played", "per game automatic switch language")
             setting("Boxes", "Draw the dialogue box, and only what is in it is read", "dialogue box draw region area text ocr")
             setting("Character names", "Link a game to its visual novel on VNDB", "vn cast search")
         },

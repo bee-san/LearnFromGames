@@ -32,6 +32,10 @@ data class Profile(val id: String, val slot: Int, val name: String, val language
  * wheels, the games' boxes and the dictionaries are not a profile's: a
  * dictionary already belongs to its language.
  *
+ * A game can be given a profile ([link]), kept beside the list and so the
+ * same whichever profile is in use: as that game comes to the front the
+ * reading service changes to it ([forGame]).
+ *
  * Each profile has a quick settings tile ([ProfileTile]), shown to Android
  * only once there are two profiles to change between.
  */
@@ -44,6 +48,11 @@ class Profiles(private val context: Context, private val settings: Settings, pri
 
     private val _list = MutableStateFlow(shown())
     val list: StateFlow<List<Profile>> = _list
+
+    private val _games = MutableStateFlow(ProfileRules.links(store.all))
+
+    /** The games given a profile, each with its profile's id: LFG changes to it as the game comes to the front ([forGame]). */
+    val games: StateFlow<Map<String, String>> = _games
 
     init {
         // The profile in use is named after its language until it is given a name: another language, another name.
@@ -103,6 +112,25 @@ class Profiles(private val context: Context, private val settings: Settings, pri
         return inUse
     }
 
+    /** The game [gameId] has the profile [id] from now; null, and it leaves the one in use as it is. */
+    @Synchronized
+    fun link(gameId: String, id: String?) {
+        if (id != null && kept.none { it.id == id }) return
+        store.edit().apply { if (id == null) remove(gameKey(gameId)) else putString(gameKey(gameId), id) }.apply()
+        _games.value = ProfileRules.links(store.all)
+    }
+
+    /**
+     * The game [gameId], in the app [hostId], has come to the front: its
+     * profile, or the app's, becomes the one in use. That profile, or null
+     * when the one in use stays ([ProfileRules.forGame]).
+     */
+    @Synchronized
+    fun forGame(gameId: String, hostId: String?): Profile? {
+        val to = ProfileRules.forGame(_games.value, gameId, hostId, kept, active) ?: return null
+        return if (use(to)) inUse else null
+    }
+
     /** The profile [id] is called [name]; nothing, and it goes by its language's again. */
     @Synchronized
     fun rename(id: String, name: String) {
@@ -117,7 +145,12 @@ class Profiles(private val context: Context, private val settings: Settings, pri
         if (id == active) use(kept.first { it.id != id }.id)
         kept = kept.filter { it.id != id }
         context.deleteSharedPreferences(file(id))
-        store.edit().remove(ankiKey(id)).apply()
+        // Its games leave the profile in use as it is from now.
+        store.edit().apply {
+            remove(ankiKey(id))
+            _games.value.filterValues { it == id }.keys.forEach { remove(gameKey(it)) }
+        }.apply()
+        _games.value = _games.value.filterValues { it != id }
         changed()
         return true
     }
@@ -159,5 +192,6 @@ class Profiles(private val context: Context, private val settings: Settings, pri
 
         private fun file(id: String) = FILE_PREFIX + id
         private fun ankiKey(id: String) = "anki.$id"
+        private fun gameKey(gameId: String) = ProfileRules.GAME_PREFIX + gameId
     }
 }

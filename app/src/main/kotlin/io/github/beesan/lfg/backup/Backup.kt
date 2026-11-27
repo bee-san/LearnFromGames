@@ -41,6 +41,9 @@ object Backup {
     /** The folders under the app's files that hold pictures: the screen's, each line's own, and notes'. */
     private val PICTURES = listOf("frames", "crops", "notes")
 
+    /** The words the person knows, a list for each language ([io.github.beesan.lfg.KnownWords]): always carried, pictures or not. */
+    private const val KNOWN = "known-words"
+
     /** Whether a settings file is the profiles' list, or the settings of a profile not in use ([Profiles]). */
     internal fun profiles(name: String) = name == Profiles.STORE + ".xml" || PROFILE.matches(name)
 
@@ -58,6 +61,7 @@ object Backup {
             add(zip, SETTINGS, File(stores, SETTINGS))
             // The profiles not in use, each in its own file, and the list of them.
             stores.listFiles()?.filter { profiles(it.name) }?.forEach { add(zip, it.name, it) }
+            File(context.filesDir, KNOWN).listFiles()?.forEach { add(zip, "files/$KNOWN/${it.name}", it) }
             if (pictures) {
                 for (dir in PICTURES) File(context.filesDir, dir).listFiles()?.forEach { add(zip, "files/$dir/${it.name}", it) }
             }
@@ -107,6 +111,11 @@ object Backup {
         // The backup's profiles take the place of the ones here; a backup from before profiles leaves the one its settings are.
         stores.listFiles()?.filter { profiles(it.name) }?.forEach { it.delete() }
         dir.listFiles()?.filter { it.isFile && profiles(it.name) }?.forEach { it.copyTo(File(stores, it.name), overwrite = true) }
+        // A backup from before the lists leaves the ones here as they are.
+        File(dir, "files/$KNOWN").listFiles()?.let { lists ->
+            val into = File(context.filesDir, KNOWN).apply { mkdirs() }
+            lists.forEach { it.copyTo(File(into, it.name), overwrite = true) }
+        }
         for (name in PICTURES) {
             val into = File(context.filesDir, name).apply { mkdirs() }
             File(dir, "files/$name").listFiles()?.forEach { it.copyTo(File(into, it.name), overwrite = true) }

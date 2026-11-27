@@ -551,7 +551,10 @@ class MainActivity : ComponentActivity() {
                             onBack = ::back,
                         )
                         page == Page.SOURCES -> SourcesScreen(sources, ::back)
-                        page == Page.ANKI -> AnkiScreen(setup, model::connectAnki, { ankiPermission.launch(AnkiBridge.PERMISSION) }, ::back)
+                        page == Page.ANKI -> AnkiScreen(
+                            setup, prefs, model::updatePrefs, (application as io.github.beesan.lfg.App).knownWords,
+                            model::connectAnki, { ankiPermission.launch(AnkiBridge.PERMISSION) }, ::back,
+                        )
                         page == Page.APPEARANCE -> AppearanceScreen(prefs, model::updatePrefs, ::back)
                         page == Page.BACKUP -> BackupScreen(
                             prefs = prefs,
@@ -653,29 +656,34 @@ class MainActivity : ComponentActivity() {
                                 onUpdate = takeUpdate,
                             )
                         }
-                        page == Page.GAMES -> GamesScreen(
-                            games, packageName, { model.updateGame(it) }, ::back,
-                            boxes = dialogueBoxes, extraBoxes = extraBoxes, picture = model::lastPicture,
-                            onDrawBox = { game, slot ->
-                                model.startBoxDraw(game, slot)
-                                page = Page.BOX_DRAW
-                            },
-                            onRemoveBox = model::removeBox,
-                            names = (dictionary as? DictState.Ready)?.dictionaries.orEmpty().filter { it.vndb != null },
-                            builds = nameBuilds,
-                            namesActions = NamesRowActions(
-                                title = model::vnTitle,
-                                onSearch = { game ->
-                                    model.startVnSearch(game)
-                                    page = Page.VN_SEARCH
+                        page == Page.GAMES -> {
+                            val allProfiles by model.profiles.collectAsStateWithLifecycle()
+                            val gameProfiles by model.gameProfiles.collectAsStateWithLifecycle()
+                            GamesScreen(
+                                games, packageName, { model.updateGame(it) }, ::back,
+                                boxes = dialogueBoxes, extraBoxes = extraBoxes, picture = model::lastPicture,
+                                onDrawBox = { game, slot ->
+                                    model.startBoxDraw(game, slot)
+                                    page = Page.BOX_DRAW
                                 },
-                                onAccept = { model.acceptVn(it) },
-                                onDecline = { model.declineVn(it) },
-                                onBuild = model::buildNames,
-                                onStop = model::stopNames,
-                                onRemove = { model.removeNames(it) },
-                            ),
-                        )
+                                onRemoveBox = model::removeBox,
+                                names = (dictionary as? DictState.Ready)?.dictionaries.orEmpty().filter { it.vndb != null },
+                                builds = nameBuilds,
+                                namesActions = NamesRowActions(
+                                    title = model::vnTitle,
+                                    onSearch = { game ->
+                                        model.startVnSearch(game)
+                                        page = Page.VN_SEARCH
+                                    },
+                                    onAccept = { model.acceptVn(it) },
+                                    onDecline = { model.declineVn(it) },
+                                    onBuild = model::buildNames,
+                                    onStop = model::stopNames,
+                                    onRemove = { model.removeNames(it) },
+                                ),
+                                profileRow = { game -> GameProfileRow(game, allProfiles, gameProfiles[game.id]) { model.gameProfile(game.id, it) } },
+                            )
+                        }
                         page == Page.BOX_DRAW -> boxDraw?.let { draw ->
                             val all = listOf(dialogueBoxes[draw.game.id]) + extraBoxes[draw.game.id].orEmpty()
                             BoxDrawScreen(

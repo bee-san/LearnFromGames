@@ -129,6 +129,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _profileMessage.value = message
     }
 
+    /** Settings › Games and apps: each game given a profile, and the profile's id. */
+    val gameProfiles: StateFlow<Map<String, String>> = app.profiles.games
+
+    fun gameProfile(gameId: String, profileId: String?) = app.profiles.link(gameId, profileId)
+
     /** The newest lines; null until the store has answered, so an empty list really is empty. */
     private val recentLines: StateFlow<List<GameLine>?> =
         app.database.lines().recent(300).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)

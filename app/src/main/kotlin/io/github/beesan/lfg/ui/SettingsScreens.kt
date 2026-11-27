@@ -319,7 +319,15 @@ fun SourcesScreen(sources: List<DictionarySource>, onBack: () -> Unit) = Page("S
 }
 
 @Composable
-fun AnkiScreen(setup: SetupState, onFindAgain: () -> Unit, onConnect: () -> Unit, onBack: () -> Unit) = Page("Anki", onBack) {
+fun AnkiScreen(
+    setup: SetupState,
+    prefs: Prefs,
+    onChange: ((Prefs) -> Prefs) -> Unit,
+    knownWords: io.github.beesan.lfg.KnownWords,
+    onFindAgain: () -> Unit,
+    onConnect: () -> Unit,
+    onBack: () -> Unit,
+) = Page("Anki", onBack) {
     Group("AnkiDroid") {
         when {
             setup.anki == AnkiStatus.NOT_INSTALLED -> Card("AnkiDroid", "Not installed · cards wait here")
@@ -338,6 +346,7 @@ fun AnkiScreen(setup: SetupState, onFindAgain: () -> Unit, onConnect: () -> Unit
     if (setup.anki != AnkiStatus.NOT_INSTALLED && setup.anki != AnkiStatus.NEEDS_PERMISSION && setup.ankiNeverSynced) {
         Hint("Using AnkiWeb? Sync AnkiDroid once first.", Lfg.Warn)
     }
+    KnownWordsGroup(prefs, onChange, knownWords, ankiConnected = setup.anki != AnkiStatus.NOT_INSTALLED && setup.anki != AnkiStatus.NEEDS_PERMISSION)
 }
 
 fun shortcutLabel(prefs: Prefs) = io.github.beesan.lfg.core.Shortcut.label(prefs.shortcut)
@@ -675,6 +684,8 @@ fun GamesScreen(
     names: List<InstalledDictionary> = emptyList(),
     builds: Map<String, io.github.beesan.lfg.names.CharacterNames.Build> = emptyMap(),
     namesActions: NamesRowActions? = null,
+    /** The profile a game changes to ([GameProfileRow]), under how it is read. */
+    profileRow: @Composable (Game) -> Unit = {},
 ) = Page("Games and apps", onBack) {
     val list = games.filter { it.packageName != ownPackage }
     if (list.isEmpty()) Hint("Nothing read yet · games show here once played")
@@ -724,6 +735,7 @@ fun GamesScreen(
             } else {
                 Text("In ${apps[game.packageName] ?: game.packageName}, named by ${game.namedBy}", color = Lfg.Dim, fontSize = 13.sp)
             }
+            profileRow(game)
             // An ordinary app is read when asked, a region at a time: only what is read by itself has boxes.
             if (!game.app) {
                 HorizontalDivider(color = Lfg.Border)
