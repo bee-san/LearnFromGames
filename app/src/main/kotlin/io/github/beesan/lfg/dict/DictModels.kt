@@ -36,9 +36,12 @@ data class Glossary(
 @Serializable
 data class FrequencyValue(val value: Int = 0, val display: String = "")
 
-/** One frequency dictionary's figures for an entry. */
+/**
+ * One frequency dictionary's figures for an entry. [occurrence]: they count
+ * the word rather than rank it, so they take no part in its average rank.
+ */
 @Serializable
-data class Frequency(val dictionary: String = "", val values: List<FrequencyValue> = emptyList())
+data class Frequency(val dictionary: String = "", val values: List<FrequencyValue> = emptyList(), val occurrence: Boolean = false)
 
 /** One pitch accent: the mora after which the pitch drops (0 for none), or a pattern of H and L. */
 @Serializable

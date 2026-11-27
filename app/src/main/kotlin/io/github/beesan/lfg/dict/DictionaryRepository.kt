@@ -113,7 +113,49 @@ class DictionaryRepository(
         // The engine scans at most this many characters ahead; no word is longer.
         val scan = text.take(SCAN_LENGTH)
         val json = io.github.beesan.lfg.core.Perf.measure("lookup.native") { Hoshidicts.lookup(handle, scan, maxResults, SCAN_LENGTH, tag()) }
-        io.github.beesan.lfg.core.Perf.measure("lookup.decode") { DictJson.decodeFromString<LookupResponse>(json).results }
+        io.github.beesan.lfg.core.Perf.measure("lookup.decode") { counted(DictJson.decodeFromString<LookupResponse>(json).results) }
+    }
+
+    /** Each dictionary's declared frequency mode, by its folder: read once from its index.json. */
+    private val modes = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** [entries] with the figures of dictionaries that count words, rather than rank them, so marked. */
+    private fun counted(entries: List<Entry>): List<Entry> {
+        if (entries.none { it.frequencies.isNotEmpty() }) return entries
+        val dictionaries = listed ?: installed().also { listed = it }
+        val counting = dictionaries.filter { it.frequencies > 0 && modeOf(it) == FrequencyModes.OCCURRENCE }.mapTo(HashSet()) { it.title }
+        if (counting.isEmpty()) return entries
+        return entries.map { e ->
+            if (e.frequencies.none { it.dictionary in counting }) e
+            else e.copy(frequencies = e.frequencies.map { if (it.dictionary in counting) it.copy(occurrence = true) else it })
+        }
+    }
+
+    private fun modeOf(d: InstalledDictionary): String = modes.getOrPut(d.path) {
+        try {
+            FrequencyModes.declared(File(d.path, "index.json").readText()).orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    /**
+     * A list that says it counts words but holds ranks, as some made with
+     * yomitanfrequencies.org do (Hachidori #684), is marked as ranks once it is
+     * imported into [home]. The [zip] is read only for a list that says it counts.
+     */
+    private fun ranksIfSo(zip: File, home: File) {
+        try {
+            val index = File(home, "index.json")
+            val text = index.readText()
+            if (FrequencyModes.declared(text) != FrequencyModes.OCCURRENCE) return
+            if (!FrequencyModes.holdRanks(FrequencyModes.values(zip))) return
+            index.writeText(FrequencyModes.asRanks(text))
+            modes.remove(home.path)
+            android.util.Log.i(TAG, "${home.name} says it counts words but ranks them: read as ranks")
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "${home.name}: its frequency figures could not be checked", e)
+        }
     }
 
     /**
@@ -128,7 +170,7 @@ class DictionaryRepository(
         val handle = if (chosen != null) openSession(only = chosen) else openSession()
         if (handle == 0L) return@withContext emptyList()
         val json = Hoshidicts.lookup(handle, kanji, 16, SCAN_LENGTH, tag())
-        DictJson.decodeFromString<LookupResponse>(json).results.filter { it.expression == kanji }
+        counted(DictJson.decodeFromString<LookupResponse>(json).results.filter { it.expression == kanji })
     }
 
     /** How many characters of [text] its best match covers; 0 when none. For stepping word by word. */
@@ -168,7 +210,7 @@ class DictionaryRepository(
         }
         for (d in chosen) {
             if (d.terms > 0) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_TERM)
-            if (d.frequencies > 0) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_FREQUENCY)
+            if (d.frequencies > 0 && (only != null || !kanjiRanksOnly(d))) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_FREQUENCY)
             if (d.pitches > 0) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_PITCH)
             if (d.kanji > 0) Hoshidicts.addDictionary(handle, d.path, Hoshidicts.KIND_KANJI)
         }
@@ -255,6 +297,7 @@ class DictionaryRepository(
                 File(root, outcome.title).deleteRecursively()
                 return "The dictionary is empty."
             }
+            if (outcome.frequencies > 0) withContext(Dispatchers.IO) { ranksIfSo(zip, File(root, outcome.title)) }
             register(outcome, vndb)
             null
         } catch (e: Exception) {
@@ -476,6 +519,7 @@ class DictionaryRepository(
                     return@withLock null
                 }
                 val home = File(root, outcome.title)
+                if (outcome.frequencies > 0) withContext(Dispatchers.IO) { ranksIfSo(zip, File(staging, outcome.title)) }
                 val moved = withContext(native) {
                     // No session may hold the old files open while they go.
                     for (handle in sessions.values) Hoshidicts.close(handle)
@@ -484,6 +528,7 @@ class DictionaryRepository(
                     home.deleteRecursively()
                     File(staging, outcome.title).renameTo(home)
                 }
+                modes.remove(home.path)
                 val new = old.copy(
                     title = outcome.title, path = home.path, terms = outcome.terms, frequencies = outcome.frequencies,
                     pitches = outcome.pitches, kanji = outcome.kanji, installedAt = System.currentTimeMillis(),
@@ -540,6 +585,7 @@ class DictionaryRepository(
             vndb = vndb,
             language = tag(),
         )
+        modes.remove(added.path)
         save(installed().filter { it.title != added.title } + added)
     }
 
@@ -587,6 +633,13 @@ class DictionaryRepository(
 
         /** Bee's Ultimate Kanji Dictionary, which a tapped kanji is looked up in unless another is chosen. */
         val DEFAULT_KANJI = DefaultDictionaries.byId("bees-ultimate-kanji-dictionary")!!
+
+        /**
+         * Bee's Ultimate Kanji Dictionary ranks characters, not words: a word
+         * of one kanji would get the character's rank, and pull its average
+         * with it (Hachidori #724). Its ranks are kept for a tapped kanji alone.
+         */
+        fun kanjiRanksOnly(dictionary: InstalledDictionary): Boolean = DEFAULT_KANJI.matches(dictionary)
 
         /** The dictionary a tapped kanji is looked up in: the one titled [title], else [DEFAULT_KANJI]; null with neither installed. */
         fun kanjiDictionary(dictionaries: List<InstalledDictionary>, title: String): InstalledDictionary? {

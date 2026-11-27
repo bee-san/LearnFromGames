@@ -71,6 +71,14 @@ class KanjiTest {
     }
 
     @Test
+    fun beesCharacterRanksAreNotAWordsFrequency() {
+        fun d(title: String) = InstalledDictionary(title = title, path = "/x", terms = 10, frequencies = 10, installedAt = 0)
+        assertTrue(DictionaryRepository.kanjiRanksOnly(d(beeTitle)))
+        assertFalse(DictionaryRepository.kanjiRanksOnly(d("JPDB_v2.2_Frequency_Kana")))
+        assertFalse(DictionaryRepository.kanjiRanksOnly(d("KANJIDIC")))
+    }
+
+    @Test
     fun inAListADictionarysNameFoldsItAwayAndAPageOfOneEntryHasNoSuchButton() {
         val entry = Entry(expression = "生", glossaries = listOf(io.github.beesan.lfg.dict.Glossary(dictionary = "JMdict", glossary = "[\"life\"]")))
         val listed = EntryHtml.listBody(listOf(entry)) { false }

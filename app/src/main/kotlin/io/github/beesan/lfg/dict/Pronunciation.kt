@@ -51,9 +51,9 @@ object Pronunciation {
         }
     }
 
-    /** Yomitan's average: the floored harmonic mean of each dictionary's first value. */
+    /** Yomitan's average: the floored harmonic mean of each ranking dictionary's first value. */
     fun frequencyRank(entry: Entry): Int? {
-        val firsts = entry.frequencies.mapNotNull { f -> f.values.firstOrNull()?.value?.takeIf { it > 0 } }
+        val firsts = entry.frequencies.filter { !it.occurrence }.mapNotNull { f -> f.values.firstOrNull()?.value?.takeIf { it > 0 } }
         if (firsts.isEmpty()) return null
         return (firsts.size / firsts.sumOf { 1.0 / it }).toInt()
     }
