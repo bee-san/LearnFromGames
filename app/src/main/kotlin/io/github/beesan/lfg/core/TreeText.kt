@@ -164,6 +164,9 @@ object TreeText {
         return (tree + kept).sortedWith(compareBy({ it.rows[0].top }, { it.rows[0].left }))
     }
 
+    /** The lines mostly inside one of [regions]. */
+    fun within(lines: List<TextLine>, regions: List<Box>): List<TextLine> = lines.filter { line -> regions.any { within(listOf(line), it).isNotEmpty() } }
+
     /** The lines mostly inside [region]: what a dragged box asks to have read. */
     fun within(lines: List<TextLine>, region: Box): List<TextLine> = lines.filter { line ->
         val area = line.box.width.toLong() * line.box.height

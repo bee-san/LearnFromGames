@@ -171,6 +171,7 @@ class LfgAccessibilityService : AccessibilityService() {
             onPickBox = { pad, once, slot, fresh -> pickRegion(pad = pad || controller.state.value.controllerMode, once = once, slot = slot, fresh = fresh) },
             onReadBox = ::readBox,
             gameBoxes = { front?.let { f -> (1..1 + app.extraBoxes[f.game.id].size).map { gameBox(f.game, f.displayId, it) } }.orEmpty() },
+            alwaysBoxes = { front?.let { f -> app.extraBoxes[f.game.id].mapIndexedNotNull { i, b -> (i + 2).takeIf { b.always } }.toSet() }.orEmpty() },
             onAskGame = ::askAboutGame,
             onAsk = { id, what ->
                 scope.launch {
@@ -1154,7 +1155,11 @@ class LfgAccessibilityService : AccessibilityService() {
             pickingPad = pad
             overlays.pickRegion(
                 // A box read once is none of the game's boxes.
-                display, playing?.game?.takeIf { !once && !region }?.let { PickFor(it.id, it.title, if (fresh) null else gameBox(it, display, slot), slot) },
+                display,
+                playing?.game?.takeIf { !once && !region }?.let {
+                    val always = app.extraBoxes[it.id].getOrNull(slot - 2)?.always == true
+                    PickFor(it.id, it.title, if (fresh) null else gameBox(it, display, slot), slot, always)
+                },
                 lookup = pad, once = once,
             )
         }
@@ -1176,6 +1181,17 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** The game's dialogue box on this screen, or null for a game read on its whole screen. */
     private fun dialogueBox(game: Game, displayId: Int): Box? = gameBox(game, displayId, 1)
+
+    /**
+     * Where the game is read on this screen: its dialogue box and each box read all the time beside it;
+     * none, for a game read on its whole screen, which has those boxes in it already.
+     */
+    private fun readingAreas(game: Game, displayId: Int): List<Box> {
+        val first = dialogueBox(game, displayId) ?: return emptyList()
+        if (game.packageName == packageName) return listOf(first)
+        val always = app.extraBoxes[game.id].withIndex().filter { it.value.always }.mapNotNull { gameBox(game, displayId, it.index + 2) }
+        return listOf(first) + always
+    }
 
     /** The game's box [slot] (1, its dialogue box, or 2 onwards) on this screen, or null when it is not drawn. */
     private fun gameBox(game: Game, displayId: Int, slot: Int): Box? {
@@ -1204,9 +1220,11 @@ class LfgAccessibilityService : AccessibilityService() {
                 if (picked is Picked.Once) ask(picked.box, thenController = lookup) else ask((picked as Picked.Keep).box, continuous = true)
             }
             is Picked.ForGame -> if (picked.game.slot > 1) {
-                // Box 2 onwards is read only when asked: it was drawn to be read, so it is read now.
+                // Box 2 onwards is read when picked, or all the time beside the dialogue box: either way it was drawn
+                // to be read, so it is read now.
                 val screen = overlays.screen(pickingOn) ?: return
-                app.extraBoxes.set(picked.game.gameId, picked.game.slot, DialogueBox(picked.box, screen.width, screen.height))
+                app.extraBoxes.set(picked.game.gameId, picked.game.slot, DialogueBox(picked.box, screen.width, screen.height, picked.always))
+                if (picked.always && app.dialogueBoxes[picked.game.gameId] == null) toast("The whole screen is read already: draw box 1 for box ${picked.game.slot} to count.")
                 if (lookup) controller.exitControllerMode()
                 ask(picked.box, thenController = lookup || pickingPad)
             } else {
@@ -1436,8 +1454,8 @@ class LfgAccessibilityService : AccessibilityService() {
             if (whole && overlays.covering) continue
             val frame = window ?: uncopiedShot(null, now.displayId) ?: continue
             Perf.add("shot", System.nanoTime() - shotAt)
-            // Where this game's dialogue is, if the player has drawn it: only that is read.
-            val area = dialogueBox(now.game, now.displayId)
+            // Where this game's dialogue is, if the player has drawn it, and any box read beside it: only those are read.
+            val areas = readingAreas(now.game, now.displayId)
             // A picture of the game's window has nothing of ours in it. One of the whole screen (all there is
             // before Android 14) shows our mark and entry, and cannot be read: it is only watched for the text
             // around them changing. When it has, they stand aside for one clean picture, read as any other.
@@ -1453,7 +1471,7 @@ class LfgAccessibilityService : AccessibilityService() {
                 try {
                     val changed = withContext(Dispatchers.Default) {
                         pipeline.watch(
-                            frame.hash, frame::bitmap, 0, 0, area,
+                            frame.hash, frame::bitmap, 0, 0, areas,
                             drawn + listOfNotNull(overlays.noticeOn(now.displayId)),
                         )
                     }
@@ -1487,7 +1505,7 @@ class LfgAccessibilityService : AccessibilityService() {
                         if (whole) 0 else now.bounds.left, if (whole) 0 else now.bounds.top,
                         // A picture of the game's own window has nothing else in it.
                         if (whole) now.covered else emptyList(),
-                        area,
+                        areas,
                         // A notice of ours on the screen's picture: cut out, not waited for.
                         if (whole) listOfNotNull(overlays.noticeOn(now.displayId)) else emptyList(),
                     )

@@ -157,7 +157,7 @@ object SettingsIndex {
             setting("Rename", "Give a game or an app another name", "title name")
             setting("Read this app", "Automatic, on demand, always or never", "stop ignore off disable block")
             setting("Profile", "The profile LFG changes to when a game is played", "per game automatic switch language")
-            setting("Boxes", "Draw the dialogue box, and only what is in it is read", "dialogue box draw region area text ocr")
+            setting("Boxes", "Draw the dialogue box, and only what is in it is read", "dialogue box draw region area text ocr always read continuous second subtitles")
             setting("Character names", "Link a game to its visual novel on VNDB", "vn cast search")
         },
         page(Page.GAME_NAMES, "Game names", "Which game is open in an emulator: Cocoon, ES-DE, RetroArch, Eden and Steam", "emulator launcher front-end frontend") {

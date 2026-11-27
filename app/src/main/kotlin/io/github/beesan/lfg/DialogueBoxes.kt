@@ -37,8 +37,9 @@ class DialogueBoxes(context: Context) {
 }
 
 /**
- * A game's other boxes, by the game's id: box 2 onwards, each read only when
- * it is picked on the wheel, as many as are drawn. Kept beside the dialogue
+ * A game's other boxes, by the game's id: box 2 onwards, each read when it
+ * is picked on the wheel, or all the time beside the dialogue box when it is
+ * [DialogueBox.always], as many as are drawn. Kept beside the dialogue
  * boxes, in the settings' own file.
  */
 class ExtraBoxes(context: Context) {
@@ -55,6 +56,11 @@ class ExtraBoxes(context: Context) {
     }
 
     operator fun get(gameId: String): List<DialogueBox> = _boxes.value[gameId].orEmpty()
+
+    /** The game's box [slot] (2 onwards) is read all the time, or only when picked. */
+    fun setAlways(gameId: String, slot: Int, always: Boolean) {
+        get(gameId).getOrNull(slot - 2)?.let { set(gameId, slot, it.copy(always = always)) }
+    }
 
     /** The game's box [slot] (2 onwards) is [box]; past the last, it is added; null takes it away. */
     fun set(gameId: String, slot: Int, box: DialogueBox?) {

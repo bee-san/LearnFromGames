@@ -77,8 +77,8 @@ class ReadingPipeline(
 
     private var lastGame = ""
 
-    /** The dialogue box the last picture was read in, or null for the whole of it. */
-    private var lastArea: Box? = null
+    /** The boxes the last picture was read in, or none for the whole of it. */
+    private var lastAreas: List<Box> = emptyList()
 
     /** Reused between frames, as [buffer] is: the part of the picture a dialogue box has read. */
     private var cutBuffer: IntArray? = null
@@ -167,6 +167,21 @@ class ReadingPipeline(
     private fun across(line: TextLine, box: Box): Boolean =
         if (line.vertical) box.left < line.box.right && line.box.left < box.right else box.top < line.box.bottom && line.box.top < box.bottom
 
+    /**
+     * The part of a picture looked at for [areas]: [box], round them all, in the picture's pixels;
+     * and with several, each one's place in it ([keep]), outside which it is painted black, so that
+     * the game between them is neither read nor taken for a change.
+     */
+    class Cut(val box: Box, private val keep: List<Box>?) {
+        fun of(whole: Frame, into: IntArray?): Frame =
+            whole.cut(box.left, box.top, box.width, box.height, into).also { part -> keep?.let(part::keepOnly) }
+    }
+
+    private fun cutFor(areas: List<Box>, offsetX: Int, offsetY: Int, width: Int, height: Int): Cut? {
+        val (box, each) = DialogueBox.reading(areas.map { it.moved(-offsetX, -offsetY) }, width, height) ?: return null
+        return Cut(box, each.takeIf { it.size > 1 }?.map { it.moved(-box.left, -box.top) })
+    }
+
     /** Paints [box] (frame pixels) black. */
     private fun blank(frame: Frame, box: Box) {
         val left = box.left.coerceIn(0, frame.width)
@@ -218,7 +233,7 @@ class ReadingPipeline(
      * a change it had the entry blink away and back every few seconds.
      */
     suspend fun watch(
-        hash: Long, picture: () -> Bitmap?, offsetX: Int = 0, offsetY: Int = 0, area: Box? = null, ours: List<Box>,
+        hash: Long, picture: () -> Bitmap?, offsetX: Int = 0, offsetY: Int = 0, areas: List<Box> = emptyList(), ours: List<Box>,
     ): Boolean {
         if (reader() == null) return false
         val moved = ours != watchOurs
@@ -227,16 +242,16 @@ class ReadingPipeline(
         val size = bitmap.width * bitmap.height
         val pixels = watchBuffer?.takeIf { it.size == size } ?: IntArray(size).also { watchBuffer = it }
         val whole = Frame(bitmap.width, bitmap.height, pixels)
-        val cut = area?.let { DialogueBox.reading(it.moved(-offsetX, -offsetY), bitmap.width, bitmap.height) }
+        val cut = cutFor(areas, offsetX, offsetY, bitmap.width, bitmap.height)
         // Where the lines being looked up are: those of the last clean picture that are lines, not a menu's text.
         val story = _latest.value?.let { reading ->
             reading.lines.filterIndexed { i, _ -> reading.saved.getOrNull(i)?.interfaceText != true }
         }.orEmpty()
         suspend fun signature(): String {
             for (box in ours) blank(whole, box.moved(-offsetX, -offsetY))
-            val frame = if (cut == null) whole else whole.cut(cut.left, cut.top, cut.width, cut.height, cutBuffer).also { cutBuffer = it.argb }
+            val frame = if (cut == null) whole else cut.of(whole, cutBuffer).also { cutBuffer = it.argb }
             val look = Perf.measure("watch") { probe().look(frame) }
-            return telling(look, story, offsetX + (cut?.left ?: 0), offsetY + (cut?.top ?: 0))
+            return telling(look, story, offsetX + (cut?.box?.left ?: 0), offsetY + (cut?.box?.top ?: 0))
         }
         if (moved || watchFirst == null) {
             watchOurs = ours
@@ -293,7 +308,7 @@ class ReadingPipeline(
     suspend fun onFrame(
         bitmap: Bitmap, game: Game, displayId: Int, nowMs: Long, offsetX: Int = 0, offsetY: Int = 0,
         covered: List<Box> = emptyList(), ours: List<Box> = emptyList(),
-    ): Boolean = onFrame(0L, { bitmap }, game, displayId, nowMs, offsetX, offsetY, covered, null, ours)
+    ): Boolean = onFrame(0L, { bitmap }, game, displayId, nowMs, offsetX, offsetY, covered, emptyList(), ours)
 
     /**
      * The same, for a picture not yet copied out of graphics memory: [hash] is
@@ -301,8 +316,8 @@ class ReadingPipeline(
      * which is done only when its pixels are needed. A screen found as it was
      * is never copied.
      *
-     * [area] is the game's dialogue box in the display's pixels, or null for a
-     * game read on its whole screen: only text in it is looked for and read.
+     * [areas] are the game's dialogue box and any box read beside it, in the display's pixels, or
+     * none for a game read on its whole screen: only text in them is looked for and read.
      *
      * [ours] is where this app draws on the picture (a notice), in display pixels: it is blanked out
      * before anything looks at the pixels, so it is neither read nor taken for a change, and no line
@@ -310,7 +325,7 @@ class ReadingPipeline(
      */
     suspend fun onFrame(
         hash: Long, picture: () -> Bitmap?, game: Game, displayId: Int, nowMs: Long, offsetX: Int = 0, offsetY: Int = 0,
-        covered: List<Box> = emptyList(), area: Box? = null, ours: List<Box> = emptyList(),
+        covered: List<Box> = emptyList(), areas: List<Box> = emptyList(), ours: List<Box> = emptyList(),
     ): Boolean {
         val engine = reader() ?: return false
         if (game.id != lastGame) {
@@ -322,14 +337,14 @@ class ReadingPipeline(
             previousFound = null
             lastGame = game.id
             kept[game.id]?.recent = null
-        } else if (area != lastArea) {
+        } else if (areas != lastAreas) {
             // The box was drawn, moved or taken away: what the probe made of the old part says nothing of this one.
             detector.reset()
             lastSignature = null
             lastFound = null
             previousFound = null
         }
-        lastArea = area
+        lastAreas = areas
         if (eager) {
             detector.settleNext()
             eager = false
@@ -353,10 +368,10 @@ class ReadingPipeline(
         val pixels = buffer?.takeIf { it.size == size } ?: IntArray(size).also { buffer = it }
         val whole = Frame(bitmap.width, bitmap.height, pixels)
         // What is probed and read: the whole picture, or the part the game's dialogue box is in.
-        val cut = area?.let { DialogueBox.reading(it.moved(-offsetX, -offsetY), bitmap.width, bitmap.height) }
+        val cut = cutFor(areas, offsetX, offsetY, bitmap.width, bitmap.height)
         val frame by lazy(LazyThreadSafetyMode.NONE) {
             if (cut == null) whole else Perf.measure("cut") {
-                whole.cut(cut.left, cut.top, cut.width, cut.height, cutBuffer).also { cutBuffer = it.argb }
+                cut.of(whole, cutBuffer).also { cutBuffer = it.argb }
             }
         }
         Perf.measure("pixels") {
@@ -373,7 +388,7 @@ class ReadingPipeline(
             if (signature.isEmpty()) {
                 // The text has gone (a scene change, a menu): nothing is on screen to tap.
                 detector.offer(signature, nowMs)
-                readMissed(engine, game, displayId, bitmap.width, bitmap.height, offsetX, offsetY, covered, cut, area, ours)
+                readMissed(engine, game, displayId, bitmap.width, bitmap.height, offsetX, offsetY, covered, cut, areas, ours)
                 interfaceText.onReading(emptyList())
                 if (_latest.value?.lines?.isNotEmpty() == true) _latest.value = Reading(game, displayId, emptyList(), emptyList(), null, nowMs)
                 // A game going on with no text in it, as at the look before, is as good as a still screen
@@ -381,7 +396,7 @@ class ReadingPipeline(
                 return known != null && known.isEmpty()
             }
             val settled = detector.offer(signature, nowMs)
-            readMissed(engine, game, displayId, bitmap.width, bitmap.height, offsetX, offsetY, covered, cut, area, ours)
+            readMissed(engine, game, displayId, bitmap.width, bitmap.height, offsetX, offsetY, covered, cut, areas, ours)
             if (!settled) return false
         }
         // How long the settled text waited to be read: since it last changed, or since it began for text that never held still.
@@ -389,7 +404,7 @@ class ReadingPipeline(
         else Perf.add("settle.still", (nowMs - detector.stillSinceMs) * 1_000_000)
         val appearedNow = detector.changeStartedMs.takeIf { it in 1..nowMs } ?: nowMs
         keep(
-            engine, frame, lastFound, bitmap, game, displayId, nowMs, appearedNow, offsetX, offsetY, covered, cut, area, ours,
+            engine, frame, lastFound, bitmap, game, displayId, nowMs, appearedNow, offsetX, offsetY, covered, cut, areas, ours,
             detector.confirming, publish = true,
         )
         return still
@@ -402,12 +417,12 @@ class ReadingPipeline(
      */
     private suspend fun readMissed(
         engine: TextReader, game: Game, displayId: Int, width: Int, height: Int, offsetX: Int, offsetY: Int,
-        covered: List<Box>, cut: Box?, area: Box?, ours: List<Box>,
+        covered: List<Box>, cut: Cut?, areas: List<Box>, ours: List<Box>,
     ) {
         if (!detector.missed) return
         val pixels = previous?.takeIf { it.size == width * height } ?: return
         val whole = Frame(width, height, pixels)
-        val frame = if (cut == null) whole else whole.cut(cut.left, cut.top, cut.width, cut.height, null)
+        val frame = if (cut == null) whole else cut.of(whole, null)
         val picture = try {
             Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
         } catch (_: Throwable) {
@@ -415,7 +430,7 @@ class ReadingPipeline(
         }
         try {
             keep(
-                engine, frame, previousFound, picture, game, displayId, previousAtMs, previousAtMs, offsetX, offsetY, covered, cut, area, ours,
+                engine, frame, previousFound, picture, game, displayId, previousAtMs, previousAtMs, offsetX, offsetY, covered, cut, areas, ours,
                 recheck = false, publish = false,
             )
         } finally {
@@ -430,7 +445,7 @@ class ReadingPipeline(
      */
     private suspend fun keep(
         engine: TextReader, frame: Frame, found: List<Box>?, bitmap: Bitmap, game: Game, displayId: Int, nowMs: Long, appearedNow: Long,
-        offsetX: Int, offsetY: Int, covered: List<Box>, cut: Box?, area: Box?, ours: List<Box>, recheck: Boolean, publish: Boolean,
+        offsetX: Int, offsetY: Int, covered: List<Box>, cut: Cut?, areas: List<Box>, ours: List<Box>, recheck: Boolean, publish: Boolean,
     ) {
         val bands = found?.let { Bands.around(it, frame.width, frame.height) }
         val textHeight = found?.let(Bands::textHeight) ?: 0
@@ -442,11 +457,11 @@ class ReadingPipeline(
             .let { rows -> japanese().let { ja -> rows.mapNotNull { TextClean.line(it, ja) } } }.filter { it.text.isNotBlank() }
             // A kana read as its lookalike put right by the dictionary (KanaRepair).
             .let { rows -> if (japanese()) Perf.measure("repair") { rows.map { KanaRepair.line(it, matchLength) } } else rows }
-            .map { it.moved(offsetX + (cut?.left ?: 0), offsetY + (cut?.top ?: 0)) }
+            .map { it.moved(offsetX + (cut?.box?.left ?: 0), offsetY + (cut?.box?.top ?: 0)) }
             // Text under another window (a system dialog on a whole-screen picture) is not the game's.
             .filter { line -> covered.none { it.intersects(line.box) } && ours.none { across(line, it) } }
-            // The room read around a dialogue box is for reading its edges well, not for what lies in it.
-            .let { rows -> if (cut != null && area != null) TreeText.within(rows, area) else rows }
+            // The room read around a box is for reading its edges well, not for what lies in it.
+            .let { rows -> if (cut != null && areas.isNotEmpty()) TreeText.within(rows, areas) else rows }
         // A reader returns rows; the game shows sentences. From here on a piece is a whole piece of text.
         val pieces = Perf.measure("group") { Blocks.group(rows) }
         if (pieces.isEmpty()) {

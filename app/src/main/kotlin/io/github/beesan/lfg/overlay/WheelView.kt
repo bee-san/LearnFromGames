@@ -64,6 +64,14 @@ internal class WheelView(
             invalidate()
         }
 
+    /** Which of [boxes] (box 1 is 1) are read all the time beside the dialogue box: outlined whole, not dashed. */
+    var always: Set<Int> = emptySet()
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
     /**
      * The game's box 1 and box 2, in this view's pixels, each null while it is
      * not drawn. Each is outlined; pointed at, it is left undimmed in place of
@@ -344,7 +352,10 @@ internal class WheelView(
 
     /** A box's number at its top left corner, and a dashed outline round a box not pointed at. */
     private fun drawBoxTag(canvas: Canvas, b: Box, slot: Int, on: Boolean, pad: Float, corner: Float) {
-        if (!on) {
+        if (!on && slot in always) {
+            hole.color = Ink.DIM
+            canvas.drawRoundRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad, corner, corner, hole)
+        } else if (!on) {
             dashed.color = Ink.DIM
             canvas.drawRoundRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad, corner, corner, dashed)
         }

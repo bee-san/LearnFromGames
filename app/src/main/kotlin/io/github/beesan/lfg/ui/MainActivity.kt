@@ -667,6 +667,7 @@ class MainActivity : ComponentActivity() {
                                     page = Page.BOX_DRAW
                                 },
                                 onRemoveBox = model::removeBox,
+                                onAlwaysBox = model::setBoxAlways,
                                 names = (dictionary as? DictState.Ready)?.dictionaries.orEmpty().filter { it.vndb != null },
                                 builds = nameBuilds,
                                 namesActions = NamesRowActions(

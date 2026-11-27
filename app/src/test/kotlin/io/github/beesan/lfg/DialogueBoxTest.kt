@@ -20,6 +20,34 @@ class DialogueBoxTest {
     }
 
     @Test
+    fun aBoxReadAllTheTimeIsKeptSoAndOneKeptBeforeIsReadWhenPicked() {
+        val always = drawn.copy(always = true)
+        assertEquals("180,780,1710,980,1920,1080,1", always.encode())
+        assertEquals(always, DialogueBox.decode(always.encode()))
+        assertFalse(DialogueBox.decode("180,780,1710,980,1920,1080")!!.always)
+    }
+
+    @Test
+    fun severalBoxesAreReadInOnePartRoundThemAll() {
+        val (whole, each) = DialogueBox.reading(listOf(Box(100, 900, 1800, 1050), Box(100, 40, 900, 120)), 1920, 1080)!!
+        assertEquals(2, each.size)
+        assertEquals(each[0].union(each[1]), whole)
+        assertNull(DialogueBox.reading(emptyList(), 1920, 1080))
+    }
+
+    @Test
+    fun aPartCutRoundSeveralBoxesIsBlackBetweenThem() {
+        val frame = Frame(4, 3, IntArray(12) { 0xFFFFFFFF.toInt() })
+        frame.keepOnly(listOf(Box(0, 0, 2, 1), Box(3, 2, 4, 3)))
+        val black = 0xFF000000.toInt()
+        val white = 0xFFFFFFFF.toInt()
+        assertEquals(
+            listOf(white, white, black, black, black, black, black, black, black, black, black, white),
+            frame.argb.toList(),
+        )
+    }
+
+    @Test
     fun whatIsNotABoxIsNotReadBack() {
         assertNull(DialogueBox.decode(""))
         assertNull(DialogueBox.decode("180,780,1710,980"))

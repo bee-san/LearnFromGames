@@ -868,8 +868,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The game's box [slot] is drawn in Settings, or added past the last: the reading notices at its next look. */
     fun saveBox(game: Game, slot: Int, box: DialogueBox) {
-        if (slot == 1) app.dialogueBoxes[game.id] = box else app.extraBoxes.set(game.id, slot, box)
+        // A box drawn again is read as it was: all the time, or when picked.
+        val always = app.extraBoxes[game.id].getOrNull(slot - 2)?.always == true
+        if (slot == 1) app.dialogueBoxes[game.id] = box else app.extraBoxes.set(game.id, slot, box.copy(always = always))
     }
+
+    /** The game's box [slot] (2 onwards) is read all the time beside box 1, or only when picked on the wheel. */
+    fun setBoxAlways(game: Game, slot: Int, always: Boolean) = app.extraBoxes.setAlways(game.id, slot, always)
 
     /** The newest picture kept of a game's screen, if its file is still there. */
     suspend fun lastPicture(gameId: String): String? = withContext(Dispatchers.IO) {

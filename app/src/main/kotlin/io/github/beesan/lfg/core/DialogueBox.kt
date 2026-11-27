@@ -9,9 +9,15 @@ package io.github.beesan.lfg.core
  * It is kept in the pixels of the screen it was drawn on, with that screen's
  * size, so that it still fits when the screen's size changes.
  */
-data class DialogueBox(val box: Box, val screenWidth: Int, val screenHeight: Int) {
-    /** `left,top,right,bottom,screenWidth,screenHeight`, the form the settings keep. */
-    fun encode() = "${box.encode()},$screenWidth,$screenHeight"
+data class DialogueBox(
+    val box: Box,
+    val screenWidth: Int,
+    val screenHeight: Int,
+    /** For box 2 onwards: read all the time, beside the dialogue box, and not only when picked on the wheel. */
+    val always: Boolean = false,
+) {
+    /** `left,top,right,bottom,screenWidth,screenHeight`, and `,1` for a box read all the time: the form the settings keep. */
+    fun encode() = "${box.encode()},$screenWidth,$screenHeight" + if (always) ",1" else ""
 
     /** The box on a screen of this size: as drawn, or stretched with the screen when its size has changed. */
     fun on(width: Int, height: Int): Box {
@@ -25,8 +31,8 @@ data class DialogueBox(val box: Box, val screenWidth: Int, val screenHeight: Int
     companion object {
         fun decode(text: String): DialogueBox? {
             val n = text.split(',').mapNotNull { it.trim().toIntOrNull() }
-            if (n.size != 6 || n[2] - n[0] < MIN || n[3] - n[1] < MIN || n[4] <= 0 || n[5] <= 0) return null
-            return DialogueBox(Box(n[0], n[1], n[2], n[3]), n[4], n[5])
+            if (n.size !in 6..7 || n[2] - n[0] < MIN || n[3] - n[1] < MIN || n[4] <= 0 || n[5] <= 0) return null
+            return DialogueBox(Box(n[0], n[1], n[2], n[3]), n[4], n[5], always = n.getOrNull(6) == 1)
         }
 
         /** The smallest box worth keeping, in pixels each way, as Rubi's: a line of text does not fit in less. */
@@ -47,6 +53,16 @@ data class DialogueBox(val box: Box, val screenWidth: Int, val screenHeight: Int
             val bottom = (box.bottom + room).coerceIn(0, height)
             if (minOf(box.right, width) - maxOf(box.left, 0) < MIN || minOf(box.bottom, height) - maxOf(box.top, 0) < MIN) return null
             return Box(left, top, right, bottom)
+        }
+
+        /**
+         * What is read of a picture to read all of [boxes] in it: the [reading] of each, and the
+         * smallest box round them all. Null when none of them can be read.
+         */
+        fun reading(boxes: List<Box>, width: Int, height: Int): Pair<Box, List<Box>>? {
+            val each = boxes.mapNotNull { reading(it, width, height) }
+            if (each.isEmpty()) return null
+            return each.reduce(Box::union) to each
         }
 
         /** The room read around a box is the picture's height over this: 60 pixels of a 1080p screen. */

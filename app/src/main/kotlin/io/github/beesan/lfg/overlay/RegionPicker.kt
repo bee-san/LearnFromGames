@@ -26,9 +26,9 @@ import kotlin.math.abs
 /**
  * The game a box is drawn for: its row, its name, which of its boxes ([slot]:
  * 1, the dialogue box it is read in, or 2 onwards, read when picked on the
- * wheel), and that box as it is now, if it has one.
+ * wheel or [always] beside the dialogue box), and that box as it is now, if it has one.
  */
-class PickFor(val gameId: String, val title: String, val saved: Box?, val slot: Int = 1)
+class PickFor(val gameId: String, val title: String, val saved: Box?, val slot: Int = 1, val always: Boolean = false)
 
 /** What was chosen for a box drawn on the screen. Boxes are in the display's pixels. */
 sealed interface Picked {
@@ -38,8 +38,11 @@ sealed interface Picked {
     /** Read it on every change until told to stop: an ordinary app's subtitles, a stream. */
     data class Keep(val box: Box) : Picked
 
-    /** It is this game's box [PickFor.slot]: for box 1, the game is read there only from now on. */
-    data class ForGame(val game: PickFor, val box: Box) : Picked
+    /**
+     * It is this game's box [PickFor.slot]: for box 1, the game is read there only from now on; box 2
+     * onwards is read when picked on the wheel, or with [always] all the time beside box 1.
+     */
+    data class ForGame(val game: PickFor, val box: Box, val always: Boolean = false) : Picked
 
     /** This game's box [PickFor.slot] is taken away: for box 1, the game is read on its whole screen again. */
     data class WholeScreen(val game: PickFor) : Picked
@@ -138,8 +141,9 @@ internal class RegionPicker(
 
     private fun refresh() {
         val done = drawing.stage == BoxDrawing.Stage.DONE
-        // As in Rubi: the second corner is the end. A box to read once is read, and a game's box is kept, at once.
-        if (done && drawing.changed && (once || game != null)) {
+        // As in Rubi: the second corner is the end. A box to read once is read, and a game's dialogue box is kept,
+        // at once. Box 2 onwards asks when it is read.
+        if (done && drawing.changed && (once || game?.slot == 1)) {
             take(if (once) Option("") { Picked.Once(it) } else Option("") { Picked.ForGame(game!!, it) })
             return
         }
@@ -164,7 +168,8 @@ internal class RegionPicker(
             BoxDrawing.Stage.STRETCHING ->
                 if (pad) "$size · The opposite corner: move and press $confirmName, or tap it. $backName takes the corner back." else "$size · Tap the opposite corner"
             BoxDrawing.Stage.DONE -> when {
-                game != null && !drawing.changed -> "${game.title} is read only in this box." + if (pad) " $backName moves its corner." else " Draw a new one to change it."
+                game != null && game.slot == 1 && !drawing.changed -> "${game.title} is read only in this box." + if (pad) " $backName moves its corner." else " Draw a new one to change it."
+                game != null && !drawing.changed -> what() + (if (game.always) ": always read." else ": read when picked.") + if (pad) " $backName moves its corner." else " Draw a new one to change it."
                 pad -> "$size · $confirmName chooses. $backName moves the corner."
                 else -> size
             }
@@ -174,7 +179,15 @@ internal class RegionPicker(
     /** What can be done with a finished box: over an ordinary app, how to read it; for a game's own box, keep it or not. */
     private fun optionsNow(): List<Option> = when {
         game == null -> listOf(Option("Read once") { Picked.Once(it) }, Option("Keep reading") { Picked.Keep(it) }, Option("Cancel") { Picked.Cancelled })
-        else -> listOf(Option("Keep this box") { Picked.Cancelled }, Option("Read the whole screen") { Picked.WholeScreen(game) })
+        game.slot == 1 -> listOf(Option("Keep this box") { Picked.Cancelled }, Option("Read the whole screen") { Picked.WholeScreen(game) })
+        // As it was read before first, so that a box drawn again stays as it was with one press.
+        drawing.changed -> listOf(Option("Read when picked") { Picked.ForGame(game, it) }, Option("Always read") { Picked.ForGame(game, it, always = true) })
+            .let { if (game.always) it.reversed() else it }
+        else -> listOf(
+            Option("Keep this box") { Picked.Cancelled },
+            if (game.always) Option("Read when picked") { Picked.ForGame(game, it) } else Option("Always read") { Picked.ForGame(game, it, always = true) },
+            Option("Remove box") { Picked.WholeScreen(game) },
+        )
     }
 
     private fun showChoices() {

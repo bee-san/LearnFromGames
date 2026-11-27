@@ -681,6 +681,7 @@ fun GamesScreen(
     boxes: Map<String, DialogueBox> = emptyMap(), extraBoxes: Map<String, List<DialogueBox>> = emptyMap(),
     picture: suspend (gameId: String) -> String? = { null },
     onDrawBox: (Game, Int) -> Unit = { _, _ -> }, onRemoveBox: (Game, Int) -> Unit = { _, _ -> },
+    onAlwaysBox: (Game, Int, Boolean) -> Unit = { _, _, _ -> },
     names: List<InstalledDictionary> = emptyList(),
     builds: Map<String, io.github.beesan.lfg.names.CharacterNames.Build> = emptyMap(),
     namesActions: NamesRowActions? = null,
@@ -739,7 +740,7 @@ fun GamesScreen(
             // An ordinary app is read when asked, a region at a time: only what is read by itself has boxes.
             if (!game.app) {
                 HorizontalDivider(color = Lfg.Border)
-                GameBoxes(game, boxes[game.id], extraBoxes[game.id].orEmpty(), picture, onDrawBox, onRemoveBox)
+                GameBoxes(game, boxes[game.id], extraBoxes[game.id].orEmpty(), picture, onDrawBox, onRemoveBox, onAlwaysBox)
             }
             // Ordinary apps have no cast to name.
             if (namesActions != null && !game.app) {

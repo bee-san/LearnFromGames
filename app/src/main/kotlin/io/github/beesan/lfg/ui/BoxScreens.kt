@@ -95,7 +95,7 @@ private fun DrawScope.drawBox(box: ScreenBox, picture: GamePicture, solid: Boole
 /**
  * A game's boxes in Settings › Games and apps: box 1, the dialogue box the
  * game is read in by itself, then any others, each read when it is picked on
- * the wheel. Each is shown on the game's last picture, to draw, draw again
+ * the wheel or, switched to, all the time beside box 1. Each is shown on the game's last picture, to draw, draw again
  * or take away, and more can be added.
  */
 @Composable
@@ -106,6 +106,7 @@ fun GameBoxes(
     picture: suspend (gameId: String) -> String?,
     onDraw: (Game, slot: Int) -> Unit,
     onRemove: (Game, slot: Int) -> Unit,
+    onAlways: (Game, slot: Int, Boolean) -> Unit,
 ) {
     val path by produceState<String?>(null, game.id) { value = picture(game.id) }
     val shown = rememberPicture(path, 320)
@@ -117,7 +118,17 @@ fun GameBoxes(
             onDraw, onRemove, removeLabel = "Read the whole screen",
         )
         others.forEachIndexed { i, box ->
-            BoxRow(game, i + 2, box, shown, "Read when picked on the wheel.", onDraw, onRemove, removeLabel = "Remove")
+            BoxRow(
+                game, i + 2, box, shown, if (box.always) "Always read, beside box 1." else "Read when picked on the wheel.",
+                onDraw, onRemove, removeLabel = "Remove",
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Always read", color = Lfg.Text, fontSize = 15.sp)
+                    if (first == null) Text("Draw box 1 first", color = Lfg.Dim, fontSize = 13.sp)
+                }
+                OnOff(box.always) { onAlways(game, i + 2, it) }
+            }
         }
         LfgButton("Add box…", { onDraw(game, others.size + 2) })
     }

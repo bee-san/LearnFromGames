@@ -90,6 +90,8 @@ class OverlayHost(
     private val onReadBox: (slot: Int) -> Unit,
     /** The game in front's boxes on its screen, from box 1, which is null while it is not drawn. */
     private val gameBoxes: () -> List<Box?>,
+    /** Which of [gameBoxes] (box 1 is 1) are read all the time beside the dialogue box. */
+    private val alwaysBoxes: () -> Set<Int> = { emptySet() },
     /** Translate or Explain pressed on the lines' screen for this saved line; the answer comes back through [onAnswer]. */
     private val onAsk: (lineId: String, what: Ask) -> Unit,
     /** A line's explanation and what was asked about it since, as kept with the line; null for a line not explained. */
@@ -599,6 +601,7 @@ class OverlayHost(
                 wheel.holes = wheelLine?.geometry?.rows.orEmpty()
                 wheel.caption = wheelLine?.takeIf { it.geometry == null }?.text?.replace('\n', ' ').orEmpty()
                 wheel.boxes = gameBoxes()
+                wheel.always = alwaysBoxes()
                 wheel.whyNot = ::wheelWhyNot
                 wheel.note = ::wheelNote
             }
