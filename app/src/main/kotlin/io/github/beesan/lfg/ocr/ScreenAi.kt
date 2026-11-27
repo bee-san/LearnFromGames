@@ -5,6 +5,7 @@ import io.github.beesan.lfg.core.Box
 import io.github.beesan.lfg.core.CharBox
 import io.github.beesan.lfg.core.GlyphBoxes
 import io.github.beesan.lfg.core.TextLine
+import io.github.beesan.lfg.core.mirrored
 import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -19,11 +20,17 @@ import java.util.zip.ZipInputStream
  * for Chromium. The library is built by tools/build_screenai.sh and is
  * optional; the model files are downloaded, never shipped.
  */
-class ScreenAi private constructor() {
+class ScreenAi private constructor(
+    /** The language read is written right to left: a row's pieces are ordered and joined from the right. */
+    private val rightToLeft: Boolean = false,
+) {
     /** [textHeight]: the smallest text's height in pixels, 0 for not known (tools/screenai/0006). */
     fun read(frame: Frame, textHeight: Int = 0): List<TextLine> {
         val bytes = nativeRead(frame.argb, frame.width, frame.height, textHeight) ?: error("ScreenAI could not read the frame.")
-        return joined(ordered(decode(bytes)))
+        val lines = decode(bytes)
+        if (!rightToLeft) return joined(ordered(lines))
+        // In a mirror, a row of Arabic runs as one of English does: its first word is the one at the left.
+        return joined(ordered(lines.map { it.mirrored() })).map { it.mirrored() }
     }
 
     companion object {
@@ -46,7 +53,11 @@ class ScreenAi private constructor() {
          * once, as that language (tools/screenai/0005). Empty, each line's script is guessed first, as Chrome does.
          */
         fun open(dir: File, language: String = ""): ScreenAi? =
-            if (loaded && nativeInit(dir.path.toByteArray(), language.toByteArray())) ScreenAi() else null
+            if (loaded && nativeInit(dir.path.toByteArray(), language.toByteArray())) {
+                ScreenAi(io.github.beesan.lfg.core.Language.of(language)?.rightToLeft == true)
+            } else {
+                null
+            }
 
         @JvmStatic
         private external fun nativeAvailable(): Boolean

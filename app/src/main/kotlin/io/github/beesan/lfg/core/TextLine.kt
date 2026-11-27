@@ -126,3 +126,20 @@ data class TextLine(
     /** One box around the whole span, whatever rows it is on. */
     fun spanBox(start: Int, end: Int): Box? = spanBoxes(start, end).reduceOrNull(Box::union)
 }
+
+/** [box] seen in a mirror (x made -x): right-to-left text then reads as left-to-right text does, for ordering and joining. */
+fun Box.mirrored() = Box(-right, top, -left, bottom)
+
+/** [this] in a mirror; twice is as it was. */
+fun TextLine.mirrored() = copy(box = box.mirrored(), chars = chars.map { it.copy(box = it.box.mirrored()) }, rows = rows.map { it.mirrored() })
+
+/** Whether [text] is written right to left: its first letter is Arabic, Hebrew, Syriac or another such script's. */
+fun rightToLeft(text: String): Boolean {
+    for (c in text) {
+        when (Character.getDirectionality(c)) {
+            Character.DIRECTIONALITY_RIGHT_TO_LEFT, Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC -> return true
+            Character.DIRECTIONALITY_LEFT_TO_RIGHT -> return false
+        }
+    }
+    return false
+}

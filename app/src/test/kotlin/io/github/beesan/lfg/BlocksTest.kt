@@ -6,6 +6,7 @@ import io.github.beesan.lfg.core.CharBox
 import io.github.beesan.lfg.core.TextLine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BlocksTest {
@@ -129,5 +130,15 @@ class BlocksTest {
     fun rowsOfDifferentTypeSizesAreNotOneSentence() {
         assertEquals(2, Blocks.group(listOf(row("見出し", 100, 100, 90), row("本文です", 100, 200, 50))).size)
         assertEquals(emptyList<TextLine>(), Blocks.group(listOf(row("   ", 0, 0))))
+    }
+
+    @Test
+    fun rightToLeftRowsJoinAtTheirRightEdge() {
+        // A right-aligned paragraph: the second, shorter row ends where the first does.
+        val first = row("مرحبا بالعالم", 100, 100, 40)
+        val second = row("كيف حالك", 100 + 13 * 40 - 8 * 40, 150, 40)
+        val pieces = Blocks.group(listOf(first, second))
+        assertEquals(1, pieces.size)
+        assertTrue(pieces[0].text.startsWith("مرحبا"))
     }
 }

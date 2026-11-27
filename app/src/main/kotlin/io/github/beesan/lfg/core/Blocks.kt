@@ -11,6 +11,14 @@ package io.github.beesan.lfg.core
  */
 object Blocks {
     fun group(lines: List<TextLine>): List<TextLine> {
+        // Rows mostly of a right-to-left script start at their right edge: grouped in a mirror, so the
+        // edges and the order below hold for them as they are, then put back.
+        val rtl = lines.count { !it.vertical && rightToLeft(it.text) } * 2 > lines.count { !it.vertical }
+        if (rtl) return groupAsLeftToRight(lines.map { it.mirrored() }).map { it.mirrored() }
+        return groupAsLeftToRight(lines)
+    }
+
+    private fun groupAsLeftToRight(lines: List<TextLine>): List<TextLine> {
         val candidates = lines.filter { it.text.isNotBlank() }
         val kept = candidates.filter { line -> candidates.none { base -> isFuriganaOf(line, base) } }
         val horizontal = kept.filter { !it.vertical }.sortedWith(compareBy({ it.box.top }, { it.box.left }))
