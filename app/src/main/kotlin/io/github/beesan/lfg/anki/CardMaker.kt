@@ -111,11 +111,11 @@ class CardMaker(
         val trim = prefs().trimBars && !content.fromApp
         val moving = if (prefs().animatedPicture && !content.fromApp) FrameRing.animation(content.lineStartMs, mediaDir, pictureName, trim) else null
         val still = content.picturePath?.let(::File)?.takeIf { moving == null && it.isFile }
-        val trimmed = still?.takeIf { trim }?.let { withoutBars(it, pictureName) }
-        val picture = moving ?: trimmed ?: still
+        val made = still?.let { forCard(it, pictureName, trim) }
+        val picture = moving ?: made ?: still
         val pictureHtml = picture?.let { anki.addPicture(it, pictureName) } ?: ""
         moving?.delete()
-        trimmed?.delete()
+        made?.delete()
         // The word said by a person, from the word audio, when the note type has a field for it.
         val soundName = "lfg_word_${card.createdAt}"
         val sound = if (wordAudio != null && !content.kanji && NoteTypes.hasWordAudioField(target.family, target.fields)) {
@@ -151,9 +151,9 @@ class CardMaker(
             val target = anki.target ?: return@withContext "AnkiDroid is not connected."
             val index = NoteTypes.pictureField(target.family, target.fields) ?: return@withContext "The note type has no picture field."
             val name = "lfg_${card.createdAt}_${System.currentTimeMillis()}"
-            val trimmed = picture.takeIf { prefs().trimBars }?.let { withoutBars(it, name) }
-            val html = anki.addPicture(trimmed ?: picture, name)
-            trimmed?.delete()
+            val made = forCard(picture, name, prefs().trimBars)
+            val html = anki.addPicture(made ?: picture, name)
+            made?.delete()
             if (html == null || !anki.setField(noteId, index, html)) return@withContext "AnkiDroid refused the picture."
             db.cards().update(card.copy(pictureName = name))
             "This screen is on the card of " + if (card.term.length > 12) card.term.take(12) + "…" else card.term
@@ -193,24 +193,47 @@ class CardMaker(
         }
     }
 
-    /** [picture] without its black bars, as a new file to send and delete; null when it has none or cannot be read. */
-    private fun withoutBars(picture: File, name: String): File? = try {
-        val bitmap = BitmapFactory.decodeFile(picture.path)
-        if (bitmap == null) {
+    /**
+     * [picture] as the card takes it, without its black bars when [trim]: an AVIF, or when none can be
+     * written the JPEG trim it always was. A new file to send and delete; null to send [picture] as it is,
+     * which is also what happens when the AVIF of an untrimmed picture comes out no smaller.
+     */
+    private fun forCard(picture: File, name: String, trim: Boolean): File? {
+        val bitmap = try {
+            BitmapFactory.decodeFile(picture.path)
+        } catch (e: Throwable) {
+            android.util.Log.w("LfgCards", "reading a picture failed", e)
             null
-        } else {
-            val pixels = IntArray(bitmap.width * bitmap.height)
-            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-            val box = BlackBars.inside(pixels, bitmap.width, bitmap.height)
-            if (box.width == bitmap.width && box.height == bitmap.height) {
-                null
-            } else {
-                mediaDir.mkdirs()
-                File(mediaDir, "$name.trim.jpg").also { out ->
-                    out.outputStream().use { Bitmap.createBitmap(bitmap, box.left, box.top, box.width, box.height).compress(Bitmap.CompressFormat.JPEG, 90, it) }
-                }
+        } ?: return null
+        val inside = if (trim) withoutBars(bitmap) else bitmap
+        try {
+            mediaDir.mkdirs()
+            val avif = File(mediaDir, "$name.avif")
+            if (inside != null && Avif.encode(inside, avif)) {
+                if (inside !== bitmap || avif.length() < picture.length()) return avif
+                avif.delete()
+                return null
             }
+            // No AVIF: the trim, if there is one, as before.
+            if (inside == null || inside === bitmap) return null
+            return File(mediaDir, "$name.trim.jpg").also { out ->
+                out.outputStream().use { inside.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            }
+        } catch (e: Throwable) {
+            android.util.Log.w("LfgCards", "making a card's picture failed", e)
+            return null
+        } finally {
+            if (inside != null && inside !== bitmap) inside.recycle()
+            bitmap.recycle()
         }
+    }
+
+    /** [bitmap] without its black bars; [bitmap] itself when it has none, null when that cannot be found. */
+    private fun withoutBars(bitmap: Bitmap): Bitmap? = try {
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        val box = BlackBars.inside(pixels, bitmap.width, bitmap.height)
+        if (box.width == bitmap.width && box.height == bitmap.height) bitmap else Bitmap.createBitmap(bitmap, box.left, box.top, box.width, box.height)
     } catch (e: Throwable) {
         android.util.Log.w("LfgCards", "trimming a picture failed", e)
         null

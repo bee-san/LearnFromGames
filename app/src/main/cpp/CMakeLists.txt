@@ -48,6 +48,14 @@ if(NOT LFG_HOST_TESTS)
   target_include_directories(lfg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/libwebp/src)
   target_link_libraries(lfg PRIVATE lfg_dict lfg_vocr libwebpmux webp jnigraphics dl)
   target_link_options(lfg PRIVATE -Wl,-z,max-page-size=16384)
+
+  # AVIF for card pictures (avif.cmake: libavif over libaom's encoder). A library of its own, loaded only
+  # when a card's picture is written: the reading service never maps it, and when it is missing or will
+  # not load, cards get the WebP or JPEG they always had.
+  include(${CMAKE_CURRENT_SOURCE_DIR}/avif.cmake)
+  add_library(lfg_avif SHARED lfg_avif_jni.c)
+  target_link_libraries(lfg_avif PRIVATE lfg_avif_core jnigraphics)
+  target_link_options(lfg_avif PRIVATE -Wl,-z,max-page-size=16384 -Wl,--gc-sections -Wl,--exclude-libs,ALL)
 else()
   # Host build: `cmake -S app/src/main/cpp -B host-build && cmake --build host-build`
   add_executable(lfg_dict_host host_test.cpp)
