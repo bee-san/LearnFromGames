@@ -24,8 +24,9 @@ object Blocks {
             val home = blocks.lastOrNull { it[0].vertical && followsColumn(it, line) }
             if (home != null) home += line else blocks += mutableListOf(line)
         }
-        // Reading order: top to bottom, then left to right, by where each piece starts.
-        return blocks.flatMap(::nameApart).map(::join).sortedWith(compareBy({ it.rows[0].top }, { it.rows[0].left }))
+        // Reading order: top to bottom, then left to right by where each piece starts; columns of vertical text right to left.
+        return blocks.flatMap(::nameApart).map(::join)
+            .sortedWith(compareBy({ it.rows[0].top }, { if (it.vertical) -it.rows[0].right else it.rows[0].left }))
     }
 
     /**

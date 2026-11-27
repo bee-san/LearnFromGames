@@ -385,6 +385,7 @@ class ReadingPipeline(
             lastSignature = signature
             previousFound = lastFound
             lastFound = look.found
+            detector.dotEnds = !japanese()
             if (signature.isEmpty()) {
                 // The text has gone (a scene change, a menu): nothing is on screen to tap.
                 detector.offer(signature, nowMs)

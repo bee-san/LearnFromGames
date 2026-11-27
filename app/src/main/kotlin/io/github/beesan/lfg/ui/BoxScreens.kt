@@ -131,6 +131,8 @@ fun GameBoxes(
             }
         }
         LfgButton("Add box…", { onDraw(game, others.size + 2) })
+        // The wheel's Box tiles go by number: one removed in the middle moves the ones after it.
+        if (others.size > 1) Text("Removing a box moves the ones after it up a number", color = Lfg.Dim, fontSize = 13.sp)
     }
 }
 

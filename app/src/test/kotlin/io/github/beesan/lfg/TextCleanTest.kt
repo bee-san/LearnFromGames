@@ -191,4 +191,12 @@ class TextCleanTest {
         assertNull(clean("口 目"))
         assertEquals("田口さん", clean("田口さん"))
     }
+
+    @Test
+    fun aKanjiOrKanaThatIsRightBesideKatakanaStays() {
+        assertEquals("ジャンプ力が上がった", clean("ジャンプ力が上がった"))
+        assertEquals("パン二つ", clean("パン二つ"))
+        assertEquals("残りターン", clean("残りターン"))
+        assertEquals("町へバスで", clean("町へバスで"))
+    }
 }

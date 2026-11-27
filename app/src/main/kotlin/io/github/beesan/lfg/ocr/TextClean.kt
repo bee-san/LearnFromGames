@@ -299,12 +299,14 @@ object TextClean {
                 }
                 val prev = near(-1)
                 val next = near(1)
-                if ((isKataWord(prev) && !isKanji(next)) || (isKataWord(next) && !isKanji(prev))) p.text = kana
+                // Beside a katakana word, and not before or after hiragana or a kanji, which a real kanji has: ジャンプ力が, パン二つ.
+                if ((isKataWord(prev) && !isKanji(next) && !isHira(next)) || (isKataWord(next) && !isKanji(prev) && !isHira(prev))) p.text = kana
             }
             KANA_TWINS[c]?.let { other ->
                 val prev = cp(pieces.getOrNull(i - 1))
                 val next = cp(pieces.getOrNull(i + 1))
-                if (isHira(c) && isKataWord(next) && !isHira(prev)) p.text = other
+                // Not after a kanji either: 残りターン, 町へバスで are as written.
+                if (isHira(c) && isKataWord(next) && !isHira(prev) && !isKanji(prev)) p.text = other
                 if (isKata(c) && isHira(next) && !isKataWord(prev)) p.text = other
             }
         }

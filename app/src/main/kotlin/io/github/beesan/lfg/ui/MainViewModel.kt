@@ -450,16 +450,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _keyTest.value = null
     }
 
+    /** Settings › Translation's change: a new key or model forgets the test of the old one. */
+    fun updateTranslation(change: (Prefs) -> Prefs) {
+        val before = app.settings.prefs.value
+        updatePrefs(change)
+        val after = change(before)
+        if (after.openRouterKey != before.openRouterKey || after.model != before.model) forgetKeyTest()
+    }
+
     fun testKey() {
         _keyTest.value = true to "Asking OpenRouter…"
         viewModelScope.launch {
             val p = app.settings.prefs.value
-            _keyTest.value = try {
+            val said = try {
                 val answer = OpenRouter.ask(p.openRouterKey, p.model, Translator.system(p.translateInto), Translator.prompt("", emptyList(), TEST_LINE))
                 true to "Works: 「$TEST_LINE」 → “$answer”"
             } catch (e: OpenRouter.Failure) {
                 false to (e.message ?: "")
             }
+            // The key or the model changed while it was asked: this is not what the new one would say.
+            val now = app.settings.prefs.value
+            _keyTest.value = if (now.openRouterKey == p.openRouterKey && now.model == p.model) said else null
         }
     }
 
@@ -806,6 +817,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── settings ─────────────────────────────────────────────────────────────
 
+    /** Bumped each time Search is opened from the wheel, so the page starts empty even if it was left open. */
+    val searchFresh = MutableStateFlow(0)
+
     fun updatePrefs(change: (Prefs) -> Prefs) = app.settings.update(change)
 
     /** Off puts every line found to be interface text back in Lines and the stats; on finds them afresh. */
@@ -948,13 +962,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         searchVn(game.title)
     }
 
+    /** The VNDB search going on: a newer one, or another game's, replaces it, and its late answer is not shown. */
+    private var vnSearching: kotlinx.coroutines.Job? = null
+
     fun searchVn(query: String) {
         val gameId = _vnSearch.value.gameId
         if (query.isBlank()) return
         _vnSearch.update { it.copy(searching = true, error = null) }
-        viewModelScope.launch {
+        vnSearching?.cancel()
+        vnSearching = viewModelScope.launch {
             val game = gameId?.let { withContext(Dispatchers.IO) { app.database.games().byId(it) } }
             val result = runCatching { app.characterNames.search(query, game) }
+            if (result.exceptionOrNull() is kotlinx.coroutines.CancellationException || _vnSearch.value.gameId != gameId) return@launch
             _vnSearch.update {
                 it.copy(
                     searching = false, searched = true, results = result.getOrDefault(emptyList()),

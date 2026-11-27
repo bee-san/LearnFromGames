@@ -28,6 +28,8 @@ data class CardContent(
     val fromApp: Boolean = false,
     /** A kanji mined from a word's headword rather than the word: tagged Kanji, and with no word audio. */
     val kanji: Boolean = false,
+    /** The note type and deck the card went to, once it has: a later change of picture or explanation fills its fields, not another type's. */
+    val sentTo: AnkiTarget? = null,
 )
 
 enum class Family { SENREN, LAPIS, KIKU, OWN }

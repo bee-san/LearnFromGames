@@ -60,7 +60,9 @@ class CardMaker(
         }
         var id = 0L
         try {
-            if (anki.target?.let { anki.isDuplicate(it, content.expression) } == true) return@withContext CardResult.Duplicate
+            // Looked for where the card will go (send settles that the same way), and never for a kanji card by its
+            // kanji alone, which is also the spelling of a one-kanji word.
+            if (!content.kanji && anki.isDuplicate(resolveTarget(), content.expression)) return@withContext CardResult.Duplicate
             id = db.cards().insert(row)
             onCard()
             send(row.copy(id = id), content)
@@ -92,7 +94,7 @@ class CardMaker(
             }
             try {
                 // The word may have been added since the card was made, or twice while AnkiDroid was away: it is the note already there.
-                val there = anki.target?.let { anki.noteId(it, content.expression) }
+                val there = if (content.kanji) null else anki.noteId(resolveTarget(), content.expression)
                 if (there != null) {
                     db.cards().update(card.copy(noteId = there, state = Card.STATE_ADDED))
                     store.attachNote(card.lineId, there)
@@ -110,8 +112,7 @@ class CardMaker(
     private suspend fun send(card: Card, content: CardContent): CardResult {
         // The saved choice is used as is; it is looked for again when it has gone, and while it is
         // only the app's own note type: Kiku, Lapis or Senren installed since then is what was wanted.
-        var target = anki.target ?: anki.chooseTarget()
-        if (target.family == Family.OWN || !anki.targetStillValid(target)) target = anki.chooseTarget()
+        val target = resolveTarget()
 
         val pictureName = "lfg_${card.createdAt}"
         // A short moving picture of the line appearing, when that is switched on and the frames are there; else the still.
@@ -120,18 +121,25 @@ class CardMaker(
         val still = content.picturePath?.let(::File)?.takeIf { moving == null && it.isFile }
         val made = still?.let { forCard(it, pictureName, trim) }
         val picture = moving ?: made ?: still
-        val pictureHtml = picture?.let { anki.addPicture(it, pictureName) } ?: ""
-        moving?.delete()
-        made?.delete()
-        // The word said by a person, from the word audio, when the note type has a field for it.
-        val soundName = "lfg_word_${card.createdAt}"
-        val sound = if (wordAudio != null && !content.kanji && NoteTypes.hasWordAudioField(target.family, target.fields)) {
-            wordAudio.export(content.expression, content.reading, mediaDir, soundName)
-        } else {
-            null
+        // Made only to be handed to AnkiDroid: gone afterwards, whether it took them or not.
+        var sound: File? = null
+        val pictureHtml: String
+        val soundTag: String
+        try {
+            pictureHtml = picture?.let { anki.addPicture(it, pictureName) } ?: ""
+            // The word said by a person, from the word audio, when the note type has a field for it.
+            val soundName = "lfg_word_${card.createdAt}"
+            sound = if (wordAudio != null && !content.kanji && NoteTypes.hasWordAudioField(target.family, target.fields)) {
+                wordAudio.export(content.expression, content.reading, mediaDir, soundName)
+            } else {
+                null
+            }
+            soundTag = sound?.let { anki.addSound(it, soundName) } ?: ""
+        } finally {
+            moving?.delete()
+            made?.delete()
+            sound?.delete()
         }
-        val soundTag = sound?.let { anki.addSound(it, soundName) } ?: ""
-        sound?.delete()
         val fields = NoteTypes.fill(target.family, target.fields, content, pictureHtml, soundTag, explained(card.lineId))
         // The game's name as it is now: a card that waited for AnkiDroid may have outlasted a rename.
         val gameName = db.lines().byId(card.lineId)?.gameName ?: content.gameName
@@ -140,7 +148,10 @@ class CardMaker(
             db.cards().update(card.copy(state = Card.STATE_FAILED))
             return CardResult.Failed("AnkiDroid refused the card.")
         }
-        val added = card.copy(noteId = noteId, state = Card.STATE_ADDED, pictureName = pictureName.takeIf { pictureHtml.isNotEmpty() })
+        val added = card.copy(
+            noteId = noteId, state = Card.STATE_ADDED, pictureName = pictureName.takeIf { pictureHtml.isNotEmpty() },
+            payload = Json.encodeToString(content.copy(sentTo = target)),
+        )
         db.cards().update(added)
         store.attachNote(card.lineId, noteId)
         media.audioFor(added, target, content.lineStartMs, content.fromApp)
@@ -157,7 +168,8 @@ class CardMaker(
         val card = db.cards().newestAdded() ?: return@withContext "No card has been made yet."
         val noteId = card.noteId ?: return@withContext "No card has been made yet."
         try {
-            val target = anki.target ?: return@withContext "AnkiDroid is not connected."
+            // The note type the card went to, which a change of profile since may not be the one in use now.
+            val target = sentTo(card) ?: anki.target ?: return@withContext "AnkiDroid is not connected."
             val index = NoteTypes.pictureField(target.family, target.fields) ?: return@withContext "The note type has no picture field."
             val name = "lfg_${card.createdAt}_${System.currentTimeMillis()}"
             val made = forCard(picture, name, prefs().trimBars)
@@ -172,6 +184,18 @@ class CardMaker(
         }
     }
 
+    /**
+     * Where the next card goes. The saved choice is used as is; it is looked for again when it has gone, and while it is
+     * only the app's own note type: Kiku, Lapis or Senren installed since then is what was wanted.
+     */
+    private fun resolveTarget(): AnkiTarget {
+        val saved = anki.target ?: return anki.chooseTarget()
+        return if (saved.family == Family.OWN || !anki.targetStillValid(saved)) anki.chooseTarget() else saved
+    }
+
+    /** Where [card] was sent, for cards made since that is kept; null for older ones. */
+    private fun sentTo(card: Card): AnkiTarget? = runCatching { Json.decodeFromString<CardContent>(card.payload).sentTo }.getOrNull()
+
     /** The line's explanation and what was asked about it, as the card's field has it; empty when there is none. */
     private suspend fun explained(lineId: String): String =
         db.explanations().of(lineId)?.let { Explainer.html(Explainer.conversation(it), Sentence::escapeHtml) }.orEmpty()
@@ -185,11 +209,12 @@ class CardMaker(
             if (anki.status() != AnkiStatus.READY) return@withContext
             val cards = db.cards().addedFor(lineId)
             if (cards.isEmpty()) return@withContext
-            val target = anki.target ?: return@withContext
-            val index = NoteTypes.miscField(target.family, target.fields) ?: return@withContext
+            val now = anki.target ?: return@withContext
             val text = explained(lineId)
             for (card in cards) {
                 val noteId = card.noteId ?: continue
+                val target = sentTo(card) ?: now
+                val index = NoteTypes.miscField(target.family, target.fields) ?: continue
                 val game = try {
                     Json.decodeFromString<CardContent>(card.payload).gameName
                 } catch (_: Exception) {

@@ -22,7 +22,24 @@ object Sentence {
             escapeHtml(sentence.substring(e))
     }
 
-    /** Anki's plain furigana form, `不思議[ふしぎ]`; just the word when the reading adds nothing. */
-    fun furiganaPlain(expression: String, reading: String): String =
-        if (reading.isEmpty() || reading == expression) expression else "$expression[$reading]"
+    /**
+     * Anki's plain furigana form, as Yomitan fills it: each run of kanji with its own reading, `食[た]べる`,
+     * `取[と]り 引[ひ]き` (a space before a run that follows kana); the whole word with its reading when it
+     * cannot be divided; just the word when the reading adds nothing.
+     */
+    fun furiganaPlain(expression: String, reading: String): String {
+        if (reading.isEmpty() || reading == expression) return expression
+        val rubies = Furigana.divide(expression, reading)
+        if (rubies.isEmpty()) return "$expression[$reading]"
+        return buildString {
+            var at = 0
+            for (ruby in rubies) {
+                append(expression, at, ruby.start)
+                if (ruby.start > 0) append(' ')
+                append(expression, ruby.start, ruby.end).append('[').append(ruby.reading).append(']')
+                at = ruby.end
+            }
+            append(expression, at, expression.length)
+        }
+    }
 }

@@ -599,7 +599,7 @@ class MainActivity : ComponentActivity() {
                             onChooseFolder = { pickFolder.launch(null) },
                             onBack = ::back,
                         )
-                        page == Page.TRANSLATION -> TranslationScreen(prefs, model::updatePrefs, keyTest, model::testKey, ::back)
+                        page == Page.TRANSLATION -> TranslationScreen(prefs, model::updateTranslation, keyTest, model::testKey, ::back)
                         page == Page.CONTROLS -> ControlsScreen(prefs, model::updatePrefs, ::back)
                         page == Page.WHEEL -> {
                             // Games a wheel can be given to: the one read last first, then the rest by name.
@@ -638,6 +638,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onBack = ::back,
+                            fresh = model.searchFresh.collectAsStateWithLifecycle().value,
                         )
                         page == Page.RECOGNITION -> RecognitionScreen(
                             reader, ScreenAi.available(), { model.downloadScreenAi() }, prefs.interfaceApart, model::setInterfaceApart, ::back,
@@ -878,6 +879,7 @@ class MainActivity : ComponentActivity() {
                 PAGE_NAMES -> requested.value = Page.GAMES
                 PAGE_SEARCH -> {
                     model.search("")
+                    model.searchFresh.value++
                     requested.value = Page.SEARCH
                 }
                 // Today's page of the game; with nothing kept of it today, the shelf.

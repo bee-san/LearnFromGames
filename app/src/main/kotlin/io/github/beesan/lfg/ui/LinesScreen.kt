@@ -356,7 +356,8 @@ private fun Explanation(state: MainViewModel.ExplainState, onExplain: () -> Unit
             LfgButton(
                 if (talk == null) "Explain" else "Explain again",
                 { if (talk != null && talk.turns.isNotEmpty()) confirm = true else onExplain() },
-                enabled = !state.busy,
+                // Not while a question waits for its answer either, which would be put back over the new explanation.
+                enabled = !state.busy && !(state.asking != null && state.askError == null),
             )
         }
     }

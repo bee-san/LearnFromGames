@@ -30,6 +30,10 @@ package io.github.beesan.lfg.core
  * before is read for it.
  */
 class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Long = 6_000, private val atSentenceEnd: Boolean = true) {
+    /** A single full stop "." ends a sentence too: in a language other than Japanese, where 「……」 is not typed a dot at a time. */
+    @Volatile
+    var dotEnds = false
+
     private var candidate = ""
     private var candidateSince = 0L
     private var lastSettled = ""
@@ -101,7 +105,7 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
             // A line typing itself out grows from the one before it; anything else is a new line.
             val growing = candidate.isNotEmpty() && signature.startsWith(candidate)
             // Seen typing, it waited to hold still even though it had ended a sentence; and now it is gone.
-            if (atSentenceEnd && !growing && candidate.isNotEmpty() && !same(candidate, lastSettled) && ended(candidate, lastSettled)) {
+            if (atSentenceEnd && !growing && candidate.isNotEmpty() && !same(candidate, lastSettled) && ended(candidate, lastSettled, dotEnds)) {
                 missed = true
                 lastSettled = candidate
                 showing = candidate
@@ -115,7 +119,7 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
             }
             // Whole on the first picture of it. Text growing from the look before is being typed, and a
             // rest after a full stop in the middle of a page looks just like its end: that waits, as ever.
-            if (atSentenceEnd && !growing && ended(signature, lastSettled)) return settle(signature, provisional = true)
+            if (atSentenceEnd && !growing && ended(signature, lastSettled, dotEnds)) return settle(signature, provisional = true)
             if (restlessSince == 0L) restlessSince = nowMs
             // Still changing after all this time: it is not typing out, it is a screen that never holds still.
             return nowMs - restlessSince >= restlessMs && settle(signature, restless = true)
@@ -164,12 +168,13 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
          * Dots do not count: 「……」 is typed a dot at a time. Rows that were there before are left out,
          * so a help line under the story that ends in a full stop does not make every look a whole line.
          */
-        fun ended(signature: String, before: String): Boolean {
+        fun ended(signature: String, before: String, dotEnds: Boolean = false): Boolean {
             val old = before.split('\n')
             val row = signature.split('\n').lastOrNull { it.isNotBlank() && it !in old }?.trimEnd() ?: return false
             val text = row.trimEnd { it in CLOSES }
             if (text.isEmpty()) return false
             if (text.last() in ENDS) return true
+            if (dotEnds && text.last() == '.' && text.getOrNull(text.length - 2) != '.') return true
             // Speech with no full stop: closed by the bracket that the new rows opened with.
             if (text.length == row.length) return false
             val first = signature.split('\n').firstOrNull { it.isNotBlank() && it !in old }?.trimStart() ?: return false

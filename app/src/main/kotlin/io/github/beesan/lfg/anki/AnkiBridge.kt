@@ -93,10 +93,12 @@ class AnkiBridge(private val context: Context) {
 
     private fun ownTarget(models: Map<Long, String>): AnkiTarget {
         val deck = ownDeck()
-        val existing = models.entries.firstOrNull { (id, name) ->
-            name == NoteTypes.OWN_MODEL && api.getFieldList(id)?.toList() == NoteTypes.OWN_FIELDS
+        // LFG's own, even with fields the player added to it (cards are filled by the fields' names): not made again beside it.
+        val existing = models.entries.firstNotNullOfOrNull { (id, name) ->
+            if (name != NoteTypes.OWN_MODEL) return@firstNotNullOfOrNull null
+            api.getFieldList(id)?.toList()?.takeIf { it.containsAll(NoteTypes.OWN_FIELDS) }?.let { id to it }
         }
-        val modelId = existing?.key ?: api.addNewCustomModel(
+        val modelId = existing?.first ?: api.addNewCustomModel(
             NoteTypes.OWN_MODEL,
             NoteTypes.OWN_FIELDS.toTypedArray(),
             arrayOf("Card 1"),
@@ -106,7 +108,7 @@ class AnkiBridge(private val context: Context) {
             deck.first,
             0,
         ) ?: error("AnkiDroid would not create the note type.")
-        return AnkiTarget(modelId, NoteTypes.OWN_MODEL, deck.first, deck.second, Family.OWN, NoteTypes.OWN_FIELDS, created = existing == null)
+        return AnkiTarget(modelId, NoteTypes.OWN_MODEL, deck.first, deck.second, Family.OWN, existing?.second ?: NoteTypes.OWN_FIELDS, created = existing == null)
     }
 
     private fun ownDeck(): Pair<Long, String> {

@@ -244,6 +244,9 @@ class CoreTest {
         assertEquals("不思議[ふしぎ]", Sentence.furiganaPlain("不思議", "ふしぎ"))
         assertEquals("ふしぎ", Sentence.furiganaPlain("ふしぎ", "ふしぎ"))
         assertEquals("ＣＤ", Sentence.furiganaPlain("ＣＤ", ""))
+        assertEquals("食[た]べる", Sentence.furiganaPlain("食べる", "たべる"))
+        assertEquals("取[と]り 引[ひ]き", Sentence.furiganaPlain("取り引き", "とりひき"))
+        assertEquals("お 茶[ちゃ]", Sentence.furiganaPlain("お茶", "おちゃ"))
     }
 
     @Test

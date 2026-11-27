@@ -763,11 +763,13 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** The line cut into the words the dictionaries know, the longest match at each place, as stepping by word does. */
     private suspend fun words(line: LookupLine): List<Word> {
-        synchronized(wordsOf) { wordsOf[line.text] }?.let { return it }
         val vn = app.characterNames.vnFor(line.gameId)
+        val language = app.settings.prefs.value.learning
+        // The same text splits otherwise in another language, or with another game's character names first.
+        val key = "${language.tag}\u0000$vn\u0000${line.text}"
+        synchronized(wordsOf) { wordsOf[key] }?.let { return it }
         val text = line.text
         val found = ArrayList<Word>()
-        val language = app.settings.prefs.value.learning
         // Japanese is looked up from any kana or kanji; another language from a letter, or, where spaces or the pack mark words, only from a word’s start.
         fun starts(at: Int) = if (language.japanese) Furigana.japanese(text[at]) else
             Character.isLetter(text[at]) && (!(language.wordStart || language.spaced) || at == 0 || !Character.isLetterOrDigit(text[at - 1]))
@@ -786,7 +788,7 @@ class LfgAccessibilityService : AccessibilityService() {
             found += Word(i, i + length, entry.expression, entry.reading)
             i += length
         }
-        synchronized(wordsOf) { wordsOf[text] = found }
+        synchronized(wordsOf) { wordsOf[key] = found }
         return found
     }
 

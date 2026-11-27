@@ -47,12 +47,14 @@ fun SearchScreen(
     onTap: (Int) -> Unit,
     onLink: (EntryLink, Int) -> Unit,
     onBack: () -> Unit,
+    /** Counts each time Search is opened afresh (from the wheel): the field is emptied and takes the keyboard again. */
+    fresh: Int = 0,
 ) {
-    var typed by rememberSaveable { mutableStateOf("") }
+    var typed by rememberSaveable(fresh) { mutableStateOf("") }
     val field = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val shape = RoundedCornerShape(6.dp)
-    LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
+    LaunchedEffect(fresh) { runCatching { field.requestFocus() } }
     Column(Modifier.fillMaxSize()) {
         PageHeader("Search") { LfgButton("Back", onBack) }
         HorizontalDivider(color = Lfg.Border)

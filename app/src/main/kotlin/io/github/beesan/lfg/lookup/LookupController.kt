@@ -345,7 +345,16 @@ class LookupController(
     }
 
     /** Makes the entry at [index] the one A adds and a note is on. */
-    fun selectEntry(index: Int) = _state.update { if (index in it.entries.indices) it.copy(entryIndex = index) else it }
+    fun selectEntry(index: Int) = _state.update { if (index in it.entries.indices) withEntry(it, index) else it }
+
+    /** [state] on entry [index], the word marked on screen as long as that entry matched. */
+    private fun withEntry(state: LookupState, index: Int): LookupState {
+        val matched = state.entries.getOrNull(index)?.matched.orEmpty()
+        val text = state.lines.getOrNull(state.line)?.text
+        if (state.kanjiFrom != null || matched.isEmpty() || text == null) return state.copy(entryIndex = index)
+        val end = (state.spanStart + matched.length).coerceAtMost(text.length)
+        return state.copy(entryIndex = index, spanEnd = end, markEnd = if (selection().wholeWord) end else state.markEnd)
+    }
 
     fun nextEntry() = stepEntry(+1)
     fun previousEntry() = stepEntry(-1)
@@ -353,7 +362,7 @@ class LookupController(
     private fun stepEntry(step: Int) = _state.update {
         val index = (it.entryIndex + step).coerceIn(0, (it.entries.size - 1).coerceAtLeast(0))
         if (index == it.entryIndex) return@update it
-        it.copy(entryIndex = index, message = null)
+        withEntry(it, index).copy(message = null)
     }
 
     /**
@@ -400,7 +409,9 @@ class LookupController(
                 expression = entry.expression,
                 reading = if (kanji) KanjiEntry.reading(entry) else entry.reading,
                 sentence = line.text,
-                spanStart = state.spanStart, spanEnd = state.spanEnd,
+                // The entry picked marks as much of the sentence as it matched, not the first entry's whole span.
+                spanStart = state.spanStart,
+                spanEnd = if (kanji || entry.matched.isEmpty()) state.spanEnd else (state.spanStart + entry.matched.length).coerceAtMost(line.text.length),
                 senses = if (kanji) KanjiEntry.senses(entry) else entry.senses(),
                 pitchPositions = Pronunciation.accents(entry).map { it.position },
                 frequencyRank = Pronunciation.frequencyRank(entry),
