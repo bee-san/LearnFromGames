@@ -35,6 +35,7 @@ struct Api {
   void (*light_mode)(bool) = nullptr;
   void (*fast_mode)(bool) = nullptr;
   void (*language)(const char*) = nullptr;
+  void (*text_height)(int32_t) = nullptr;
   char* (*perform)(const Bitmap*, uint32_t*) = nullptr;
   void (*free_chars)(char*) = nullptr;
 };
@@ -78,6 +79,7 @@ bool load() {
   g_api.light_mode = reinterpret_cast<void (*)(bool)>(dlsym(lib, "SetOCRLightMode"));
   g_api.fast_mode = reinterpret_cast<void (*)(bool)>(dlsym(lib, "SetOCRFastMode"));
   g_api.language = reinterpret_cast<void (*)(const char*)>(dlsym(lib, "SetOCRLanguage"));
+  g_api.text_height = reinterpret_cast<void (*)(int32_t)>(dlsym(lib, "SetOCRTextHeight"));
   g_api.perform = reinterpret_cast<char* (*)(const Bitmap*, uint32_t*)>(dlsym(lib, "PerformOCR"));
   g_api.free_chars = reinterpret_cast<void (*)(char*)>(dlsym(lib, "FreeLibraryAllocatedCharArray"));
   if (g_api.set_files == nullptr || g_api.init == nullptr || g_api.perform == nullptr || g_api.free_chars == nullptr) {
@@ -130,7 +132,8 @@ JNIEXPORT jboolean JNICALL Java_io_github_beesan_lfg_ocr_ScreenAi_nativeInit(JNI
 
 // Returns the serialized chrome_screen_ai.VisualAnnotation; empty for no text, null when the read failed.
 JNIEXPORT jbyteArray JNICALL Java_io_github_beesan_lfg_ocr_ScreenAi_nativeRead(JNIEnv* env, jclass, jintArray pixels,
-                                                                               jint width, jint height) {
+                                                                               jint width, jint height,
+                                                                               jint text_height) {
   std::lock_guard<std::mutex> guard(g_lock);
   if (!g_ready || pixels == nullptr || width <= 0 || height <= 0) return nullptr;
   const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height);
@@ -146,6 +149,10 @@ JNIEXPORT jbyteArray JNICALL Java_io_github_beesan_lfg_ocr_ScreenAi_nativeRead(J
     gray[i] = static_cast<uint8_t>((77 * ((p >> 16) & 0xFF) + 150 * ((p >> 8) & 0xFF) + 29 * (p & 0xFF) + 128) >> 8);
   }
   env->ReleasePrimitiveArrayCritical(pixels, const_cast<jint*>(argb), JNI_ABORT);
+
+  // How tall the smallest text is, when the probe saw it (tools/screenai/0006): text is looked for at the scale
+  // that keeps it just tall enough to find, often a third of the pixels. A library built without it reads as before.
+  if (g_api.text_height != nullptr) g_api.text_height(text_height > 0 ? text_height : 0);
 
   Bitmap bitmap{};
   bitmap.pixels = gray.data();

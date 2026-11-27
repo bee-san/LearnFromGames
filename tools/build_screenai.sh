@@ -36,6 +36,8 @@
 #                                                         the faster cores of a phone's processor
 #   0005-language-given-and-lines-remembered              screenai_ocr: SetOCRLanguage, one pass by the language's
 #                                                         recognizer; fast mode remembers the lines it read
+#   0006-detection-at-the-texts-own-size                  screenai_ocr: SetOCRTextHeight, text looked for at its own
+#                                                         size; the detector's threads off the slow cores
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -268,7 +270,7 @@ check_library() {
     die "$so has a LOAD segment that is not 16 KB aligned"
   fi
   symbols="$("$LLVM_BIN/llvm-nm" -D --defined-only "$so")"
-  for sym in SetFileContentFunctions InitOCRUsingCallback SetOCRLightMode SetOCRFastMode SetOCRLanguage GetMaxImageDimension PerformOCR \
+  for sym in SetFileContentFunctions InitOCRUsingCallback SetOCRLightMode SetOCRFastMode SetOCRLanguage SetOCRTextHeight GetMaxImageDimension PerformOCR \
     FreeLibraryAllocatedCharArray UninitializeOCR; do
     grep -q " T $sym\$" <<<"$symbols" || die "$so does not export $sym"
   done

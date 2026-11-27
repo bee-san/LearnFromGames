@@ -1,0 +1,452 @@
+LearnFromGames: text is looked for at its own size, the detector's pyramid is kept for the recognizer, and the
+detector's threads keep off the slowest cores.
+
+SetOCRTextHeight(pixels) tells the library how tall the smallest text on the pages to come is (LFG knows it from
+its probe). The detector fits every page into 1280 x 1280 whatever is on it; given the height, it looks at the
+scale that keeps that text 24 px tall when that is smaller, and a narrower page is then less work rather than
+blown up again. Measured on a desktop with the probe's text height stood in for by the labelled lines':
+994 Vita and PSP screens cut to the rows around their text, a read 22 ms -> 7 ms (median), characters wrong 7.5% ->
+7.1%; cut to the text's columns too, 5 ms. What goes is mostly lines of nothing but dots or dashes (「…………」),
+which grow too thin to find at a third of the size. Without a height (0, the default) the output is the same as
+before, byte for byte.
+
+The recognizer crops lines of large text from the detector's pyramid; it was built again for that (and the
+detector's config read and parsed again). It is now handed over in PageLayout::pyramid.
+
+The XNNPACK delegate starts its pool's threads when it is created, and they keep the cores they start on; the
+detector's (four threads) now start on the faster cores, as the recognizer's do since 0004, and in fast mode the
+calling thread keeps to them for the read. FasterCores moves from recognizer.cc to tflite_model.cc for that.
+
+diff --git a/cpp/capi/c_api.cc b/cpp/capi/c_api.cc
+index 70c5efe..085a1e1 100644
+--- a/cpp/capi/c_api.cc
++++ b/cpp/capi/c_api.cc
+@@ -32,6 +32,7 @@ int g_max_image_dimension = 0;
+ bool g_light_mode = false;
+ bool g_fast_mode = false;
+ std::string g_language;
++int g_text_height = 0;
+ 
+ char* CopyOut(const std::string& s, uint32_t* length) {
+   *length = static_cast<uint32_t>(s.size());
+@@ -62,6 +63,7 @@ SCREENAI_EXPORT bool InitOCRUsingCallback() {
+   if (!g_engine) return false;
+   g_engine->SetLightMode(g_light_mode);
+   g_engine->SetFastMode(g_fast_mode);
++  g_engine->SetTextHeight(g_text_height);
+   g_max_image_dimension = 2048;
+   return true;
+ }
+@@ -88,6 +90,13 @@ SCREENAI_EXPORT void SetOCRLanguage(const char* language) {
+   if (g_engine) g_engine->SetLanguage(g_language);
+ }
+ 
++// LearnFromGames, not in the original: the height in pixels of the smallest text on the pages to come, 0 (the
++// default) for not known. See TextDetector::SetTextHeight. Kept for every page until set again.
++SCREENAI_EXPORT void SetOCRTextHeight(int32_t pixels) {
++  g_text_height = pixels > 0 ? pixels : 0;
++  if (g_engine) g_engine->SetTextHeight(g_text_height);
++}
++
+ SCREENAI_EXPORT uint32_t GetMaxImageDimension() { return g_max_image_dimension; }
+ 
+ // The original keeps reporting the max image dimension after uninitialization.
+diff --git a/cpp/capi/exports.map b/cpp/capi/exports.map
+index 1688fe6..ea9bb96 100644
+--- a/cpp/capi/exports.map
++++ b/cpp/capi/exports.map
+@@ -1,6 +1,6 @@
+ {
+   global:
+-    SetFileContentFunctions; InitOCRUsingCallback; SetOCRLightMode; SetOCRFastMode; SetOCRLanguage; GetMaxImageDimension; UninitializeOCR;
++    SetFileContentFunctions; InitOCRUsingCallback; SetOCRLightMode; SetOCRFastMode; SetOCRLanguage; SetOCRTextHeight; GetMaxImageDimension; UninitializeOCR;
+     PerformOCR; FreeLibraryAllocatedCharArray; FreeLibraryAllocatedInt32Array; GetLibraryVersion; EnableDebugMode;
+   local: *;
+ };
+diff --git a/cpp/capi/exports.txt b/cpp/capi/exports.txt
+index c815901..72a09a0 100644
+--- a/cpp/capi/exports.txt
++++ b/cpp/capi/exports.txt
+@@ -3,6 +3,7 @@ _InitOCRUsingCallback
+ _SetOCRLightMode
+ _SetOCRFastMode
+ _SetOCRLanguage
++_SetOCRTextHeight
+ _GetMaxImageDimension
+ _UninitializeOCR
+ _PerformOCR
+diff --git a/cpp/capi/ocr_engine.cc b/cpp/capi/ocr_engine.cc
+index d603000..2d40016 100644
+--- a/cpp/capi/ocr_engine.cc
++++ b/cpp/capi/ocr_engine.cc
+@@ -5,6 +5,9 @@
+ #include <cstdio>
+ #include <cstdlib>
+ #include <fstream>
++#include <optional>
++
++#include "tflite_model.h"
+ 
+ #include "visual_annotation.h"
+ 
+@@ -36,6 +39,11 @@ void OcrEngine::SetLanguage(const std::string& language) {
+   recognizer_->SetLanguage(language);
+ }
+ 
++void OcrEngine::SetTextHeight(int pixels) {
++  std::lock_guard<std::mutex> lock(mu_);
++  detector_->SetTextHeight(pixels);
++}
++
+ namespace {
+ 
+ // SCREENAI_STAGE_DUMP=<dir>: writes each stage's output as goodoc.PageLayoutProto, named like trace/stage_dump.py
+@@ -70,6 +78,10 @@ bool OcrEngine::RunLayout(const RgbaImage& rgba, PageLayout* layout) { return Ru
+ 
+ bool OcrEngine::RunLayout(const GrayImage& gray, PageLayout* layout) {
+   std::lock_guard<std::mutex> lock(mu_);
++  // LearnFromGames: in fast mode the calling thread, which runs a share of the detector's operators and of the
++  // line recognition, keeps off the slowest cores for the read (see FasterCores).
++  std::optional<FasterCoresScope> pinned;
++  if (fast_) pinned.emplace();
+   StageTimer timer;
+   const RgbaImage rgba;  // the recognizer takes it and reads only the gray image
+   *layout = PageLayout();
+@@ -82,6 +94,7 @@ bool OcrEngine::RunLayout(const GrayImage& gray, PageLayout* layout) {
+   if (!recognizer_->Recognize(rgba, gray, layout)) return false;
+   timer.Mark("recognize");
+   DumpStage(*layout, "002_lay_in");
++  layout->pyramid.reset();
+   if (!(fast_ ? layout_analyzer_->AnalyzeFast(layout) : layout_analyzer_->Analyze(gray, layout))) return false;
+   timer.Mark("layout");
+   DumpStage(*layout, "003_final");
+diff --git a/cpp/capi/ocr_engine.h b/cpp/capi/ocr_engine.h
+index 7c8f6f7..c8353b8 100644
+--- a/cpp/capi/ocr_engine.h
++++ b/cpp/capi/ocr_engine.h
+@@ -34,6 +34,9 @@ class OcrEngine {
+   void SetFastMode(bool fast);
+   // LearnFromGames: the language of what is read, "" for not known (LineRecognizer::SetLanguage).
+   void SetLanguage(const std::string& language);
++  // LearnFromGames: the height of the smallest text on the pages to come, 0 for not known
++  // (TextDetector::SetTextHeight).
++  void SetTextHeight(int pixels);
+ 
+  private:
+   std::shared_ptr<Resources> resources_;
+diff --git a/cpp/src/detector.cc b/cpp/src/detector.cc
+index 9218f74..f7feb27 100644
+--- a/cpp/src/detector.cc
++++ b/cpp/src/detector.cc
+@@ -1683,11 +1683,16 @@ int LineParagraph(const std::vector<Level1Box>& l1, const MergedLine& m) {
+ // The image pyramid of GroupRpnDetectorV2 (also rebuilt by the line recognizer, which crops lines of large text
+ // from it: DetectorPyramid).
+ void BuildPyramid(const TextDetector::Config& c, const Plane& src, std::vector<std::unique_ptr<Plane>>* levels_out,
+-                  std::vector<float>* scales_out) {
++                  std::vector<float>* scales_out, float shrink = 1.0f) {
+   const int W = src.width, H = src.height;
++  // LearnFromGames: the first shape made smaller by `shrink` (TextDetector::SetTextHeight).
++  std::pair<int, int> fit = c.predefined_shapes.front();
++  if (shrink < 1.0f)
++    fit = {std::max(32, static_cast<int>(rintf(shrink * static_cast<float>(fit.first)))),
++           std::max(32, static_cast<int>(rintf(shrink * static_cast<float>(fit.second))))};
+   // Reference image: box-filter scale so the image fits the largest predefined shape, upscaling (if at all) only
+   // up to the first shape (GroupRpnDetectorV2, fixed_shape_inference = false).
+-  const auto& first = c.predefined_shapes.front();
++  const auto& first = fit;
+   const auto& last = c.predefined_shapes.back();
+   float up = static_cast<float>(first.first) / static_cast<float>(W);
+   if (static_cast<float>(first.second) / static_cast<float>(H) < up)
+@@ -1731,7 +1736,7 @@ void BuildPyramid(const TextDetector::Config& c, const Plane& src, std::vector<s
+ 
+ TextDetector::~TextDetector() = default;
+ 
+-std::vector<DetectorPyramidLevel> DetectorPyramid(const Resources& res, const GrayImage& gray) {
++std::vector<DetectorPyramidLevel> DetectorPyramid(const Resources& res, const GrayImage& gray, float shrink) {
+   std::string cfg_bytes;
+   TextDetector::Config c;
+   if (gray.width < 1 || gray.height < 1 || gray.width >= 32768 || gray.height >= 32768) return {};
+@@ -1741,7 +1746,7 @@ std::vector<DetectorPyramidLevel> DetectorPyramid(const Resources& res, const Gr
+   src.data = gray.data;
+   std::vector<std::unique_ptr<Plane>> levels;
+   std::vector<float> scales;
+-  BuildPyramid(c, src, &levels, &scales);
++  BuildPyramid(c, src, &levels, &scales, shrink);
+   levels[0].reset();  // never fed to the model, and gone when the lines are cropped (see Detect)
+   std::vector<DetectorPyramidLevel> out(levels.size());
+   for (size_t k = 0; k < levels.size(); k++) {
+@@ -1779,7 +1784,16 @@ bool TextDetector::Detect(const GrayImage& gray, PageLayout* out) {
+   const int num_levels = static_cast<int>(c.packing_sequence.size());
+   std::vector<std::unique_ptr<Plane>> levels;
+   std::vector<float> scales;
+-  BuildPyramid(c, src, &levels, &scales);
++  // LearnFromGames: the scale that keeps the smallest text known kTextPixels tall, where that is below the
++  // detector's own (the first shape's fit of the page, whatever the pyramid's reference level).
++  float shrink = 1.0f;
++  if (text_height_ > 0) {
++    const auto& first = c.predefined_shapes.front();
++    const float own = std::min(static_cast<float>(first.first) / static_cast<float>(W),
++                               static_cast<float>(first.second) / static_cast<float>(H));
++    shrink = std::min(1.0f, static_cast<float>(kTextPixels) / static_cast<float>(text_height_) / own);
++  }
++  BuildPyramid(c, src, &levels, &scales, shrink);
+   if (DumpDir()) {
+     std::string d;
+     for (const auto& [w, h] : c.predefined_shapes) d += "shape " + std::to_string(w) + "x" + std::to_string(h) + "\n";
+@@ -1990,6 +2004,16 @@ bool TextDetector::Detect(const GrayImage& gray, PageLayout* out) {
+     }
+   }
+   DumpFile("lines.txt", dump);
++  // LearnFromGames: the pyramid goes to the recognizer, as DetectorPyramid would build it (no reference level).
++  out->pyramid = std::make_shared<std::vector<DetectorPyramidLevel>>(levels.size());
++  for (size_t k = 0; k < levels.size(); k++) {
++    DetectorPyramidLevel& l = (*out->pyramid)[k];
++    l.scale = scales[k];
++    if (!levels[k]) continue;
++    l.image.emplace();
++    l.image->width = levels[k]->width, l.image->height = levels[k]->height;
++    l.image->data = std::move(levels[k]->data);
++  }
+   if (DumpDir()) {
+     std::string ties;
+     for (const auto& [site, t] : TieCounts())
+diff --git a/cpp/src/detector.h b/cpp/src/detector.h
+index 6630cd4..b258955 100644
+--- a/cpp/src/detector.h
++++ b/cpp/src/detector.h
+@@ -24,12 +24,20 @@ class TextDetector {
+   // Appends one LINE entity (followed by its empty PARAGRAPH parent) per detected text line.
+   bool Detect(const GrayImage& gray, PageLayout* out);
+ 
++  // LearnFromGames: the height in page pixels of the smallest text the caller knows to be on the page, 0 for not
++  // known. Text that tall is looked for at a scale that keeps it kTextPixels tall, when that is smaller than the
++  // detector's own (which fits the page into 1280 x 1280): the detector's model costs as many times less as there
++  // are fewer pixels, and finds text that size as well as at its own scale. Kept until changed.
++  void SetTextHeight(int pixels) { text_height_ = pixels; }
++  static constexpr int kTextPixels = 24;
++
+   struct Config;  // detector settings read from the .binarypb (see detector.cc)
+ 
+  private:
+   TextDetector() = default;
+   std::unique_ptr<Config> config_;
+   std::unique_ptr<TfliteModel> model_;
++  int text_height_ = 0;
+ };
+ 
+ // One level of the detector's image pyramid (GroupRpnDetectorV2): its scale relative to the page and its image. The
+@@ -41,6 +49,7 @@ struct DetectorPyramidLevel {
+ 
+ // Rebuilds the pyramid as the detector's CropDetections sees it: lines with detection_image_scale < 1000 are cropped
+ // from the level of that scale (the line recognizer's first-pass images). Empty when the config cannot be read.
+-std::vector<DetectorPyramidLevel> DetectorPyramid(const Resources& res, const GrayImage& gray);
++// `shrink`: see TextDetector::SetTextHeight (1 for the detector's own scale).
++std::vector<DetectorPyramidLevel> DetectorPyramid(const Resources& res, const GrayImage& gray, float shrink = 1.0f);
+ 
+ }  // namespace screenai
+diff --git a/cpp/src/page_layout.h b/cpp/src/page_layout.h
+index 5daad5f..b928979 100644
+--- a/cpp/src/page_layout.h
++++ b/cpp/src/page_layout.h
+@@ -6,6 +6,7 @@
+ #pragma once
+ 
+ #include <cstdint>
++#include <memory>
+ #include <optional>
+ #include <string>
+ #include <string_view>
+@@ -14,6 +15,8 @@
+ 
+ namespace screenai {
+ 
++struct DetectorPyramidLevel;
++
+ // Curved line geometry (goodoc.CurvedBoundingBox / ocr.photo.CurvedBoundingBox): a polyline along the middle of
+ // the text plus its thickness. The detector emits it for lines whose raw boxes bend.
+ struct Curve {
+@@ -90,6 +93,9 @@ struct PageLayout {
+   // Page-level goodoc.LanguageCombination (bcp47 tag, weight), set by layout analysis.
+   std::optional<std::vector<std::pair<std::string, float>>> language_mix;
+   std::optional<std::string> creator_id;
++  // LearnFromGames: the detector's image pyramid, kept for the recognizer, which crops lines of large text from it
++  // (DetectorPyramid would build the same again). Not serialized.
++  std::shared_ptr<std::vector<DetectorPyramidLevel>> pyramid;
+ };
+ 
+ // goodoc.PageLayoutProto wire format (subset).
+diff --git a/cpp/src/recognizer.cc b/cpp/src/recognizer.cc
+index a7fd0e8..034aa72 100644
+--- a/cpp/src/recognizer.cc
++++ b/cpp/src/recognizer.cc
+@@ -32,34 +32,6 @@
+ namespace screenai {
+ namespace rec {
+ 
+-#if defined(__linux__)
+-// LearnFromGames (tight batches): the cores that are not the slowest of the machine, by their top frequency; none
+-// where all cores are alike or the frequencies cannot be read. A thread started for one invoke has no history for
+-// the scheduler to go by and is put on a small core of a phone's processor, where the invoke takes three times as
+-// long: on a Snapdragon 8 Gen 2 a screen's recognition took 54 ms left to the scheduler and 21 ms kept off its
+-// three small cores.
+-static const cpu_set_t* FasterCores() {
+-  static const cpu_set_t set = [] {
+-    cpu_set_t s;
+-    CPU_ZERO(&s);
+-    long freq[CPU_SETSIZE], lowest = 0;
+-    int n = 0;
+-    for (; n < CPU_SETSIZE; n++) {
+-      char path[96];
+-      std::snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", n);
+-      FILE* f = std::fopen(path, "r");
+-      if (!f) break;
+-      if (std::fscanf(f, "%ld", &freq[n]) != 1) freq[n] = 0;
+-      std::fclose(f);
+-      if (n == 0 || freq[n] < lowest) lowest = freq[n];
+-    }
+-    for (int i = 0; i < n; i++)
+-      if (freq[i] > lowest) CPU_SET(i, &s);
+-    return s;
+-  }();
+-  return CPU_COUNT(&set) > 0 ? &set : nullptr;
+-}
+-#endif
+ namespace {
+ 
+ constexpr const char* kModelRoot = "gocr/gocr_models/";
+@@ -483,7 +455,7 @@ std::vector<LineTensors> ScriptRecognizer::Run(const std::vector<GrayImage>& lin
+ #if defined(__linux__)
+     // Refused where the process may not use those cores; the thread then runs where it is put, as before.
+     if (own_thread && tight_batches_)
+-      if (const cpu_set_t* faster = FasterCores()) sched_setaffinity(0, sizeof *faster, faster);
++      if (const cpu_set_t* faster = screenai::FasterCores()) sched_setaffinity(0, sizeof *faster, faster);
+ #else
+     (void)own_thread;
+ #endif
+@@ -1080,7 +1052,9 @@ bool LineRecognizer::Recognize(const RgbaImage& rgba, const GrayImage& gray, Pag
+     if (layout->entities[i].type == EntityType::kLine) line_idx.push_back(static_cast<int>(i));
+   std::vector<LineState> state(line_idx.size());
+ 
+-  std::optional<std::vector<DetectorPyramidLevel>> pyramid;  // built for the first line of large text
++  // LearnFromGames: the detector's own pyramid (PageLayout::pyramid), or built for the first line of large text.
++  std::optional<std::vector<DetectorPyramidLevel>> built;
++  const std::vector<DetectorPyramidLevel>* pyramid = layout->pyramid.get();
+ 
+   // Recognizes `which` lines with recognizer `key`; first pass also handles the direction head.
+   // LearnFromGames: with the language given (SetLanguage) every line is read once, by that language's
+@@ -1118,7 +1092,7 @@ bool LineRecognizer::Recognize(const RgbaImage& rgba, const GrayImage& gray, Pag
+         const int dis = e.detection ? e.detection->detection_image_scale : 1000;
+         const DetectorPyramidLevel* level = nullptr;
+         if (dis > 0 && dis < 1000) {
+-          if (!pyramid) pyramid = DetectorPyramid(*res_, gray);
++          if (!pyramid) pyramid = &built.emplace(DetectorPyramid(*res_, gray));
+           for (const DetectorPyramidLevel& l : *pyramid)
+             if (l.image && static_cast<int>(l.scale * 1000.0f) == dis) level = &l;
+         }
+diff --git a/cpp/src/tflite_model.cc b/cpp/src/tflite_model.cc
+index aaa7b07..9ae4f93 100644
+--- a/cpp/src/tflite_model.cc
++++ b/cpp/src/tflite_model.cc
+@@ -5,8 +5,51 @@
+ #include "tensorflow/lite/interpreter_builder.h"
+ #include "tensorflow/lite/kernels/register.h"
+ 
++#include <cstdio>
++
+ namespace screenai {
+ 
++
++#if defined(__linux__)
++// LearnFromGames: the cores that are not the slowest of the machine, by their top frequency; none where all cores
++// are alike or the frequencies cannot be read. A thread started for one invoke has no history for the scheduler to
++// go by and is put on a small core of a phone's processor, where the invoke takes three times as long: on a
++// Snapdragon 8 Gen 2 a screen's recognition took 54 ms left to the scheduler and 21 ms kept off its three small
++// cores.
++const cpu_set_t* FasterCores() {
++  static const cpu_set_t set = [] {
++    cpu_set_t s;
++    CPU_ZERO(&s);
++    long freq[CPU_SETSIZE], lowest = 0;
++    int n = 0;
++    for (; n < CPU_SETSIZE; n++) {
++      char path[96];
++      std::snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", n);
++      FILE* f = std::fopen(path, "r");
++      if (!f) break;
++      if (std::fscanf(f, "%ld", &freq[n]) != 1) freq[n] = 0;
++      std::fclose(f);
++      if (n == 0 || freq[n] < lowest) lowest = freq[n];
++    }
++    for (int i = 0; i < n; i++)
++      if (freq[i] > lowest) CPU_SET(i, &s);
++    return s;
++  }();
++  return CPU_COUNT(&set) > 0 ? &set : nullptr;
++}
++
++FasterCoresScope::FasterCoresScope() {
++  const cpu_set_t* faster = FasterCores();
++  if (!faster) return;
++  if (sched_getaffinity(0, sizeof before_, &before_) != 0) return;
++  set_ = sched_setaffinity(0, sizeof *faster, faster) == 0;
++}
++
++FasterCoresScope::~FasterCoresScope() {
++  if (set_) sched_setaffinity(0, sizeof before_, &before_);
++}
++#endif
++
+ std::unique_ptr<TfliteModel> TfliteModel::Create(std::string model_bytes, int num_threads, OpRegistrar custom_ops,
+                                                  bool use_xnnpack) {
+   std::unique_ptr<TfliteModel> m(new TfliteModel());
+@@ -23,7 +66,12 @@ std::unique_ptr<TfliteModel> TfliteModel::Create(std::string model_bytes, int nu
+   if (use_xnnpack) {
+     TfLiteXNNPackDelegateOptions opts = TfLiteXNNPackDelegateOptionsDefault();
+     opts.num_threads = num_threads;
+-    m->delegate_ = TfLiteXNNPackDelegateCreate(&opts);
++    {
++      // LearnFromGames: the delegate starts its pool's threads here, and they keep the cores they start on: on a
++      // phone's processor a share of each operator run on a small core holds up the rest.
++      FasterCoresScope pinned;
++      m->delegate_ = TfLiteXNNPackDelegateCreate(&opts);
++    }
+     if (m->interpreter_->ModifyGraphWithDelegate(m->delegate_) != kTfLiteOk) return nullptr;
+   }
+   return m;
+diff --git a/cpp/src/tflite_model.h b/cpp/src/tflite_model.h
+index d881d3f..2b40ec9 100644
+--- a/cpp/src/tflite_model.h
++++ b/cpp/src/tflite_model.h
+@@ -11,8 +11,32 @@
+ #include "tensorflow/lite/model_builder.h"
+ #include "tensorflow/lite/mutable_op_resolver.h"
+ 
++#if defined(__linux__)
++#include <sched.h>
++#endif
++
+ namespace screenai {
+ 
++#if defined(__linux__)
++// LearnFromGames: the cores that are not the machine's slowest, or null where all are alike.
++const cpu_set_t* FasterCores();
++
++// LearnFromGames: keeps the calling thread (and the threads it starts) on FasterCores() while it lives.
++class FasterCoresScope {
++ public:
++  FasterCoresScope();
++  ~FasterCoresScope();
++  FasterCoresScope(const FasterCoresScope&) = delete;
++  FasterCoresScope& operator=(const FasterCoresScope&) = delete;
++
++ private:
++  cpu_set_t before_;
++  bool set_ = false;
++};
++#else
++struct FasterCoresScope {};
++#endif
++
+ class TfliteModel {
+  public:
+   // `custom_ops` may add registrations (e.g. the language-ID ops) to the builtin resolver.

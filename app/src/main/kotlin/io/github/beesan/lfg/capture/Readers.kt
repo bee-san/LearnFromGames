@@ -20,7 +20,11 @@ interface TextReader {
     /** Stored in `game_lines.engine`, e.g. `screenai`. */
     val name: String
 
-    suspend fun read(frame: Frame): List<TextLine>
+    /**
+     * [textHeight]: how tall in pixels the smallest text on [frame] is, as the probe found it ([Bands.textHeight]);
+     * 0 when it is not known. Text is then looked for no larger than it needs to be.
+     */
+    suspend fun read(frame: Frame, textHeight: Int = 0): List<TextLine>
 }
 
 /**
@@ -100,7 +104,8 @@ class ReaderProbe(private val reader: TextReader) : ChangeProbe {
 
 class ScreenAiReader(private val engine: ScreenAi) : TextReader {
     override val name = "screenai"
-    override suspend fun read(frame: Frame): List<TextLine> = withContext(Dispatchers.Default) { engine.read(frame) }
+    override suspend fun read(frame: Frame, textHeight: Int): List<TextLine> =
+        withContext(Dispatchers.Default) { engine.read(frame, textHeight) }
 }
 
 /** The engines in use. With no reader the service takes no pictures. */

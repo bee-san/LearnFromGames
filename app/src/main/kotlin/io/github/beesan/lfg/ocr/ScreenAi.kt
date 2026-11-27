@@ -20,8 +20,9 @@ import java.util.zip.ZipInputStream
  * optional; the model files are downloaded, never shipped.
  */
 class ScreenAi private constructor() {
-    fun read(frame: Frame): List<TextLine> {
-        val bytes = nativeRead(frame.argb, frame.width, frame.height) ?: error("ScreenAI could not read the frame.")
+    /** [textHeight]: the smallest text's height in pixels, 0 for not known (tools/screenai/0006). */
+    fun read(frame: Frame, textHeight: Int = 0): List<TextLine> {
+        val bytes = nativeRead(frame.argb, frame.width, frame.height, textHeight) ?: error("ScreenAI could not read the frame.")
         return joined(ordered(decode(bytes)))
     }
 
@@ -54,7 +55,7 @@ class ScreenAi private constructor() {
         private external fun nativeInit(dir: ByteArray, language: ByteArray): Boolean
 
         @JvmStatic
-        private external fun nativeRead(pixels: IntArray, width: Int, height: Int): ByteArray?
+        private external fun nativeRead(pixels: IntArray, width: Int, height: Int, textHeight: Int): ByteArray?
 
         /**
          * The library is asked for its fast mode (tools/screenai/0003), which gives the lines in the order it

@@ -433,9 +433,10 @@ class ReadingPipeline(
         offsetX: Int, offsetY: Int, covered: List<Box>, cut: Box?, area: Box?, ours: List<Box>, recheck: Boolean, publish: Boolean,
     ) {
         val bands = found?.let { Bands.around(it, frame.width, frame.height) }
+        val textHeight = found?.let(Bands::textHeight) ?: 0
         val rows = Perf.measure("read") {
-            if (bands == null) engine.read(frame)
-            else bands.unstack(engine.read(bands.stack(frame, bandBuffer).also { bandBuffer = it.argb }))
+            if (bands == null) engine.read(frame, textHeight)
+            else bands.unstack(engine.read(bands.stack(frame, bandBuffer).also { bandBuffer = it.argb }, textHeight))
         }
             // The reader's forms made the game's own (TextClean), and what is not the game's text dropped.
             .let { rows -> japanese().let { ja -> rows.mapNotNull { TextClean.line(it, ja) } } }.filter { it.text.isNotBlank() }

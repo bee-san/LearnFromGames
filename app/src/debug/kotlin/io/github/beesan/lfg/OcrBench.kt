@@ -56,12 +56,14 @@ class OcrBench : Instrumentation() {
         val models = ModelStore(context)
         val language = arguments?.getString("language") ?: ""
         val clean = arguments?.getString("clean") != "false"
+        // `-e textscale 75`: the text's height given to ScreenAI as that share of what the probe saw (to try sizes).
+        val textScale = arguments?.getString("textscale")?.toIntOrNull() ?: 100
         val engines = LinkedHashMap<String, (Frame) -> List<TextLine>>()
         // What an engine is given before its clock starts.
         val prepare = HashMap<String, (Frame) -> Unit>()
         if ("screenai" in wanted) {
             val engine = models.screenAiDir()?.let { ScreenAi.open(it, language) } ?: error("ScreenAI is not installed")
-            engines["screenai"] = engine::read
+            engines["screenai"] = { frame -> engine.read(frame) }
         }
         if ("screenai-bands" in wanted) {
             val engine = models.screenAiDir()?.let { ScreenAi.open(it, language) } ?: error("ScreenAI is not installed")
@@ -73,8 +75,11 @@ class OcrBench : Instrumentation() {
                 of = frame
             }
             engines["screenai-bands"] = { frame ->
-                val bands = found?.takeIf { of === frame }?.let { Bands.around(it, frame.width, frame.height) }
-                if (bands == null) engine.read(frame) else bands.unstack(engine.read(bands.stack(frame)))
+                // As the reading pipeline does: only around what the probe found, and told how small its text is.
+                val seen = found?.takeIf { of === frame }
+                val bands = seen?.let { Bands.around(it, frame.width, frame.height) }
+                val textHeight = (seen?.let(Bands::textHeight) ?: 0) * textScale / 100
+                if (bands == null) engine.read(frame, textHeight) else bands.unstack(engine.read(bands.stack(frame), textHeight))
             }
         }
         if ("vocr" in wanted) {

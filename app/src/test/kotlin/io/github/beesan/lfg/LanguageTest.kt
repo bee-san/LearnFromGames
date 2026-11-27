@@ -19,7 +19,7 @@ import org.junit.Test
 class LanguageTest {
     private class FakeReader(var lines: List<TextLine>) : TextReader {
         override val name = "fake"
-        override suspend fun read(frame: Frame) = lines
+        override suspend fun read(frame: Frame, textHeight: Int) = lines
     }
 
     private val frame = Frame(2, 2, IntArray(4))
