@@ -128,11 +128,16 @@ class Diary(private val db: LfgDatabase, private val zone: () -> ZoneId = { Zone
         val lookups = db.lookups().counts().associate { it.lineId to it.count }
         val moments = moments()
         val entries = db.notes().entries().filter { it.picturePath != null }.map { it.gameId to dayOf(it, zone) }.toSet()
+        // Each game's lines with pictures, by day: read once a game, not once a day.
+        val byGame = HashMap<String, Map<java.time.LocalDate, List<GameLine>>>()
         for ((key, read) in old.groupBy { it.gameId to ReadingStats.dayOf(it.timestamp, zone) }) {
             val row = kept[key.first to key.second.toEpochDay()]
             if (key in entries || row?.picturePath?.let(::File)?.isFile == true) continue
             // Chosen from the whole day: the clean-up may cut a day in two, and the better picture be in the part still kept.
-            val day = db.lines().ofGame(key.first).filter { it.screenshotPath != null && ReadingStats.dayOf(it.timestamp, zone) == key.second }
+            val days = byGame.getOrPut(key.first) {
+                db.lines().ofGame(key.first).filter { it.screenshotPath != null }.groupBy { ReadingStats.dayOf(it.timestamp, zone) }
+            }
+            val day = days[key.second].orEmpty()
             val line = DayPicture.line(candidates(day.ifEmpty { read }, lookups), moments) ?: continue
             db.diary().put((row ?: DiaryDay(key.first, key.second.toEpochDay())).copy(picturePath = line.screen, lineId = line.id))
         }

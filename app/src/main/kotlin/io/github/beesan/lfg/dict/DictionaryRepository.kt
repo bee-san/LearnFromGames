@@ -301,9 +301,12 @@ class DictionaryRepository(
                     withContext(Dispatchers.IO) { old.forEach { File(it.path).deleteRecursively() } }
                 }
             }
-            // The same dictionary added again is written over in place: no session may have its files mapped meanwhile.
-            closeSession()
-            val outcome = importZip(zip)
+            // The same dictionary added again is written over in place: no session may have its files mapped meanwhile,
+            // so they are closed in the same turn of the one thread lookups run on as the import itself.
+            val outcome = withContext(native) {
+                closeSession()
+                importZip(zip)
+            }
             if (!outcome.success || outcome.title.isEmpty()) return outcome.error.ifEmpty { "This is not a Yomitan dictionary." }
             if (outcome.terms + outcome.frequencies + outcome.pitches + outcome.kanji == 0L) {
                 folderOf(outcome.title).deleteRecursively()

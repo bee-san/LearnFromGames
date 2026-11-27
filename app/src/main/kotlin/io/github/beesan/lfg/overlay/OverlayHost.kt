@@ -449,8 +449,9 @@ class OverlayHost(
 
     /** The session still going: its game and its stats; null when there is none. */
     fun onSession(game: String?, stats: String?, front: GameLine? = frontLine) {
-        // A game in front with no session going (just opened, or after a break) is still named.
-        session = game?.let { it to stats }
+        // A game in front with no session going (just opened, or after a break) is still named; a game
+        // played yesterday, with nothing in front now, is not.
+        session = game?.takeIf { stats != null || front != null }?.let { it to stats }
         frontLine = front
         panelView?.refresh()
     }
@@ -1275,6 +1276,9 @@ class OverlayHost(
         /** The game being read, as the top of the screen names it. */
         private fun title(): String = session?.first ?: state.lines.firstOrNull()?.gameName ?: "LearnFromGames"
 
+        /** The game the panel is about, as its title names it. */
+        fun titleNow(): String = title()
+
         /** The line on screen now that a note on the game is hung on: the newest kept one, for its picture. */
         private fun newestOnScreen(): LookupLine? = state.lines.storyLine()
 
@@ -1446,7 +1450,7 @@ class OverlayHost(
                 val now = System.currentTimeMillis()
                 screen.take(UNKEPT_SHOWN).forEach {
                     // Kept as a menu's text, it has a row all the same, which Translate and Explain can be asked about.
-                    val kept = it.value.lineId?.let { id ->
+                    val kept = it.value.row?.takeIf { row -> row.id == it.value.lineId } ?: it.value.lineId?.let { id ->
                         GameLine(
                             id = id, gameId = it.value.gameId.orEmpty(), gameName = it.value.gameName, lineText = it.value.text, timestamp = now / 1000.0,
                             screenshotPath = it.value.framePath, createdAt = now, lastModified = now, source = it.value.source,
@@ -1661,7 +1665,8 @@ class OverlayHost(
      */
     private fun askRecapOf(line: GameLine?, what: RecapOf) {
         if (recaps.values.any { it.busy }) {
-            if (what == RecapOf.NEXT && line != null) nextWaiting = line
+            // Queued only when it is not the one being written already: a second press would pay for it twice.
+            if (what == RecapOf.NEXT && line != null && recaps[RecapOf.NEXT]?.busy != true) nextWaiting = line
             return
         }
         if (line == null || recapGame != line?.gameId) {
@@ -1669,7 +1674,8 @@ class OverlayHost(
             recaps.clear()
             recapOf = null
             recapGame = line?.gameId
-            recapGameName = line?.gameName
+            // With nothing read, the panel's game is still the one the message is about.
+            recapGameName = line?.gameName ?: panelView?.titleNow()
         }
         if (what != RecapOf.NEXT) recapOf = what
         if (line == null) {

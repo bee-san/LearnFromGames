@@ -798,8 +798,13 @@ class MainActivity : ComponentActivity() {
         }
         // The LFG button is the service's: on these pages Android would take it (L3, R3, Start) for a press of
         // whatever button has the pad's focus, and open the Play Store or answer a question for the player.
+        // Only the buttons Android turns into such a press: L1, R1, L2 and R2 step through entries and diary days here.
         val (first, second) = io.github.beesan.lfg.core.Shortcut.keys(model.prefs.value.shortcut)
-        if (!choosingShortcut && (event.keyCode == first || event.keyCode == second)) return true
+        val pressing = setOf(
+            android.view.KeyEvent.KEYCODE_BUTTON_THUMBL, android.view.KeyEvent.KEYCODE_BUTTON_THUMBR,
+            android.view.KeyEvent.KEYCODE_BUTTON_START, android.view.KeyEvent.KEYCODE_BUTTON_SELECT,
+        )
+        if (!choosingShortcut && event.keyCode in pressing && (event.keyCode == first || event.keyCode == second)) return true
         return super.dispatchKeyEvent(event)
     }
 

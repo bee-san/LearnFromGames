@@ -132,6 +132,9 @@ class LfgAccessibilityService : AccessibilityService() {
     private val down = HashSet<Int>()
     private var chordFired = false
 
+    /** When the shortcut's last button was let go, after a press of both. */
+    private var chordEndedAt = 0L
+
     override fun onServiceConnected() {
         app = application as App
         // LFG has just updated itself, which closed its pages: they open again, as only an app with a service like this may.
@@ -161,7 +164,7 @@ class LfgAccessibilityService : AccessibilityService() {
             service = this,
             controller = controller,
             prefs = { app.settings.prefs.value },
-            chordActive = { chordFired },
+            chordActive = { chordFired || SystemClock.uptimeMillis() - chordEndedAt < CHORD_AFTER_MS },
             tapOn = ::tapOwnWindow,
             onTapElsewhere = { if (asked?.continuous == false) endAsked() },
             // While a reading is up, the button takes it away, a region kept reading included.
@@ -289,6 +292,7 @@ class LfgAccessibilityService : AccessibilityService() {
                         LookupLine(
                             line.text, reading.saved.getOrNull(i)?.id, reading.framePath, reading.game.title, line,
                             reading.appearedAtMs.getOrNull(i), gameId = reading.game.id, menu = reading.saved.getOrNull(i)?.interfaceText == true,
+                            row = reading.saved.getOrNull(i),
                         )
                     },
                 )
@@ -467,14 +471,11 @@ class LfgAccessibilityService : AccessibilityService() {
                 chordLetGo = true
                 shortcutUp(anyApp = true)
             }
-            if (first !in down && second !in down && chordFired) {
-                // Cleared after this release has reached the window in front too: lookup asks whether it was the shortcut's.
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    if (first !in down && second !in down) {
-                        chordFired = false
-                        chordLetGo = false
-                    }
-                }, CHORD_AFTER_MS)
+            if (first !in down && second !in down) {
+                // Lookup hears this release after the service does: for a moment it still counts as the shortcut's.
+                if (chordFired) chordEndedAt = SystemClock.uptimeMillis()
+                chordFired = false
+                chordLetGo = false
             }
         }
         return false

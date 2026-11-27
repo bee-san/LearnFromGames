@@ -49,6 +49,8 @@ data class LookupLine(
     val gameId: String? = null,
     /** Kept as a menu's or a label's text, not the story's: the wheel acts on a line of the story first. */
     val menu: Boolean = false,
+    /** Its row as the reading saved it, when it has one: its translation and cards with it. */
+    val row: io.github.beesan.lfg.data.GameLine? = null,
 )
 
 /** The line the wheel and the panel act on with nothing picked: the story's newest on screen, else any kept line there. */
