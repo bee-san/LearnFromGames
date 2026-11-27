@@ -6,6 +6,7 @@ import android.util.Log
 import io.github.beesan.lfg.Prefs
 import io.github.beesan.lfg.capture.SoundCapture
 import io.github.beesan.lfg.capture.VoiceFinder
+import io.github.beesan.lfg.core.Wav
 import io.github.beesan.lfg.data.Card
 import io.github.beesan.lfg.data.LfgDatabase
 import kotlinx.coroutines.CoroutineScope
@@ -97,8 +98,17 @@ class MediaAttacher(
         try {
             val text = db.lines().byId(card.lineId)?.lineText ?: return
             val name = "lfg_${card.createdAt}"
-            val file = File(mediaDir(), "$name.wav")
-            if (speech.toFile(text, file)) attach(card, target, file, name)
+            val wav = File(mediaDir(), "$name.wav")
+            if (!speech.toFile(text, wav)) return
+            // Android's voice writes WAV, ten times the size of the game's own sound: made AAC like it, kept WAV if that fails.
+            val m4a = File(mediaDir(), "$name.m4a")
+            val pcm = Wav.read(wav.readBytes())
+            if (pcm != null && pcm.samples.isNotEmpty() && SoundCapture.encode(pcm.samples, m4a, pcm.rate)) {
+                wav.delete()
+                attach(card, target, m4a, name)
+            } else {
+                attach(card, target, wav, name)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "spoken line failed", e)
         }

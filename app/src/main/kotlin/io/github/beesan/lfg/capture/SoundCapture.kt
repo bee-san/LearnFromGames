@@ -105,14 +105,14 @@ object SoundCapture {
     }
 
     /**
-     * Mono 16-bit samples as AAC in an .m4a file, which Anki plays everywhere.
-     * Returns false when the device's encoder refuses.
+     * Mono 16-bit samples, [rate] a second, as AAC in an .m4a file, which Anki
+     * plays everywhere. Returns false when the device's encoder refuses.
      */
-    fun encode(samples: ShortArray, to: File): Boolean {
+    fun encode(samples: ShortArray, to: File, rate: Int = SAMPLE_RATE): Boolean {
         var codec: MediaCodec? = null
         var muxer: MediaMuxer? = null
         return try {
-            val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, SAMPLE_RATE, 1).apply {
+            val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, rate, 1).apply {
                 setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
                 setInteger(MediaFormat.KEY_BIT_RATE, 64_000)
                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16_384)
@@ -133,7 +133,7 @@ object SoundCapture {
                         val buffer = codec.getInputBuffer(index)!!
                         val n = minOf(buffer.remaining() / 2, samples.size - fed)
                         buffer.asShortBuffer().put(samples, fed, n)
-                        val timeUs = fed * 1_000_000L / SAMPLE_RATE
+                        val timeUs = fed * 1_000_000L / rate
                         fed += n
                         inputDone = fed >= samples.size
                         codec.queueInputBuffer(index, 0, n * 2, timeUs, if (inputDone) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0)
