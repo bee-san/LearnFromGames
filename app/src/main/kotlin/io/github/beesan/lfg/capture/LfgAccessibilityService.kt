@@ -1017,7 +1017,8 @@ class LfgAccessibilityService : AccessibilityService() {
 
         val fromTree = treeLines.toHashSet()
         val now = Asked(game, target.packageName, target.displayId, target.windowId, continuous = false, frame = shot?.bitmap, framePath = null)
-        val keep = app.settings.prefs.value.keepAppLines
+        // A game's text read once is its lines; an ordinary app's are kept only when asked.
+        val keep = !game.app || app.settings.prefs.value.keepAppLines
         val saved = if (keep) withContext(Dispatchers.IO) {
             now.framePath = now.frame?.let(::writeFrame)
             lines.map { line ->

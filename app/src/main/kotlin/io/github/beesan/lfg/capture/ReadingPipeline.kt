@@ -509,11 +509,16 @@ class ReadingPipeline(
         val saved = ArrayList<GameLine>()
         val appeared = ArrayList<Long>()
         val held = ArrayList<List<Held>>()
+        // A box the player drew beside box 1 is read for its text: what is read in it is always a line.
+        val drawn = areas.drop(1)
+        val inDrawn = HashSet<String>()
         for ((piece, parts) in pieces.zip(sorted.parts)) {
             held += parts.map { part ->
                 // A page that has grown by a sentence is several lines, each with its own row.
                 val line = if (part.from == 0 && part.to == piece.text.length) piece else piece.slice(part.from, part.to)
                 val alone = parts.size == 1
+                val mine = drawn.any { it.intersects(line.box) }
+                if (mine) inDrawn += line.text
                 var began = appearedNow
                 val row = when (part) {
                     is Part.Same -> (byId[part.id] ?: store.line(part.id))?.also { began = memory.appeared[it.id] ?: it.createdAt }
@@ -525,8 +530,8 @@ class ReadingPipeline(
                         }
                     }
                     is Part.New -> null
-                } ?: run {
-                    val isInterface = telling && (
+                }?.takeUnless { mine && it.interfaceText } ?: run {
+                    val isInterface = telling && !mine && (
                         (part as? Part.New)?.interfaceText == true || InterfaceText.lone(line.text) || (alone && line.text in found) ||
                             // Words in the picture: short, and set far smaller than the story is.
                             (alone && !long(line) && InterfaceText.small(line.typeSize, memory.storyType()))
@@ -565,6 +570,7 @@ class ReadingPipeline(
                 Held(part.from, part.to, row.id, row.lineText, row.interfaceText)
             }
         }
+        newly.removeAll(inDrawn)
         // Found once, it is interface text in this game before and after: the lines saved of it already go too.
         for (text in newly) {
             store.markInterface(game, text, nowMs)
