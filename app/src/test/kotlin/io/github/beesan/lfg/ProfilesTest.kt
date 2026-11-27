@@ -161,7 +161,9 @@ class ProfilesTest {
         assertTrue(arrivals.arrived("retroarch:pokemon", "retroarch"))
         // The name is lost for a look, then found: neither changes the profile again.
         assertFalse(arrivals.arrived("retroarch", "retroarch"))
-        assertTrue(arrivals.arrived("retroarch:pokemon", "retroarch"))
+        assertFalse(arrivals.arrived("retroarch:pokemon", "retroarch"))
+        // Another game named in it is a change.
+        assertTrue(arrivals.arrived("retroarch:zelda", "retroarch"))
         // Another app, then the emulator again: that is a change.
         assertTrue(arrivals.arrived("eden", "eden"))
         assertTrue(arrivals.arrived("retroarch", "retroarch"))

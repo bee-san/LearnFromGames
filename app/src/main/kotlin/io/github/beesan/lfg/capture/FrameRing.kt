@@ -16,6 +16,11 @@ object FrameRing {
     @Volatile
     var enabled = false
 
+    /** How long after a line began to appear its moving picture may run. */
+
+    private const val AFTER_MS = 10_000L
+
+
     private const val FRAMES = 14
     private const val MAX_WIDTH = 480
 
@@ -47,13 +52,15 @@ object FrameRing {
     }
 
     /**
-     * An animated WebP of the frames from a second before [fromMs] onwards
-     * (all that are held, when it is null), or null when there are too few to
-     * move or the encoder fails.
+     * An animated WebP of the frames from a second and a half before [fromMs] to [AFTER_MS] after it, or
+     * null when there are too few to move or the encoder fails. With no [fromMs], or none of its frames
+     * held any more (a line opened from the lines' page, a card that waited), there is none: what is on
+     * screen now is another moment, and the line's still is used.
      */
     @Synchronized
     fun animation(fromMs: Long?, dir: File, name: String, trimBars: Boolean = false): File? {
-        val chosen = frames.filter { fromMs == null || it.atMs >= fromMs - 1500 }.ifEmpty { frames.toList() }
+        if (fromMs == null) return null
+        val chosen = frames.filter { it.atMs >= fromMs - 1500 && it.atMs <= fromMs + AFTER_MS }
         // One picture does not move; the still is better than that.
         if (chosen.size < 2) return null
         val durations = IntArray(chosen.size) { i ->

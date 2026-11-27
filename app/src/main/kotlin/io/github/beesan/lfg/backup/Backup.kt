@@ -84,6 +84,24 @@ object Backup {
             deleteRecursively()
             mkdirs()
         }
+        try {
+            unpackAndSwap(context, db, input, dir)
+        } finally {
+            // The whole backup, unpacked: never left behind, however the restore ended.
+            dir.deleteRecursively()
+        }
+    }
+
+    /** Thrown once the database was closed: whatever went wrong, the app must start again. */
+    class PartlyRestored(cause: Throwable) : IOException("The restore stopped partway. LFG will start again.", cause)
+
+    /** Moves (not copies, which would need the room twice) a file from the unpacked backup into place. */
+    private fun move(from: File, to: File) {
+        to.parentFile?.mkdirs()
+        if (!from.renameTo(to)) from.copyTo(to, overwrite = true)
+    }
+
+    private fun unpackAndSwap(context: Context, db: LfgDatabase, input: InputStream, dir: File) {
         val root = dir.canonicalPath + File.separator
         ZipInputStream(input.buffered()).use { zip ->
             while (true) {
@@ -97,30 +115,31 @@ object Backup {
             }
         }
         val database = File(dir, DB)
-        if (!database.isFile) {
-            dir.deleteRecursively()
-            throw IOException("This file isn’t an LFG backup.")
-        }
-        db.close()
-        val live = context.getDatabasePath(DB)
-        File(live.path + "-wal").delete()
-        File(live.path + "-shm").delete()
-        database.copyTo(live, overwrite = true)
-        val stores = File(context.applicationInfo.dataDir, "shared_prefs")
-        File(dir, SETTINGS).takeIf { it.isFile }?.copyTo(File(stores, SETTINGS), overwrite = true)
-        // The backup's profiles take the place of the ones here; a backup from before profiles leaves the one its settings are.
-        stores.listFiles()?.filter { profiles(it.name) }?.forEach { it.delete() }
-        dir.listFiles()?.filter { it.isFile && profiles(it.name) }?.forEach { it.copyTo(File(stores, it.name), overwrite = true) }
+        if (!database.isFile) throw IOException("This file isn’t an LFG backup.")
+        // Pictures and lists first, while nothing is changed yet: they are what runs out of room.
         // A backup from before the lists leaves the ones here as they are.
         File(dir, "files/$KNOWN").listFiles()?.let { lists ->
             val into = File(context.filesDir, KNOWN).apply { mkdirs() }
-            lists.forEach { it.copyTo(File(into, it.name), overwrite = true) }
+            lists.forEach { move(it, File(into, it.name)) }
         }
         for (name in PICTURES) {
             val into = File(context.filesDir, name).apply { mkdirs() }
-            File(dir, "files/$name").listFiles()?.forEach { it.copyTo(File(into, it.name), overwrite = true) }
+            File(dir, "files/$name").listFiles()?.forEach { move(it, File(into, it.name)) }
         }
-        dir.deleteRecursively()
+        db.close()
+        try {
+            val live = context.getDatabasePath(DB)
+            File(live.path + "-wal").delete()
+            File(live.path + "-shm").delete()
+            move(database, live)
+            val stores = File(context.applicationInfo.dataDir, "shared_prefs")
+            File(dir, SETTINGS).takeIf { it.isFile }?.copyTo(File(stores, SETTINGS), overwrite = true)
+            // The backup's profiles take the place of the ones here; a backup from before profiles leaves the one its settings are.
+            stores.listFiles()?.filter { profiles(it.name) }?.forEach { it.delete() }
+            dir.listFiles()?.filter { it.isFile && profiles(it.name) }?.forEach { it.copyTo(File(stores, it.name), overwrite = true) }
+        } catch (e: Exception) {
+            throw PartlyRestored(e)
+        }
     }
 
     /** An automatic backup into [Prefs.backupFolder], the oldest past [Prefs.backupKeep] deleted, then the lines file. Returns the backup's size. */
@@ -131,7 +150,13 @@ object Backup {
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val doc = DocumentsContract.createDocument(resolver, parent, "application/zip", name)
             ?: throw IOException("Android would not make a file in the backup folder. Choose the folder again.")
-        (resolver.openOutputStream(doc) ?: throw IOException("The backup folder can’t be written to.")).use { write(context, db, it, prefs.backupPictures) }
+        try {
+            (resolver.openOutputStream(doc) ?: throw IOException("The backup folder can’t be written to.")).use { write(context, db, it, prefs.backupPictures) }
+        } catch (e: Exception) {
+            // A broken backup left in the folder would count among those kept, and push a good one out.
+            runCatching { DocumentsContract.deleteDocument(resolver, doc) }
+            throw e
+        }
         val children = children(resolver, tree)
         if (prefs.backupKeep > 0) {
             children.filter { it.name.startsWith(PREFIX) && it.name.endsWith(".zip") }.sortedBy { it.name }

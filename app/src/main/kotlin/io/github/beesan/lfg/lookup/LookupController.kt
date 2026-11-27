@@ -503,8 +503,12 @@ class LookupController(
         val from = CursorPos(state.line, state.spanStart)
         // Right goes past the word shown: in Whole word selection, once that word's lookup is in.
         val matchedEnd = if (selection().wholeWord && (state.entries.isNotEmpty() || selection().wordStart)) state.spanEnd else 0
+        // A language looked up from the word's start takes any letter of a word back to its first: a step
+        // inside the word would come back where it began, so right goes on past the word, by stick too.
+        val wordEnd = if (selection().wordStart) state.lines.getOrNull(state.line)?.text?.let { Selectable.wordEnd(it, state.spanStart) } ?: 0 else 0
         val to = when (move) {
-            Move.RIGHT -> if (stick) cursor.stickRight(from) else cursor.right(from, matchedEnd)
+            Move.RIGHT -> if (wordEnd > state.spanStart) cursor.right(from, maxOf(matchedEnd, wordEnd))
+                else if (stick) cursor.stickRight(from) else cursor.right(from, matchedEnd)
             Move.LEFT -> if (stick) cursor.stickLeft(from) else cursor.left(from)
             Move.UP -> cursor.up(from)
             Move.DOWN -> cursor.down(from)

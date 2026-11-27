@@ -133,7 +133,9 @@ class CardMaker(
         val soundTag = sound?.let { anki.addSound(it, soundName) } ?: ""
         sound?.delete()
         val fields = NoteTypes.fill(target.family, target.fields, content, pictureHtml, soundTag, explained(card.lineId))
-        val noteId = anki.addNote(target, fields, setOfNotNull("LFG", NoteTypes.gameTag(content.gameName), "Kanji".takeIf { content.kanji }))
+        // The game's name as it is now: a card that waited for AnkiDroid may have outlasted a rename.
+        val gameName = db.lines().byId(card.lineId)?.gameName ?: content.gameName
+        val noteId = anki.addNote(target, fields, setOfNotNull("LFG", NoteTypes.gameTag(gameName), "Kanji".takeIf { content.kanji }))
         if (noteId == null) {
             db.cards().update(card.copy(state = Card.STATE_FAILED))
             return CardResult.Failed("AnkiDroid refused the card.")

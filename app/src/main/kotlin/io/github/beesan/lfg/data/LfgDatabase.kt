@@ -210,15 +210,15 @@ interface CardDao {
     @Query("UPDATE cards SET audio_name = :name WHERE id = :id")
     suspend fun setAudio(id: Long, name: String)
 
-    /** When each card was made, added or still waiting; a failed one was never made. */
-    @Query("SELECT created_at FROM cards WHERE state != 'failed'")
+    /** When each card was made, added or still waiting; a failed one was never made, and the tutorial's is practice. */
+    @Query("SELECT created_at FROM cards WHERE state != 'failed' AND line_id NOT IN (SELECT id FROM game_lines WHERE source = 'practice')")
     suspend fun madeTimes(): List<Long>
 
     /** Each card made, and the game of the line it was made from. */
-    @Query("SELECT cards.created_at AS madeAt, game_lines.game_id AS gameId FROM cards JOIN game_lines ON game_lines.id = cards.line_id WHERE cards.state != 'failed'")
+    @Query("SELECT cards.created_at AS madeAt, game_lines.game_id AS gameId FROM cards JOIN game_lines ON game_lines.id = cards.line_id WHERE cards.state != 'failed' AND game_lines.source != 'practice'")
     fun madeByGame(): Flow<List<GameStats.CardMade>>
 
-    @Query("SELECT cards.created_at AS madeAt, game_lines.game_id AS gameId FROM cards JOIN game_lines ON game_lines.id = cards.line_id WHERE cards.state != 'failed' AND cards.created_at >= :since")
+    @Query("SELECT cards.created_at AS madeAt, game_lines.game_id AS gameId FROM cards JOIN game_lines ON game_lines.id = cards.line_id WHERE cards.state != 'failed' AND game_lines.source != 'practice' AND cards.created_at >= :since")
     suspend fun madeSince(since: Long): List<GameStats.CardMade>
 
     @Query("SELECT * FROM cards WHERE state = 'pending' ORDER BY created_at")

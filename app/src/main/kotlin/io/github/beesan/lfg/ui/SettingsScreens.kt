@@ -212,6 +212,9 @@ fun DictionariesScreen(
     onRemoveAudio: () -> Unit,
     /** The starter dictionaries not installed, by name, and the button that fetches them. */
     starterMissing: List<String>,
+    starterMegabytes: Long? = null,
+    /** Only Japanese has kanji to choose a dictionary for. */
+    japanese: Boolean = true,
     onStarter: () -> Unit,
     /** Whether dictionaries are brought up to date by themselves, when they were last asked about (0 for never), and "Check now". */
     updates: Boolean,
@@ -239,7 +242,7 @@ fun DictionariesScreen(
     val names = all.filter { it.vndb != null }
     if (starterMissing.isNotEmpty() && fetching == null) {
         Group("Get started") {
-            Card("Starter set", "Missing: " + starterMissing.joinToString(", ") + " · about 105 MB") {
+            Card("Starter set", "Missing: " + starterMissing.joinToString(", ") + (starterMegabytes?.let { " · about ${maxOf(it, 1)} MB" } ?: "")) {
                 LfgButton("Download", onStarter, primary = true, enabled = !busy.busy)
             }
         }
@@ -255,7 +258,7 @@ fun DictionariesScreen(
         }
     }
     Group("Options") {
-        val kanjiChoices = list.filter { it.terms > 0 }
+        val kanjiChoices = if (japanese) list.filter { it.terms > 0 } else emptyList()
         if (kanjiChoices.isNotEmpty()) {
             val kanji = DictionaryRepository.kanjiDictionary(kanjiChoices, kanjiDictionary)
             Card("Kanji", if (kanji == null) "Bee's kanji dictionary is not installed: all are used" else "Tap a kanji for its entry here") {
@@ -931,7 +934,8 @@ fun StatsScreen(
     Page("Stats", onBack, actions = {
         Choice(StatsPeriod.entries.map { it.name to it.label }, period.name) { period = StatsPeriod.valueOf(it) }
     }) {
-        val today = remember { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, ZoneId.systemDefault()) }
+        // Moves on at 04:00 while the page stays open.
+        val today = ReadingStats.dayOf(rememberNow(), ZoneId.systemDefault())
         if (!stats.loaded) return@Page
         val byId = remember(games) { games.associateBy { it.id } }
         if (stats.days.isEmpty()) {
@@ -940,8 +944,8 @@ fun StatsScreen(
             Goals(goals, null, 0, onGoals)
             return@Page
         }
-        val view = remember(stats, period) { period.view(stats.days, today) }
-        val progress = remember(stats, goals, view) { goals.progress(stats.days, view.start, today) }
+        val view = remember(stats, period, today) { period.view(stats.days, today) }
+        val progress = remember(stats, goals, view, today) { goals.progress(stats.days, view.start, today) }
         val t = view.totals
         val before = view.before
         Text(view.range, color = Lfg.Dim, fontSize = 14.sp)

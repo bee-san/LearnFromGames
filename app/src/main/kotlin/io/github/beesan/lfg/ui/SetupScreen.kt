@@ -26,6 +26,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -211,14 +212,17 @@ private fun LanguageStep(chosen: Language?, onPick: (Language) -> Unit) {
 
 @Composable
 private fun ReadingStep(setup: SetupState, actions: SetupActions) {
+    // On when the step opened: come back to with Back, so it waits to be left rather than going on by itself.
+    val onAlready = remember { setup.serviceOn }
     if (setup.serviceOn) {
         // Back from Android's page with the switch on: nothing to press.
-        LaunchedEffect(Unit) {
+        if (!onAlready) LaunchedEffect(Unit) {
             delay(DONE_MS)
             actions.onNext()
         }
         Heading("Screen reading is on")
         Body("LFG can read your games now.")
+        if (onAlready) LfgButton("Next", actions.onNext, primary = true, modifier = Modifier.firstFocus())
         return
     }
     Question("Let LFG read your screen", "LFG needs this to see the words in your games. What it reads stays on your device unless you ask for a translation.") {
@@ -310,7 +314,9 @@ private fun AiStep(prefs: Prefs, keyTest: Pair<Boolean, String>?, actions: Setup
     )
     // The key works: nothing more to ask.
     val works = keyTest?.first == true && keyTest.second.startsWith("Works")
-    if (works) LaunchedEffect(Unit) {
+    // Tested before the step opened (come back to with Back): it waits to be left.
+    val worked = remember { works }
+    if (works && !worked) LaunchedEffect(Unit) {
         delay(DONE_MS)
         actions.onNext()
     }

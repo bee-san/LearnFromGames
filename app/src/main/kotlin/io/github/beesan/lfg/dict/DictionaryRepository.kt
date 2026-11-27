@@ -67,6 +67,8 @@ class DictionaryRepository(
     private val context: Context,
     /** The language being learnt, or null before set-up has asked: its dictionaries are the ones listed, fetched and looked up in. */
     private val language: () -> Language? = { Language.JAPANESE },
+    /** A dictionary's title changed with an update (Jitendex's carries its date): settings kept by title follow it. */
+    private val onRetitled: (old: String, new: String) -> Unit = { _, _ -> },
 ) {
     private val prefs = context.getSharedPreferences("dictionaries", Context.MODE_PRIVATE)
     private val root = File(context.filesDir, "dictionaries")
@@ -92,7 +94,10 @@ class DictionaryRepository(
     val fetching: StateFlow<DictState?> = _fetching
 
     /** The dictionaries of the language being learnt. Another language's stay on the device, for when it is learnt again. */
-    fun installed(): List<InstalledDictionary> = (language() ?: Language.JAPANESE).tag.let { tag -> everything().filter { it.language == tag } }
+    fun installed(): List<InstalledDictionary> = installedOf(tag())
+
+    /** The dictionaries of the language [tag]: a download or import keeps to the language it began in. */
+    private fun installedOf(tag: String): List<InstalledDictionary> = everything().filter { it.language == tag }
 
     private fun everything(): List<InstalledDictionary> = prefs.getString(KEY_INSTALLED, null)?.let {
         try {
@@ -225,6 +230,9 @@ class DictionaryRepository(
 
     private fun tag() = (language() ?: Language.JAPANESE).tag
 
+    /** Where hoshidicts keeps a dictionary of this title: its own folder name, which is not the title when that has a `/` in it. */
+    private fun folderOf(title: String) = File(root, folderName(title))
+
     /**
      * Another language is being learnt: its dictionaries are the ones listed and looked up in from here on.
      * The caller starts [DictionaryWorker] for those it has none of.
@@ -238,7 +246,7 @@ class DictionaryRepository(
     private fun defaults(): List<DefaultDictionaries.Source> = language()?.let(DefaultDictionaries::of).orEmpty()
 
     /** Japanese keeps the key it had before there was a second language. */
-    private fun pendingKey() = tag().let { if (it == "ja") KEY_DEFAULTS_PENDING else "$KEY_DEFAULTS_PENDING-$it" }
+    private fun pendingKey(tag: String = tag()) = if (tag == "ja") KEY_DEFAULTS_PENDING else "$KEY_DEFAULTS_PENDING-$tag"
 
     /** [installed] as the sessions last saw it, so a lookup does not read the list each time. */
     private var listed: List<InstalledDictionary>? = null
@@ -282,24 +290,30 @@ class DictionaryRepository(
      * went wrong in words.
      */
     suspend fun addFromZip(zip: File, vndb: String? = null): String? = installing.withLock {
+        // The language it is added under is the one when it was asked for, even if that changes during a long import.
+        val lang = tag()
         try {
             if (vndb != null) {
                 // A rebuild replaces the old one, which may have had another title.
-                val old = installed().filter { it.vndb == vndb }
+                val old = installedOf(lang).filter { it.vndb == vndb }
                 if (old.isNotEmpty()) {
-                    save(installed() - old.toSet())
+                    save(installedOf(lang) - old.toSet(), lang)
                     withContext(Dispatchers.IO) { old.forEach { File(it.path).deleteRecursively() } }
                 }
             }
+            // The same dictionary added again is written over in place: no session may have its files mapped meanwhile.
+            closeSession()
             val outcome = importZip(zip)
             if (!outcome.success || outcome.title.isEmpty()) return outcome.error.ifEmpty { "This is not a Yomitan dictionary." }
             if (outcome.terms + outcome.frequencies + outcome.pitches + outcome.kanji == 0L) {
-                File(root, outcome.title).deleteRecursively()
+                folderOf(outcome.title).deleteRecursively()
                 return "The dictionary is empty."
             }
-            if (outcome.frequencies > 0) withContext(Dispatchers.IO) { ranksIfSo(zip, File(root, outcome.title)) }
-            register(outcome, vndb)
+            if (outcome.frequencies > 0) withContext(Dispatchers.IO) { ranksIfSo(zip, folderOf(outcome.title)) }
+            register(outcome, vndb, lang)
             null
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             e.message ?: "The dictionary could not be imported."
         }
@@ -356,13 +370,16 @@ class DictionaryRepository(
         val all = installed()
         val gone = all.firstOrNull { it.title == title } ?: return
         save(all - gone)
-        withContext(Dispatchers.IO) { File(gone.path).deleteRecursively() }
+        // Only ever a folder inside the dictionaries' own, never that folder or one outside it.
+        withContext(Dispatchers.IO) { File(gone.path).takeIf { it.canonicalFile.parentFile == root.canonicalFile }?.deleteRecursively() }
     }
 
     /** [all] are the dictionaries of the language being learnt, in their order; the other languages' are kept as they are. */
-    private suspend fun save(all: List<InstalledDictionary>) {
-        val others = tag().let { tag -> everything().filter { it.language != tag } }
+    private suspend fun save(all: List<InstalledDictionary>, tag: String = tag()) {
+        val others = everything().filter { it.language != tag }
         prefs.edit().putString(KEY_INSTALLED, DictJson.encodeToString(others + all)).apply()
+        // Another language's list, changed behind the one being learnt, is not what is shown or looked in.
+        if (tag != tag()) return
         closeSession()
         _state.value = if (all.isEmpty()) DictState.Missing else DictState.Ready(all)
     }
@@ -403,20 +420,23 @@ class DictionaryRepository(
      * lock as "Add dictionary…", but the downloads do not.
      */
     suspend fun ensureDefaults(): Boolean = fetchingDefaults.withLock {
-        // Which language is not known until set-up has asked: nothing is fetched before.
-        val all = defaults().ifEmpty { return true }
-        val key = pendingKey()
+        // Which language is not known until set-up has asked: nothing is fetched before. What is fetched is
+        // that language's, even if another is chosen meanwhile.
+        val lang = language() ?: return true
+        val tag = lang.tag
+        val all = DefaultDictionaries.of(lang).ifEmpty { return true }
+        val key = pendingKey(tag)
         val chosen = prefs.getStringSet(key, null)
-            ?: if (installed().isEmpty()) all.map { it.id }.toSet() else return true
+            ?: if (installedOf(tag).isEmpty()) all.map { it.id }.toSet() else return true
         val pending = chosen.toMutableSet()
         fun remember() = prefs.edit().putStringSet(key, pending.toSet()).apply()
         remember()
         var lastError: String? = null
         for (source in all) {
             if (source.id !in pending) continue
-            if (installed().none(source::matches)) {
+            if (installedOf(tag).none(source::matches)) {
                 val error = try {
-                    install(source)
+                    install(source, tag)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -433,8 +453,8 @@ class DictionaryRepository(
         // Unknown ids (a source since dropped) are not waited for.
         pending.retainAll { id -> all.any { it.id == id } }
         remember()
-        val now = installed()
-        _state.value = when {
+        val now = installedOf(tag)
+        if (tag == tag()) _state.value = when {
             now.isNotEmpty() -> DictState.Ready(now)
             else -> DictState.Failed(lastError ?: "The dictionary download failed.")
         }
@@ -442,9 +462,9 @@ class DictionaryRepository(
     }
 
     /** Downloads and imports one starter dictionary. Returns null on success, or what went wrong. */
-    private suspend fun install(source: DefaultDictionaries.Source): String? {
+    private suspend fun install(source: DefaultDictionaries.Source, tag: String): String? {
         val zip = File(context.cacheDir, "default-${source.id}.zip")
-        val background = installed().isNotEmpty()
+        val background = installedOf(tag).isNotEmpty() || tag != tag()
         val report: (DictState) -> Unit = { if (background) _fetching.value = it else _state.value = it }
         try {
             withContext(Dispatchers.IO) { download(source.name, source.url, source.minBytes, zip, report) }
@@ -452,10 +472,10 @@ class DictionaryRepository(
             return installing.withLock {
                 val outcome = importZip(zip)
                 if (source.accepts(outcome)) {
-                    register(outcome)
+                    register(outcome, tag = tag)
                     return@withLock null
                 }
-                if (outcome.title.isNotEmpty() && installed().none { it.title == outcome.title }) File(root, outcome.title).deleteRecursively()
+                if (outcome.title.isNotEmpty() && everything().none { it.title == outcome.title }) folderOf(outcome.title).deleteRecursively()
                 outcome.error.ifEmpty { "${source.name} looks incomplete: ${outcome.terms} entries, ${outcome.frequencies} frequencies." }
             }
         } finally {
@@ -518,15 +538,15 @@ class DictionaryRepository(
                     prefs.edit().putString(skip, theirs.revision).apply()
                     return@withLock null
                 }
-                val home = File(root, outcome.title)
-                if (outcome.frequencies > 0) withContext(Dispatchers.IO) { ranksIfSo(zip, File(staging, outcome.title)) }
+                val home = folderOf(outcome.title)
+                if (outcome.frequencies > 0) withContext(Dispatchers.IO) { ranksIfSo(zip, File(staging, folderName(outcome.title))) }
                 val moved = withContext(native) {
                     // No session may hold the old files open while they go.
                     for (handle in sessions.values) Hoshidicts.close(handle)
                     sessions.clear()
                     File(old.path).deleteRecursively()
                     home.deleteRecursively()
-                    File(staging, outcome.title).renameTo(home)
+                    File(staging, folderName(outcome.title)).renameTo(home)
                 }
                 modes.remove(home.path)
                 val new = old.copy(
@@ -535,6 +555,14 @@ class DictionaryRepository(
                 )
                 // The old one is gone either way; a move that failed leaves the starter set to fetch it again.
                 save(all.toMutableList().apply { if (moved) set(at, new) else removeAt(at) })
+                if (moved && new.title != old.title) {
+                    // Folded away in the entry before, it stays folded under its new title.
+                    if (old.title in FoldedDictionaries.get(context)) {
+                        FoldedDictionaries.set(context, old.title, false)
+                        FoldedDictionaries.set(context, new.title, true)
+                    }
+                    onRetitled(old.title, new.title)
+                }
                 if (moved) outcome.title else null
             }
         } finally {
@@ -573,20 +601,20 @@ class DictionaryRepository(
         DictJson.decodeFromString<ImportOutcome>(Hoshidicts.import(zip.path, into.path, lowRam = false))
     }
 
-    private suspend fun register(outcome: ImportOutcome, vndb: String? = null) {
+    private suspend fun register(outcome: ImportOutcome, vndb: String? = null, tag: String = tag()) {
         val added = InstalledDictionary(
             title = outcome.title,
-            path = File(root, outcome.title).path,
+            path = folderOf(outcome.title).path,
             terms = outcome.terms,
             frequencies = outcome.frequencies,
             pitches = outcome.pitches,
             kanji = outcome.kanji,
             installedAt = System.currentTimeMillis(),
             vndb = vndb,
-            language = tag(),
+            language = tag,
         )
         modes.remove(added.path)
-        save(installed().filter { it.title != added.title } + added)
+        save(installedOf(tag).filter { it.title != added.title } + added, tag)
     }
 
     private fun download(name: String, url: String, minBytes: Long, to: File, report: (DictState) -> Unit) {
@@ -623,6 +651,19 @@ class DictionaryRepository(
     }
 
     companion object {
+        /**
+         * hoshidicts' `dictionary_importer::folder_name`: the title itself when it is one plain folder name,
+         * else with `/ \ :` made `_` and its FNV-1a hash after it, so "A/B" or "x/.." stays inside the folder.
+         */
+        fun folderName(title: String): String {
+            val plain = title.isNotEmpty() && title != "." && title != ".." && title.none { it == '/' || it == '\\' || it == '\u0000' }
+            if (plain) return title
+            val folder = title.map { if (it == '/' || it == '\\' || it == ':' || it == '\u0000') '_' else it }.joinToString("")
+            var hash = 2166136261L
+            for (b in title.toByteArray(Charsets.UTF_8)) hash = ((hash xor (b.toLong() and 0xFF)) * 16777619L) and 0xFFFFFFFFL
+            return folder + " #%08x".format(hash)
+        }
+
         private const val KEY_INSTALLED = "installed"
         private const val KEY_DEFAULTS_PENDING = "defaults_pending"
         private const val KEY_UPDATES_CHECKED = "updates_checked"

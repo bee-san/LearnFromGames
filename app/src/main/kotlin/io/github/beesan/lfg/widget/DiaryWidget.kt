@@ -61,7 +61,7 @@ class DiaryWidget : AppWidgetProvider() {
                 return
             }
             val (page, label) = shown
-            val picture = withContext(Dispatchers.IO) { Postcard.decode(page.entries.lastOrNull { it.picturePath != null }?.picturePath ?: page.picture, 1000) }
+            val picture = withContext(Dispatchers.IO) { Postcard.decode(page.entries.lastOrNull { it.picturePath?.let { p -> java.io.File(p).isFile } == true }?.picturePath ?: page.picture, 1000) }
             val entry = page.entries.lastOrNull { it.text.isNotBlank() }?.text.orEmpty()
             val words = Postcard.Words(
                 label = label,

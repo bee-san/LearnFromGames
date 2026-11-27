@@ -442,7 +442,7 @@ fun DiaryEntryScreen(entry: Note, page: DiaryPage?, onShare: () -> Unit, onEdit:
         }
         HorizontalDivider(color = Lfg.Border)
         val card = @Composable { modifier: Modifier ->
-            PostcardBox(entry.picturePath ?: page?.picture, modifier) {
+            PostcardBox(entry.picturePath?.takeIf { java.io.File(it).isFile } ?: page?.picture, modifier) {
                 Text(
                     entry.text.ifBlank { entry.title }, color = OnPicture, fontFamily = Paper, fontSize = 18.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold,
                     maxLines = 6, overflow = TextOverflow.Ellipsis, style = TextStyle(shadow = PictureShadow),

@@ -96,7 +96,7 @@ fun HomeScreen(
             }
         }
         val latest = lines.firstOrNull()
-        val continueCard = @Composable { ContinueCard(latest, lines, now, today, zone, shortcut, loaded, onOpenLine, onRecap, onLines) }
+        val continueCard = @Composable { ContinueCard(latest, lines, now, today, zone, shortcut, loaded, onOpenLine, onRecap, onLines, stats) }
         val todayCard = @Composable { TodayCard(day, stats.loaded, onStats, onGoals) }
         val lastLines = @Composable { LastLines(lines.drop(1).take(4), onOpenLine, onLines) }
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -192,6 +192,7 @@ private fun ContinueCard(
     onOpenLine: (GameLine) -> Unit,
     onRecap: () -> Unit,
     onLines: () -> Unit,
+    stats: StatsState? = null,
 ) = Card(strong = latest != null) {
     if (latest == null) {
         Label("Start")
@@ -199,7 +200,11 @@ private fun ContinueCard(
         if (loaded) Text("No lines yet. Open a game. Tap a word, or press $shortcut.", color = Lfg.Text, fontSize = 17.sp, lineHeight = 26.sp)
         return@Card
     }
-    val gameToday = lines.count { it.gameId == latest.gameId && ReadingStats.dayOf(it.timestamp, zone) == today }
+    // The stats count every line of the day; the recent lines given here stop at a few hundred.
+    val gameToday = maxOf(
+        lines.count { it.gameId == latest.gameId && ReadingStats.dayOf(it.timestamp, zone) == today },
+        stats?.summary?.gameDays?.get(latest.gameId)?.firstOrNull { it.day == today }?.lines ?: 0,
+    )
     Row(verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Label("Continue")

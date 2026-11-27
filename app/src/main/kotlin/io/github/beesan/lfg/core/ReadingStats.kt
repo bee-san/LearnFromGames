@@ -57,7 +57,8 @@ object ReadingStats {
     fun perHour(timedChars: Int, seconds: Double): Int = if (seconds < 1.0) 0 else (timedChars * 3600.0 / seconds).toInt()
 
     fun dayOf(timestamp: Double, zone: ZoneId): LocalDate =
-        Instant.ofEpochMilli((timestamp * 1000).toLong()).atZone(zone).minusHours(DAY_STARTS_AT_HOUR).toLocalDate()
+        // On the clock's time, not the instant's: on a day the clocks change, the day still turns at 04:00 local.
+        Instant.ofEpochMilli((timestamp * 1000).toLong()).atZone(zone).toLocalDateTime().minusHours(DAY_STARTS_AT_HOUR).toLocalDate()
 
     /** Unicode 17.0's Han, Hiragana and Katakana letters (and the combining dakuten), first and last code point. */
     private val JAPANESE_LETTERS = intArrayOf(
@@ -77,10 +78,11 @@ object ReadingStats {
             if (cp <= JAPANESE_LETTERS[i + 1]) return true
             i += 2
         }
-        return false
+        // Every other language's letters too (é, ñ, Hangul, Cyrillic…); full-width Latin and digits stay out, as before.
+        return cp !in 0xFF00..0xFFEF && Character.isLetterOrDigit(cp)
     }
 
-    /** The characters of a line that count as read: Japanese letters and ASCII letters and digits, no punctuation, spaces or symbols. */
+    /** The characters of a line that count as read: letters and digits of any language, no punctuation, spaces or symbols. */
     fun characters(text: String): Int = text.codePoints().filter(::counts).count().toInt()
 
     data class Credit(val us: Long, val pace: Int)

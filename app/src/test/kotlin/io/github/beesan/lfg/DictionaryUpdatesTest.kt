@@ -51,4 +51,11 @@ class DictionaryUpdatesTest {
         assertTrue(DictionaryUpdates.replaces(ranks, ImportOutcome(success = true, title = "Jiten", frequencies = 610_000)))
         assertFalse(DictionaryUpdates.replaces(ranks, ImportOutcome(success = true, title = "Jiten", frequencies = 0)))
     }
+
+    @Test
+    fun aTitleWithASlashHasHoshidictsFolderName() {
+        assertEquals("Jitendex", io.github.beesan.lfg.dict.DictionaryRepository.folderName("Jitendex"))
+        assertEquals("A_B #7e560f81", io.github.beesan.lfg.dict.DictionaryRepository.folderName("A/B"))
+        assertTrue(io.github.beesan.lfg.dict.DictionaryRepository.folderName("x/..").startsWith("x_.. #"))
+    }
 }

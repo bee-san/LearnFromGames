@@ -128,10 +128,11 @@ class GameArrivals {
     @Synchronized
     fun arrived(gameId: String?, hostId: String? = null): Boolean {
         if (gameId == null || gameId == last) return false
-        val nameLost = hostId == gameId && lastHost == hostId
+        // The game is still the one remembered: its name coming back is not a new arrival either.
+        if (hostId == gameId && lastHost == hostId) return false
         last = gameId
         lastHost = hostId
-        return !nameLost
+        return true
     }
 
     /** The games' profiles were changed: whatever is in front next has come anew, and takes up its profile. */

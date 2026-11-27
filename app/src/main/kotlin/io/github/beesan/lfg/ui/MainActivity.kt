@@ -158,6 +158,20 @@ class MainActivity : ComponentActivity() {
             var page by rememberSaveable { mutableStateOf(Page.HOME) }
             // Where a line was opened from, Home or Lines, so back returns there.
             var lineFrom by rememberSaveable { mutableStateOf(Page.HOME) }
+            // Pages with more than one way in (Goals from Home or Stats, Translation from Ask, Controls from the wheel,
+            // the diary's settings from the diary) go back the way they came.
+            var shownBefore by rememberSaveable { mutableStateOf(page) }
+            var detour by rememberSaveable { mutableStateOf<Page?>(null) }
+            var detourFrom by rememberSaveable { mutableStateOf<Page?>(null) }
+            var goingBack by remember { mutableStateOf(false) }
+            LaunchedEffect(page) {
+                if (!goingBack && page in setOf(Page.GOALS, Page.DIARY_SETTINGS, Page.TRANSLATION, Page.CONTROLS) && shownBefore != page) {
+                    detour = page
+                    detourFrom = shownBefore
+                }
+                goingBack = false
+                shownBefore = page
+            }
             // The game whose own stats page is open, and the period it opened on.
             var statsGame by rememberSaveable { mutableStateOf("") }
             var statsGamePeriod by rememberSaveable { mutableStateOf(StatsPeriod.DAYS_30) }
@@ -210,7 +224,7 @@ class MainActivity : ComponentActivity() {
                 // "Pick your LFG button": every button pressed is the answer, here and in the service.
                 androidx.compose.runtime.DisposableEffect(step) {
                     choosingShortcut = step == SetupStep.BUTTON
-                    LfgAccessibilityService.choosingShortcut = choosingShortcut
+                    LfgAccessibilityService.choosingShortcut = choosingShortcut && hasWindowFocus()
                     onDispose {
                         choosingShortcut = false
                         LfgAccessibilityService.choosingShortcut = false
@@ -219,6 +233,14 @@ class MainActivity : ComponentActivity() {
                 }
             }
             fun back() {
+                goingBack = true
+                if (page == detour) {
+                    detourFrom?.let { from ->
+                        detour = null
+                        page = from
+                        return
+                    }
+                }
                 // Stats keeps its period and chart across the goals page, and opens on its defaults again after Home.
                 if (page == Page.STATS) saved.removeState(Page.STATS)
                 page = when (page) {
@@ -271,7 +293,10 @@ class MainActivity : ComponentActivity() {
                                         onConnectAnki = { ankiPermission.launch(AnkiBridge.PERMISSION) },
                                         onInstallAnki = ::openAnkiDroidListing,
                                         onEverywhere = { all -> model.updatePrefs { it.copy(readButton = all, setupStep = SetupFlow.next(step, steps).name) } },
-                                        onKey = { key -> model.updatePrefs { it.copy(openRouterKey = key.trim()) } },
+                                        onKey = { key ->
+                                            model.forgetKeyTest()
+                                            model.updatePrefs { it.copy(openRouterKey = key.trim()) }
+                                        },
                                         onTestKey = model::testKey,
                                         onKeepDialogue = { yes ->
                                             model.updatePrefs { it.copy(keepDialogue = yes, keepDialogueAsked = true, setupStep = SetupFlow.next(step, steps).name) }
@@ -449,11 +474,11 @@ class MainActivity : ComponentActivity() {
                         page == Page.DIARY_SHARE -> diary.entry?.let { entry ->
                             DiaryShareScreen(
                                 entry = entry,
-                                picture = entry.picturePath ?: diary.page?.picture,
+                                picture = entry.picturePath?.takeIf { java.io.File(it).isFile } ?: diary.page?.picture,
                                 sharing = sharing,
                                 prefs = prefs,
                                 onTranslate = model.diary::translate,
-                                onShare = { choice -> shareEntry(entry, entry.picturePath ?: diary.page?.picture, shareWords(entry, sharing, choice)) },
+                                onShare = { choice -> shareEntry(entry, entry.picturePath?.takeIf { java.io.File(it).isFile } ?: diary.page?.picture, shareWords(entry, sharing, choice)) },
                                 onBack = ::back,
                             )
                         }
@@ -544,6 +569,8 @@ class MainActivity : ComponentActivity() {
                             onAddAudio = { pickAudio.launch(arrayOf("*/*")) },
                             onRemoveAudio = { model.removeWordAudio() },
                             starterMissing = remember(dictionary, fetchingDictionary) { model.starterMissing() },
+                            starterMegabytes = remember(dictionary, fetchingDictionary) { model.starterMegabytes() },
+                            japanese = prefs.learning.japanese,
                             onStarter = model::fetchStarterDictionaries,
                             updates = prefs.updateDictionaries,
                             onUpdates = { on -> model.updatePrefs { it.copy(updateDictionaries = on) } },
@@ -768,6 +795,10 @@ class MainActivity : ComponentActivity() {
         ) {
             return true
         }
+        // The LFG button is the service's: on these pages Android would take it (L3, R3, Start) for a press of
+        // whatever button has the pad's focus, and open the Play Store or answer a question for the player.
+        val (first, second) = io.github.beesan.lfg.core.Shortcut.keys(model.prefs.value.shortcut)
+        if (!choosingShortcut && (event.keyCode == first || event.keyCode == second)) return true
         return super.dispatchKeyEvent(event)
     }
 
@@ -873,6 +904,15 @@ class MainActivity : ComponentActivity() {
                 requested.value = if (found) Page.DIARY_DAY else Page.DIARY
             }
         }
+    }
+
+    /**
+     * The service hears every press as the answer to "Pick your LFG button" only while this page has the
+     * buttons: a game played meanwhile, on this screen or the other, keeps its LFG button.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        LfgAccessibilityService.choosingShortcut = choosingShortcut && hasFocus
     }
 
     override fun onResume() {

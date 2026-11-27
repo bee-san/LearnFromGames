@@ -467,9 +467,14 @@ class LfgAccessibilityService : AccessibilityService() {
                 chordLetGo = true
                 shortcutUp(anyApp = true)
             }
-            if (first !in down && second !in down) {
-                chordFired = false
-                chordLetGo = false
+            if (first !in down && second !in down && chordFired) {
+                // Cleared after this release has reached the window in front too: lookup asks whether it was the shortcut's.
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    if (first !in down && second !in down) {
+                        chordFired = false
+                        chordLetGo = false
+                    }
+                }, CHORD_AFTER_MS)
             }
         }
         return false
@@ -1072,7 +1077,11 @@ class LfgAccessibilityService : AccessibilityService() {
                 if (r == null || asked?.continuous != true) return@collect
                 controller.setLines(
                     r.lines.mapIndexed { i, line ->
-                        LookupLine(line.text, r.saved.getOrNull(i)?.id, r.framePath, r.game.title, line, fromApp = true, gameId = r.game.id)
+                        // A game's region, read as its subtitles come, has the game's sound and its moving picture as the game's own reading does.
+                        LookupLine(
+                            line.text, r.saved.getOrNull(i)?.id, r.framePath, r.game.title, line, r.appearedAtMs.getOrNull(i),
+                            fromApp = r.game.app, gameId = r.game.id,
+                        )
                     },
                 )
                 overlays.onScreen(r.displayId, true, true, asking = true)
@@ -1916,6 +1925,9 @@ class LfgAccessibilityService : AccessibilityService() {
     companion object {
         /** A line read again within this long is the one kept, not a new one: a box read once, then again. */
         private const val SAME_LINE_MS = 10 * 60_000L
+
+        /** How long after the shortcut's last button is let go its release still counts as the shortcut's. */
+        private const val CHORD_AFTER_MS = 150L
 
         private const val TAG = "LfgService"
 

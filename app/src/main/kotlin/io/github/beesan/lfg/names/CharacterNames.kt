@@ -173,6 +173,8 @@ class CharacterNames(
      * visual novel", so they are not built again by themselves.
      */
     suspend fun remove(vnId: String) {
+        // A build still going would put them back once it is done.
+        CharacterNamesWorker.stop(context, vnId)
         dictionaries.names(vnId)?.let { dictionaries.remove(it.title) }
         for (game in db.games().withVn()) {
             if (game.vndb == vnId) {

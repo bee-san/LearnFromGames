@@ -47,6 +47,8 @@ class GameFinder(private val context: Context, private val scope: CoroutineScope
             // A Steam player just came to the front: ask Steam now, not in half a minute.
             steamFor = packageName
             lastSteam = -STEAM_MS
+            // What Steam said last time was another session's game: until it answers again, none is known.
+            steamNow = null
         }
         if (refreshing?.isActive != true) {
             val files = now - lastFiles >= FILES_MS

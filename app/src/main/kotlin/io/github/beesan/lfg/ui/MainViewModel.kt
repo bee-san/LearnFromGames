@@ -258,6 +258,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun starterMissing(): List<String> = app.dictionaries.defaultsMissing().map { it.name }
 
+    /** The starter set's size in MB when all of it is missing; null when only part is, whose size is not known. */
+    fun starterMegabytes(): Long? {
+        val learning = app.settings.prefs.value.learning
+        val missing = app.dictionaries.defaultsMissing()
+        return if (missing.size == io.github.beesan.lfg.dict.DefaultDictionaries.of(learning).size) {
+            io.github.beesan.lfg.dict.DefaultDictionaries.bytes(learning) / 1_000_000
+        } else {
+            null
+        }
+    }
+
     /** "Check now" on Settings › Dictionaries: every dictionary that can be updated is asked about behind the page. */
     fun checkDictionaryUpdates() = io.github.beesan.lfg.dict.DictionaryUpdateWorker.now(app)
 
@@ -433,6 +444,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** What "Test the key" found: a translation of a sample line, or what went wrong. */
     private val _keyTest = MutableStateFlow<Pair<Boolean, String>?>(null)
     val keyTest: StateFlow<Pair<Boolean, String>?> = _keyTest
+
+    /** The key was changed: what was said of the old one is not true of it. */
+    fun forgetKeyTest() {
+        _keyTest.value = null
+    }
 
     fun testKey() {
         _keyTest.value = true to "Asking OpenRouter…"
@@ -627,6 +643,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     File(dir, Backup.fileName()).outputStream().use { Backup.write(app, app.database, it, prefs.backupPictures) }
                 }
                 (app.contentResolver.openInputStream(uri) ?: throw java.io.IOException()).use { Backup.restore(app, app.database, it) }
+            } catch (e: Backup.PartlyRestored) {
+                // The database is closed: only a fresh start can go on, with what was put back.
+                android.util.Log.w("LfgBackup", "restore stopped partway", e)
             } catch (e: Exception) {
                 _backupMessage.value = e.message?.takeIf { it.startsWith("This file") } ?: "The restore failed; nothing was changed. Try again."
                 return@launch

@@ -63,7 +63,12 @@ class App : Application() {
     val diary by lazy { io.github.beesan.lfg.data.Diary(database) }
     val recapper by lazy { Recapper(database, { settings.prefs.value }, diary = diary) }
     val asker by lazy { Asker(database, { settings.prefs.value }) }
-    val dictionaries by lazy { DictionaryRepository(this) { Language.of(settings.prefs.value.language) } }
+    val dictionaries by lazy {
+        DictionaryRepository(this, { Language.of(settings.prefs.value.language) }) { old, new ->
+            // The kanji dictionary picked by hand is the same one after its update.
+            if (settings.prefs.value.kanjiDictionary == old) settings.update { it.copy(kanjiDictionary = new) }
+        }
+    }
     val wordAudio by lazy { WordAudio(this) }
     val anki by lazy { AnkiBridge(this) }
     val knownWords by lazy { KnownWords(this) }
@@ -119,6 +124,12 @@ class App : Application() {
                 // At start only made sure of: a restore brings the setting without its schedule.
                 if (first) withContext(Dispatchers.IO) { BackupWorker.ensure(this@App, every) } else BackupWorker.schedule(this@App, every)
                 first = false
+            }
+        }
+        // Sentence audio turned off: the game's sound stops being taken, and Android's notification of it goes.
+        scope.launch {
+            settings.prefs.map { it.sentenceAudio }.distinctUntilChanged().collect { on ->
+                if (!on && io.github.beesan.lfg.capture.SoundCapture.running.value) io.github.beesan.lfg.capture.SoundCapture.stop(this@App)
             }
         }
         // The diary's days are written once each is over, while that is on and there is a key to write them with.

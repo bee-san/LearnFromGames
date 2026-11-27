@@ -312,10 +312,11 @@ fun GameStatsScreen(
     }) {
         if (!stats.loaded) return@Page
         val zone = remember { ZoneId.systemDefault() }
-        val today = remember { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, zone) }
+        // Moves on at 04:00 while the page stays open.
+        val today = ReadingStats.dayOf(rememberNow(), zone)
         val days = stats.summary.gameDays[gameId].orEmpty()
-        val view = remember(stats, period) { period.view(days, today) }
-        val all = remember(stats, period) { period.view(stats.days, today).totals }
+        val view = remember(stats, period, today) { period.view(days, today) }
+        val all = remember(stats, period, today) { period.view(stats.days, today).totals }
         val sessions = remember(stats) { stats.summary.sessions.filter { it.gameId == gameId } }
         val sessionCards = remember(stats) { GameStats.sessionCards(sessions, stats.cards) }
         val shown = sessions.filter { ReadingStats.dayOf(it.start, zone) >= view.start }

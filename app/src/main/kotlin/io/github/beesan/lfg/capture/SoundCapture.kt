@@ -101,6 +101,8 @@ object SoundCapture {
     internal fun setRunning(value: Boolean) {
         // Once it has listened, the next game opened after it stops may ask again.
         if (value) asked = false
+        // Sound from before a break is not counted back from the new sound as if it ran on.
+        if (value) ring.clear()
         _running.value = value
     }
 
@@ -178,6 +180,12 @@ class SampleRing(private val capacity: Int) {
     private val data = ShortArray(capacity)
     private var written = 0L
     private var endMs = 0L
+
+    @Synchronized
+    fun clear() {
+        written = 0L
+        endMs = 0L
+    }
 
     @Synchronized
     fun write(samples: ShortArray, count: Int, endMs: Long) {
@@ -260,6 +268,8 @@ class SoundService : Service() {
         }
         // Android requires the notification to be up before the consent is used.
         startForeground(NOTIFICATION, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        // Already listening (two screens may each have asked): the second consent is not needed.
+        if (projection != null) return START_NOT_STICKY
         try {
             val granted = getSystemService(MediaProjectionManager::class.java).getMediaProjection(code, data)
                 ?: error("Android gave no screen recording consent.")
@@ -288,6 +298,8 @@ class SoundService : Service() {
                     val n = current.read(buffer, 0, buffer.size)
                     if (n > 0) SoundCapture.onSamples(buffer, n, System.currentTimeMillis()) else if (n < 0) break
                 }
+                // The recorder died (the sound server restarted): the service ends, so LFG stops saying it listens and Start comes back.
+                if (reading) main.post { stopSelf() }
             }
         } catch (e: Exception) {
             Log.w(TAG, "could not start capturing sound", e)
@@ -303,6 +315,8 @@ class SoundService : Service() {
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+            // LFG's own sound (a word's recording, Read aloud, Hear) is no part of the game's line.
+            .excludeUid(android.os.Process.myUid())
             .build()
         val format = AudioFormat.Builder()
             .setEncoding(AudioFormat.ENCODING_PCM_16BIT)

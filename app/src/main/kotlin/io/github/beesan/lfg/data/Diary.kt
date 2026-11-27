@@ -61,7 +61,7 @@ class Diary(private val db: LfgDatabase, private val zone: () -> ZoneId = { Zone
         val totals = ReadingStats.summarise(lines.map { ReadingStats.Stamp(it.timestamp, ReadingStats.characters(it.lineText), it.gameId) }, zone)
             .gameDays.mapValues { (_, days) -> days.associateBy { it.day } }
         val byDay = lines.groupBy { it.gameId to ReadingStats.dayOf(it.timestamp, zone) }
-        val keys = (byDay.keys + entries.keys).filter { (gameId, _) -> games[gameId]?.app != true || entries.keys.any { it.first == gameId } }
+        val keys = (byDay.keys + entries.keys).filter { key -> games[key.first]?.app != true || key in entries }
         keys.groupBy { it.first }.map { (gameId, days) ->
             val ordered = days.map { it.second }.sorted()
             val name = games[gameId]?.title ?: byDay[gameId to ordered.last()]?.lastOrNull()?.gameName
@@ -131,7 +131,9 @@ class Diary(private val db: LfgDatabase, private val zone: () -> ZoneId = { Zone
         for ((key, read) in old.groupBy { it.gameId to ReadingStats.dayOf(it.timestamp, zone) }) {
             val row = kept[key.first to key.second.toEpochDay()]
             if (key in entries || row?.picturePath?.let(::File)?.isFile == true) continue
-            val line = DayPicture.line(candidates(read, lookups), moments) ?: continue
+            // Chosen from the whole day: the clean-up may cut a day in two, and the better picture be in the part still kept.
+            val day = db.lines().ofGame(key.first).filter { it.screenshotPath != null && ReadingStats.dayOf(it.timestamp, zone) == key.second }
+            val line = DayPicture.line(candidates(day.ifEmpty { read }, lookups), moments) ?: continue
             db.diary().put((row ?: DiaryDay(key.first, key.second.toEpochDay())).copy(picturePath = line.screen, lineId = line.id))
         }
     }
