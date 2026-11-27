@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * What the wheel and a lookup sound like over a game: a tick for each slice
  * or word the player moves to, a thock for a pick, two notes going into a
- * wheel and coming back out, and a chime when a card is made.
+ * wheel and coming back out. A card made is silent: only a failed one is heard.
  *
  * Small and quiet on purpose: they go with what the hand does and are heard
  * under the game, not over it. The tick is one sound, the same every time, as
@@ -24,24 +24,21 @@ object GameSounds {
     /** Each sound, its recording, and how loud it plays beside the others. */
     enum class Sound(val recording: Int, val volume: Float) {
         /** The wheel points at another slice; lookup steps to another word. */
-        MOVE(R.raw.sound_move, 0.55f),
+        MOVE(R.raw.sound_move, 0.495f),
 
         /** A tile is picked. */
-        PICK(R.raw.sound_pick, 0.8f),
+        PICK(R.raw.sound_pick, 0.72f),
 
         /** Into a wheel inside the wheel, and back out of it. */
-        INTO(R.raw.sound_into, 0.6f),
-        BACK(R.raw.sound_back, 0.6f),
+        INTO(R.raw.sound_into, 0.54f),
+        BACK(R.raw.sound_back, 0.54f),
 
         /** The wheel opens, and goes with nothing picked. */
-        OPEN(R.raw.sound_open, 0.6f),
-        AWAY(R.raw.sound_away, 0.5f),
-
-        /** A card was made. */
-        CARD(R.raw.sound_card, 0.7f),
+        OPEN(R.raw.sound_open, 0.54f),
+        AWAY(R.raw.sound_away, 0.45f),
 
         /** It cannot be done: a tile that has nothing to act on, a card that failed. */
-        NO(R.raw.sound_no, 0.7f),
+        NO(R.raw.sound_no, 0.63f),
     }
 
     /** Settings › Appearance: off, nothing plays. */
@@ -79,7 +76,7 @@ object GameSounds {
     fun play(heard: Heard) = when (heard) {
         Heard.STEP -> play(Sound.MOVE, quieter = true)
         Heard.CARD_ASKED -> play(Sound.PICK)
-        Heard.CARD_MADE -> play(Sound.CARD)
+        Heard.CARD_MADE -> Unit
         Heard.CARD_FAILED -> play(Sound.NO)
     }
 

@@ -8,7 +8,6 @@
 | `sound_pick` | a tile is picked; a card is asked for | the Hi75 key going down, a low thump under it, a faint marimba E5 |
 | `sound_into`, `sound_back` | into a wheel inside the wheel, and back out | the key coming up, then two marimba notes: E5 to A5, and A5 to E5 |
 | `sound_open`, `sound_away` | the wheel opens, and goes with nothing picked | a bamboo swish, and the same a fourth lower |
-| `sound_card` | a card was made | two marimba notes a fifth apart |
 | `sound_no` | a tile with nothing to act on; a card that failed | the same low marimba note twice |
 
 The Hi75 recordings are the ones the app's buttons play (`click_down_1`, `click_up_1`; Josh Comeau's

@@ -421,7 +421,7 @@ fun AppearanceScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack:
     }
     Group("Sounds") {
         Card("Button sounds") { OnOff(prefs.buttonSounds) { on -> onChange { it.copy(buttonSounds = on) } } }
-        Card("Wheel and lookup sounds", "Tick, thock, chime") {
+        Card("Wheel and lookup sounds", "Tick and thock") {
             OnOff(prefs.gameSounds) { on -> onChange { it.copy(gameSounds = on) } }
         }
         Card("Sound volume") {

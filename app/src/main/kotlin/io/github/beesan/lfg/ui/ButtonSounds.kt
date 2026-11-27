@@ -39,7 +39,7 @@ object ButtonSounds {
     var enabled: Boolean = true
 
     /** Well under full volume, as the library plays them. */
-    private const val VOLUME = 0.35f
+    private const val VOLUME = 0.315f
 
     /** Settings › Appearance, "Sound volume": the volume is multiplied by this. */
     @Volatile

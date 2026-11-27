@@ -181,7 +181,7 @@ data class Prefs(
     val wheelDim: Int = 60,
     /** The app's buttons click as they are pressed and let go. */
     val buttonSounds: Boolean = true,
-    /** Over a game the wheel ticks from slice to slice and thocks at a pick, lookup ticks from word to word, and a card made chimes. */
+    /** Over a game the wheel ticks from slice to slice and thocks at a pick and lookup ticks from word to word. */
     val gameSounds: Boolean = true,
     /** How loud the app's own sounds are, as a percentage: one of [SOUND_VOLUME_STEPS]. */
     val soundVolume: Int = 100,

@@ -22,7 +22,6 @@ out["sound_into"] = mix(0.55 * up, 0.5 * cut(E5, 110, 30), at(0.58 * cut(A5, 200
 out["sound_back"] = mix(0.55 * up, 0.5 * cut(A5, 110, 30), at(0.58 * cut(E5, 200, 70), 0.07))
 out["sound_open"] = cut(rd("r2/bank_swish_open.wav", thr=0.05), 230, 40)
 out["sound_away"] = cut(rd("r2/bank_swish_away.wav", thr=0.05), 230, 40)
-out["sound_card"] = cut(rd("r2/fig_card_fifth.wav"), 900, 300)
 out["sound_no"] = cut(rd("r2/fig_no_double.wav"), 420, 80)
 # Others worth hearing beside them
 alt = {}

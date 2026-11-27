@@ -75,7 +75,7 @@ object SettingsIndex {
             setting("Theme", "Light, dark, or the same as the system", "dark mode night black white")
             setting("Colours", "Pink, mono, amber, teal or purple", "colors color colour scheme palette accent")
             setting("Button sounds", "Buttons click when you press them", "click audio mute sfx")
-            setting("Wheel and lookup sounds", "A tick as you move, a thock when you pick, a chime for a new card", "audio sfx mute tick click chime radial ring menu")
+            setting("Wheel and lookup sounds", "A tick as you move, a thock when you pick", "audio sfx mute tick click radial ring menu")
             setting("Sound volume", "How loud LFG’s own sounds are", "audio loud quiet level sfx")
         },
         page(Page.BACKUP, "Backup", "Back up, restore, and back up on a schedule", "save copy move new device") {
