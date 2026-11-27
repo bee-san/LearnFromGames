@@ -20,7 +20,7 @@ class LineAsker(private val db: LfgDatabase, private val prefs: () -> Prefs) {
         // The language the line was read as, which the one being learnt now may not be.
         val language = Language.orJapanese(line.language)
         val task = task(action, p.translateInto, question, language) ?: throw OpenRouter.Failure("That tile asks nothing of a line.")
-        val before = if (p.translateContext > 0) db.lines().before(line.gameId, line.timestamp, p.translateContext).reversed().map { it.lineText } else emptyList()
+        val before = if (p.translateContext > 0) db.lines().before(line.gameId, line.timestamp, p.translateContext, line.id).reversed().map { it.lineText } else emptyList()
         return OpenRouter.ask(p.openRouterKey, p.model, system(p.translateInto, task, language), prompt(line.gameName, before, line.lineText, language)).trim()
             .ifBlank { throw OpenRouter.Failure("The answer came back empty. Try again.") }
     }

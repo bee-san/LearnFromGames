@@ -88,7 +88,7 @@ class Explainer(
     }
 
     private suspend fun before(line: GameLine, p: Prefs): List<String> =
-        if (p.translateContext > 0) db.lines().before(line.gameId, line.timestamp, p.translateContext).reversed().map { it.lineText } else emptyList()
+        if (p.translateContext > 0) db.lines().before(line.gameId, line.timestamp, p.translateContext, line.id).reversed().map { it.lineText } else emptyList()
 
     private suspend fun save(lineId: String, conversation: Conversation, model: String): Conversation {
         db.explanations().put(

@@ -579,4 +579,14 @@ class LineSorterTest {
         assertEquals(first, checked.readAt(listOf(clear), recheck = true))
         assertEquals(listOf(clear), checked.lines)
     }
+
+    @Test
+    fun aDrawnBoxIsNoPartOfAMenusCrowd() = runBlocking {
+        val sorter = LineSorter()
+        // Box 1's line arrives with five new rows of a log read in a box drawn beside it: six together would be a menu.
+        val pieces = listOf("あいつが来るまで、ここで待っていよう。", "ログ一", "ログ二", "ログ三", "ログ四", "ログ五")
+        val sorted = sorter.sort(pieces, emptyList(), drawn = setOf(1, 2, 3, 4, 5))
+        assertTrue(sorted.parts.flatten().none { (it as? Part.New)?.interfaceText == true })
+        assertTrue(!sorted.menu)
+    }
 }

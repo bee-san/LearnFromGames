@@ -96,7 +96,7 @@ class LineStore(
     suspend fun grow(line: GameLine, text: String, box: Box?, screenshotPath: String?, nowMs: Long = System.currentTimeMillis()): GameLine {
         val grown = line.copy(
             lineText = text, charCount = text.codePointCount(0, text.length), box = box?.encode() ?: line.box,
-            screenshotPath = screenshotPath ?: line.screenshotPath, lastModified = nowMs,
+            screenshotPath = screenshotPath ?: line.screenshotPath, lastModified = nowMs, translation = null,
         )
         db.lines().grow(grown.id, grown.lineText, grown.charCount, grown.box, grown.screenshotPath, nowMs)
         onSaved(grown)

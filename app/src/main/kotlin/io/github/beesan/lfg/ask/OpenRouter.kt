@@ -148,7 +148,11 @@ object OpenRouter {
         }
         try {
             val code = connection.responseCode
-            if (code != 200) throw Failure(failure(code))
+            if (code != 200) {
+                // OpenRouter says what was wrong in the body: a model without pictures or tools is a 404 as a missing one is.
+                val said = runCatching { connection.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull()
+                throw Failure(failure(code, said?.let(::errorMessage).orEmpty()))
+            }
             connection.inputStream.bufferedReader().use { it.readText() }
         } catch (_: IOException) {
             throw Failure("OpenRouter isn’t reachable. Check the connection and try again.", offline = true)
@@ -158,13 +162,22 @@ object OpenRouter {
     }
 
     /** What went wrong, by the response's status, and what to do. */
-    fun failure(code: Int): String = when (code) {
+    fun failure(code: Int, said: String = ""): String = when {
+        said.contains("image", ignoreCase = true) -> "This model can’t see pictures. Ask without the screen, or pick another model in Settings › Translation."
+        said.contains("tool", ignoreCase = true) -> "This model can’t search the web. Pick another model in Settings › Translation."
+        else -> when (code) {
         401 -> "OpenRouter refused the key. Check it in Settings › Translation."
         402 -> "The OpenRouter account is out of credit. Add some at openrouter.ai."
         404 -> "OpenRouter has no such model. Check the model in Settings › Translation."
         429 -> "OpenRouter is busy. Try again in a minute."
-        else -> "OpenRouter answered with an error ($code). Try again."
+        else -> "OpenRouter answered with an error ($code)" + (if (said.isNotBlank()) ": ${said.take(160)}" else ". Try again.")
+        }
     }
+
+    /** The message in an error's body, `{"error": {"message": …}}`, or blank. */
+    fun errorMessage(body: String): String = runCatching {
+        (Json.parseToJsonElement(body).jsonObject["error"] as? JsonObject)?.text("message")
+    }.getOrNull().orEmpty()
 
     /** The first JSON object in [text]: a model may wrap one in a code fence. */
     fun jsonIn(text: String): JsonObject {

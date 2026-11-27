@@ -128,7 +128,7 @@ On 2026-11-22 the Thor was running a build of a local branch with 49 commits tha
 ## Profiles
 
 - The profile in use **is** the ordinary settings (`Settings`, the `settings` file); one not in use is the same keys in a file of its own (`profile-<id>`), with its Anki target beside it in `profiles`. Changing profile (`Profiles.use`) puts one away and takes the other out, so nothing else in the app knows of profiles.
-- **A new setting is each profile's own** unless it is added to `Prefs.withShared` (set-up, keys, backups, game folders, storage and downloads, LFG's own updates, the widget's size). Wheels, boxes and dictionaries are not a profile's.
+- **A new setting is each profile's own** unless it is added to `Prefs.withShared` (set-up, keys, backups, game folders, storage and downloads, LFG's own updates, the widget's size, leaving out menus). Wheels, boxes and dictionaries are not a profile's.
 - A profile with no name goes by its language's (`ProfileRules.shown`), so it follows a change of language.
 - **Tiles:** six `ProfileTile` services in the manifest, off until there are two profiles (`Profiles.syncTiles`). A tile redraws by watching `profiles.list` while it is listening: `TileService.requestListeningState` does nothing for them while the shade is open. Android 13 leaves the tile of a deleted profile greyed out in the shade until the user drags it away.
 - Changing to another language over a game reads that game's text as the new language. That is the user's to choose, not a bug to guard.

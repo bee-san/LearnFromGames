@@ -96,10 +96,12 @@ class MediaAttacher(
 
     private suspend fun speak(card: Card, target: AnkiTarget) {
         try {
-            val text = db.lines().byId(card.lineId)?.lineText ?: return
+            // In the voice of the language the line was read as: a card waiting may outlast a change of profile.
+            val line = db.lines().byId(card.lineId) ?: return
+            val text = line.lineText
             val name = "lfg_${card.createdAt}"
             val wav = File(mediaDir(), "$name.wav")
-            if (!speech.toFile(text, wav)) return
+            if (!speech.toFile(text, wav, io.github.beesan.lfg.core.Language.orJapanese(line.language))) return
             // Android's voice writes WAV, ten times the size of the game's own sound: made AAC like it, kept WAV if that fails.
             val m4a = File(mediaDir(), "$name.m4a")
             val pcm = Wav.read(wav.readBytes())

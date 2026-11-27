@@ -604,7 +604,8 @@ fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: (
         Card("Add card button", "The other one closes") {
             Choice(listOf("a" to "A adds", "b" to "B adds"), if (prefs.swapConfirm) "b" else "a") { v -> onChange { it.copy(swapConfirm = v == "b") } }
         }
-        Card("Selection", if (word) "▶ goes a word" else "▶ goes a character") {
+        // With Stick by word the stick does the stepping a word at a time, and ◀ ▶ a character (ControllerInput).
+        Card("Selection", (if (prefs.stickWords) "The stick goes " else "▶ goes ") + if (word) "a word" else "a character") {
             Choice(listOf(Prefs.SELECT_WORD to "Whole word", Prefs.SELECT_CHARACTER to "Character"), if (word) Prefs.SELECT_WORD else Prefs.SELECT_CHARACTER) { v ->
                 onChange { it.copy(selection = v) }
             }
@@ -632,9 +633,9 @@ fun ControlsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBack: (
     Group("Buttons in lookup") {
         Plain {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                KeyChip("◀ ▶", if (word) "Word" else "Character")
+                KeyChip("◀ ▶", if (word && !prefs.stickWords) "Word" else "Character")
                 KeyChip("▲ ▼", "Row")
-                KeyChip("L stick", "Character")
+                KeyChip("L stick", if (word && prefs.stickWords) "Word" else "Character")
                 KeyChip("L1 R1", "Entry")
                 KeyChip("Y", "Listen")
                 KeyChip("R stick", "Scroll")

@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import io.github.beesan.lfg.data.Notes
 import android.content.Intent
 import io.github.beesan.lfg.ask.OpenRouter
@@ -110,9 +111,16 @@ class App : Application() {
             }
         }
         // The widgets measure against the goals and draw in the chosen colours, so they redraw as soon as one changes.
-        scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme, it.widgetSize) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
+        scope.launch { settings.prefs.map { listOf(it.goals, it.goalCards, it.colours, it.theme, it.widgetSize, it.appsInReadingTime, it.interfaceApart) }.distinctUntilChanged().drop(1).collect { StatsWidgets.update(this@App) } }
         // WorkManager keeps the automatic backup across restarts; it changes only when the setting does.
-        scope.launch { settings.prefs.map { it.backupEvery }.distinctUntilChanged().drop(1).collect { BackupWorker.schedule(this@App, it) } }
+        scope.launch {
+            var first = true
+            settings.prefs.map { it.backupEvery }.distinctUntilChanged().collect { every ->
+                // At start only made sure of: a restore brings the setting without its schedule.
+                if (first) withContext(Dispatchers.IO) { BackupWorker.ensure(this@App, every) } else BackupWorker.schedule(this@App, every)
+                first = false
+            }
+        }
         // The diary's days are written once each is over, while that is on and there is a key to write them with.
         scope.launch {
             settings.prefs.map { it.diaryWrite == Prefs.DIARY_EACH_DAY && it.aiReady }.distinctUntilChanged()

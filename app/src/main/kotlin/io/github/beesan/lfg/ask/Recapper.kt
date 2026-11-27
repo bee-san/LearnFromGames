@@ -53,8 +53,7 @@ class Recapper(
         val p = prefs()
         var row = db.recaps().latest(gameId)
         val all = db.lines().ofGame(gameId)
-        val start = row?.let { kept -> all.indexOfFirst { it.id == kept.lastLineId } + 1 } ?: 0
-        val fresh = all.drop(start.coerceAtLeast(0))
+        val fresh = all.drop(row?.let { start(all, it, db.lines().byId(it.lastLineId)) } ?: 0)
         if (fresh.isEmpty()) return row ?: throw OpenRouter.Failure("Nothing has been read in this game yet.")
         for (piece in fresh.chunked(CHUNK)) {
             val earlier = row?.let { Json.decodeFromString<Recap>(it.json) }
@@ -91,6 +90,16 @@ class Recapper(
     }
 
     companion object {
+        /**
+         * Where the lines not yet in [kept] begin in [all]. Its last line may since have been marked a menu's or deleted,
+         * and so be missing from [all]: then the lines read after it ([last], when it is still there), or after the recap was written.
+         */
+        fun start(all: List<GameLine>, kept: RecapRow, last: GameLine?): Int {
+            all.indexOfFirst { it.id == kept.lastLineId }.takeIf { it >= 0 }?.let { return it + 1 }
+            val after = last?.timestamp ?: (kept.createdAt / 1000.0)
+            return all.indexOfFirst { it.timestamp > after }.takeIf { it >= 0 } ?: all.size
+        }
+
         /** Lines what to do next is told from: enough to hold the last thing the player was asked to do. */
         const val NEXT = 150
 

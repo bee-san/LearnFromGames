@@ -31,9 +31,9 @@ class Speech(
     private var finished: CompletableDeferred<Boolean>? = null
 
     /** The engine, set to the voice of the language being learnt now; null when there is no such voice. */
-    private suspend fun ready(): TextToSpeech? {
+    private suspend fun ready(voiceOf: Language? = null): TextToSpeech? {
         val tts = engine ?: start() ?: return null
-        val learning = language()
+        val learning = voiceOf ?: language()
         if (tts.setLanguage(Locale.forLanguageTag(learning.voice)) < TextToSpeech.LANG_AVAILABLE) {
             Log.i(TAG, "no ${learning.title} voice")
             return null
@@ -53,28 +53,29 @@ class Speech(
         }
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) = Unit
+            // Only the file's own utterance ends the wait: a line said aloud meanwhile is not it.
             override fun onDone(utteranceId: String?) {
-                finished?.complete(true)
+                if (utteranceId == FILE) finished?.complete(true)
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
-                finished?.complete(false)
+                if (utteranceId == FILE) finished?.complete(false)
             }
 
             override fun onError(utteranceId: String?, errorCode: Int) {
-                finished?.complete(false)
+                if (utteranceId == FILE) finished?.complete(false)
             }
         })
         engine = tts
         return tts
     }
 
-    /** Writes [text] spoken to [file] as WAV. Returns false when there is no voice or it failed. */
-    suspend fun toFile(text: String, file: File): Boolean = lock.withLock {
-        val tts = ready() ?: return false
+    /** Writes [text] spoken to [file] as WAV, in [language]'s voice (the one being learnt when null). Returns false when there is no voice or it failed. */
+    suspend fun toFile(text: String, file: File, language: Language? = null): Boolean = lock.withLock {
+        val tts = ready(language) ?: return false
         val done = CompletableDeferred<Boolean>().also { finished = it }
-        if (tts.synthesizeToFile(text, Bundle(), file, "line") != TextToSpeech.SUCCESS) return false
+        if (tts.synthesizeToFile(text, Bundle(), file, FILE) != TextToSpeech.SUCCESS) return false
         val ok = withTimeoutOrNull(TIMEOUT_MS) { done.await() } == true && file.length() > WAV_HEADER
         if (!ok) file.delete()
         ok
@@ -88,6 +89,7 @@ class Speech(
 
     private companion object {
         const val TAG = "LfgSpeech"
+        const val FILE = "line"
         const val TIMEOUT_MS = 30_000L
         const val WAV_HEADER = 44L
     }

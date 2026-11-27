@@ -466,6 +466,8 @@ class ReadingPipeline(
         val pieces = Perf.measure("group") { Blocks.group(rows) }
         if (pieces.isEmpty()) {
             interfaceText.onReading(emptyList())
+            // Nothing of the game's text is on screen now: the lines before are not there to tap.
+            if (publish && _latest.value?.lines?.isNotEmpty() == true) _latest.value = Reading(game, displayId, emptyList(), emptyList(), null, nowMs)
             return
         }
         val telling = apart()
@@ -488,6 +490,8 @@ class ReadingPipeline(
             memory.sorter.sort(
                 pieces.map { it.text }, recent.map { KeptLine(it.id, it.lineText, it.createdAt) }, interfaceKnown, telling, pieces.map { it.box },
                 recheck,
+                // What is in a box the player drew beside box 1 is a line, and no part of a menu's crowd.
+                drawn = pieces.indices.filterTo(HashSet()) { i -> areas.drop(1).any { it.intersects(pieces[i].box) } },
             ) { text ->
                 store.lineOf(game, text)?.let { byId[it.id] = it; KeptLine(it.id, it.lineText, it.createdAt) }
             }

@@ -357,11 +357,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_translation.value.busy) return
         _translation.update { it.copy(busy = true, error = null) }
         viewModelScope.launch {
-            _translation.value = try {
+            val answer = try {
                 TranslationState(app.translator.translate(line))
             } catch (e: OpenRouter.Failure) {
                 TranslationState(_translation.value.text, error = e.message)
             }
+            // Another line may have been opened while this one was translated.
+            if (opened?.id == line.id) _translation.value = answer
         }
     }
 
@@ -959,7 +961,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         withContext(Dispatchers.IO) {
             val old = app.database.games().byId(game.id)
             app.database.games().update(game)
-            if (old != null && old.title != game.title) app.database.games().renameLines(game.id, game.title)
+            if (old != null && old.title != game.title) {
+                app.database.games().renameLines(game.id, game.title)
+                app.database.games().renameNotes(game.id, game.title)
+            }
         }
         LfgAccessibilityService.gamesChanged = true
     }

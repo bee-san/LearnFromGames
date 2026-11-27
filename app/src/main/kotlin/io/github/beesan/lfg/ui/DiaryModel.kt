@@ -202,7 +202,8 @@ class DiaryModel(private val app: App, private val scope: CoroutineScope, privat
         scope.launch {
             try {
                 val text = app.translator.translate(line)
-                _sharing.update { it.copy(line = line.copy(translation = text), translating = false) }
+                // Another entry may be shared by now: only its own line takes the translation.
+                _sharing.update { it.copy(line = if (it.line?.id == line.id) line.copy(translation = text) else it.line, translating = false) }
             } catch (e: OpenRouter.Failure) {
                 _sharing.update { it.copy(translating = false, error = e.message) }
             }

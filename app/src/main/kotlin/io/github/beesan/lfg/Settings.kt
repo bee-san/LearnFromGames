@@ -201,7 +201,8 @@ data class Prefs(
 
     /**
      * These settings, a profile's, with what every profile shares taken from [from], the settings in use:
-     * set-up, the keys, backups, the game folders, storage and downloads, LFG's own updates, and the widget's size.
+     * set-up, the keys, backups, the game folders, storage and downloads, LFG's own updates, the widget's size, and
+     * whether menus are left out (turned off, it forgets the marks on every line, whichever profile read it).
      * A setting not named here is each profile's own.
      */
     fun withShared(from: Prefs): Prefs = copy(
@@ -212,7 +213,7 @@ data class Prefs(
         backupPictures = from.backupPictures, backupLast = from.backupLast, backupLastSize = from.backupLastSize, gsmFile = from.gsmFile,
         cocoonFolder = from.cocoonFolder, esdeFolder = from.esdeFolder, retroArchFolder = from.retroArchFolder, edenFolder = from.edenFolder,
         keepScreensDays = from.keepScreensDays, wifiOnly = from.wifiOnly, updateDictionaries = from.updateDictionaries, updateApp = from.updateApp,
-        widgetSize = from.widgetSize,
+        widgetSize = from.widgetSize, interfaceApart = from.interfaceApart,
     )
 
     val picking: io.github.beesan.lfg.core.Selection

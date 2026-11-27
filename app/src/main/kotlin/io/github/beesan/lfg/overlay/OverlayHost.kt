@@ -48,6 +48,7 @@ import io.github.beesan.lfg.ui.htmlState
 import io.github.beesan.lfg.ui.palette
 import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
+import io.github.beesan.lfg.lookup.storyLine
 import io.github.beesan.lfg.lookup.LookupState
 
 /**
@@ -183,7 +184,10 @@ class OverlayHost(
     private var history: List<GameLine> = emptyList()
 
     /** The game of the session still going and its stats, as the top of the panel shows them. */
-    private var session: Pair<String, String>? = null
+    private var session: Pair<String, String?>? = null
+
+    /** The newest kept line of the game in front, however long ago it was read: what Recap and the like are of. */
+    private var frontLine: GameLine? = null
 
     private var ownApp: Set<Int> = emptySet()
 
@@ -444,8 +448,10 @@ class OverlayHost(
     }
 
     /** The session still going: its game and its stats; null when there is none. */
-    fun onSession(game: String?, stats: String?) {
-        session = if (game != null && stats != null) game to stats else null
+    fun onSession(game: String?, stats: String?, front: GameLine? = frontLine) {
+        // A game in front with no session going (just opened, or after a break) is still named.
+        session = game?.let { it to stats }
+        frontLine = front
         panelView?.refresh()
     }
 
@@ -1270,7 +1276,7 @@ class OverlayHost(
         private fun title(): String = session?.first ?: state.lines.firstOrNull()?.gameName ?: "LearnFromGames"
 
         /** The line on screen now that a note on the game is hung on: the newest kept one, for its picture. */
-        private fun newestOnScreen(): LookupLine? = state.lines.lastOrNull { it.geometry != null && it.lineId != null }
+        private fun newestOnScreen(): LookupLine? = state.lines.storyLine()
 
         /** The lines, the notes among them, and the sheet under them, as they are now. */
         fun refresh() {
@@ -1382,10 +1388,12 @@ class OverlayHost(
         private fun recapSheet(): PanelSheet.Recap {
             val ai = prefs().aiReady
             val busy = recaps.values.any { it.busy }
-            val answer = recapOf?.let { recaps[it] }
+            // Only this game's recap: another's stays with it.
+            val chosen = recapOf?.takeIf { recapGameName == title() }
+            val answer = chosen?.let { recaps[it] }
             val text = when {
                 !ai -> "A recap is written by the model in Settings › Translation, with your OpenRouter key. Press LFG to add one."
-                recapOf == null -> "Which recap? The scene you are in now, the last session, or the whole story so far. " +
+                chosen == null -> "Which recap? The scene you are in now, the last session, or the whole story so far. " +
                     "Each is told from only what you have read, so nothing ahead is spoiled."
                 answer?.error != null -> answer.error
                 answer?.text != null -> answer.text
@@ -1393,7 +1401,7 @@ class OverlayHost(
             }
             return PanelSheet.Recap(
                 choices = if (!ai) emptyList() else RecapOf.recaps.map { what ->
-                    RecapChoice(what, if (recaps[what]?.busy == true) what.label + "…" else what.label, chosen = what == recapOf, enabled = !busy)
+                    RecapChoice(what, if (recaps[what]?.busy == true) what.label + "…" else what.label, chosen = what == chosen, enabled = !busy)
                 },
                 text = text,
                 tone = if (answer?.error != null && ai) Tone.ACCENT else if (answer?.text == null || !ai) Tone.DIM else Tone.TEXT,
@@ -1436,7 +1444,17 @@ class OverlayHost(
             // Text on screen that is not a kept line (a menu, an ordinary app) comes last, while none of it is.
             if (out.none { it.onScreen >= 0 }) {
                 val now = System.currentTimeMillis()
-                screen.take(UNKEPT_SHOWN).forEach { out += Row("s:${it.index}:${it.value.text}", now, it.value.text, onScreen = it.index) }
+                screen.take(UNKEPT_SHOWN).forEach {
+                    // Kept as a menu's text, it has a row all the same, which Translate and Explain can be asked about.
+                    val kept = it.value.lineId?.let { id ->
+                        GameLine(
+                            id = id, gameId = it.value.gameId.orEmpty(), gameName = it.value.gameName, lineText = it.value.text, timestamp = now / 1000.0,
+                            screenshotPath = it.value.framePath, createdAt = now, lastModified = now, source = it.value.source,
+                            charCount = it.value.text.codePointCount(0, it.value.text.length), interfaceText = true,
+                        )
+                    }
+                    out += Row("s:${it.index}:${it.value.text}", now, it.value.text, saved = kept, onScreen = it.index)
+                }
             }
             return out
         }
@@ -1499,7 +1517,7 @@ class OverlayHost(
             /** Asks for a recap of the game being read, which its newest kept line names. */
             override fun recap(what: RecapOf) {
                 val name = title()
-                askRecapOf(history.firstOrNull { it.gameName == name }, what)
+                askRecapOf(history.firstOrNull { it.gameName == name } ?: frontLine?.takeIf { it.gameName == name }, what)
             }
 
             override fun crop() {
@@ -1624,7 +1642,11 @@ class OverlayHost(
     /** Which recap was chosen last, of which game, and what each came back as. */
     private var recapOf: RecapOf? = null
     private var recapGame: String? = null
+    private var recapGameName: String? = null
     private val recaps = HashMap<RecapOf, Answer>()
+
+    /** What am I meant to do? asked while a recap was being written: asked as soon as that is done. */
+    private var nextWaiting: GameLine? = null
 
     /** The answer sheet opens on [tab], in place of a word's entry, or goes down for null. */
     private fun openSheet(tab: SheetTab?) {
@@ -1638,14 +1660,21 @@ class OverlayHost(
      * lines' screen or in the wheel's card; null when nothing has been read in it.
      */
     private fun askRecapOf(line: GameLine?, what: RecapOf) {
-        if (recaps.values.any { it.busy }) return
+        if (recaps.values.any { it.busy }) {
+            if (what == RecapOf.NEXT && line != null) nextWaiting = line
+            return
+        }
+        if (line == null || recapGame != line?.gameId) {
+            // Another game's recaps, and the choice made in it, are not this one's.
+            recaps.clear()
+            recapOf = null
+            recapGame = line?.gameId
+            recapGameName = line?.gameName
+        }
         if (what != RecapOf.NEXT) recapOf = what
         if (line == null) {
             recaps[what] = Answer(error = "Nothing has been read in this game yet.")
         } else {
-            // Another game's recaps are not this one's.
-            if (recapGame != line.gameId) recaps.clear()
-            recapGame = line.gameId
             recaps[what] = Answer(recaps[what]?.text, busy = true)
             onRecapAsked(line.gameId, line.gameName, what)
         }
@@ -1658,6 +1687,10 @@ class OverlayHost(
         recaps[what] = Answer(text ?: recaps[what]?.text, error = error)
         panelView?.refresh()
         if (cardFor == WheelAction.RECAP || cardFor == WheelAction.NEXT) render()
+        nextWaiting?.let {
+            nextWaiting = null
+            askRecapOf(it, RecapOf.NEXT)
+        }
     }
 
     private fun ask(lineId: String, what: Ask) {
@@ -1748,7 +1781,7 @@ class OverlayHost(
         if (!canOpenWheel) return false
         closeCard()
         wheelLine = state.selectedLine?.takeIf { state.selected }
-            ?: state.lines.lastOrNull { it.geometry != null && it.lineId != null }
+            ?: state.lines.storyLine()
             ?: state.lines.lastOrNull { it.geometry != null }
         wheelOpen = true
         wheelHeld = true
@@ -2029,6 +2062,7 @@ class OverlayHost(
         val line = wheelLine
         return history.firstOrNull { line?.gameId != null && it.gameId == line.gameId }
             ?: (line?.gameName ?: session?.first)?.let { name -> history.firstOrNull { it.gameName == name } }
+            ?: frontLine?.takeIf { front -> line?.gameId == null || line.gameId == front.gameId }
     }
 
     private fun askGame(question: String) {
@@ -2282,7 +2316,7 @@ class OverlayHost(
                 val (text, color) = when {
                     !p.aiReady -> "This is written by the model in Settings › Translation, with your OpenRouter key." to Ink.DIM
                     game == null -> "Nothing has been read in this game yet." to Ink.DIM
-                    answer?.busy == true -> "Thinking…" to Ink.DIM
+                    answer?.busy == true || nextWaiting != null -> "Thinking…" to Ink.DIM
                     answer?.error != null -> answer.error to Ink.ACCENT
                     answer?.text != null -> answer.text to Ink.TEXT
                     else -> "Thinking…" to Ink.DIM

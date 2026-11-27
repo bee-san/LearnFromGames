@@ -288,7 +288,7 @@ class LfgAccessibilityService : AccessibilityService() {
                     reading.lines.mapIndexed { i, line ->
                         LookupLine(
                             line.text, reading.saved.getOrNull(i)?.id, reading.framePath, reading.game.title, line,
-                            reading.appearedAtMs.getOrNull(i), gameId = reading.game.id,
+                            reading.appearedAtMs.getOrNull(i), gameId = reading.game.id, menu = reading.saved.getOrNull(i)?.interfaceText == true,
                         )
                     },
                 )
@@ -340,8 +340,10 @@ class LfgAccessibilityService : AccessibilityService() {
         scope.launch {
             combine(app.database.lines().recent(1), minutes(), frontGame) { rows, _, playing -> rows.firstOrNull() to playing }.collect { (latest, playing) ->
                 // A game just opened has no line kept yet: the panel names it, not the game the newest line came from.
-                if (playing != null && latest?.gameId != playing.id) overlays.onSession(playing.title, null)
-                else overlays.onSession(latest?.gameName, withContext(Dispatchers.IO) { sessionLine(latest) })
+                // Its newest line, however old, is what Recap and What am I meant to do? are asked of.
+                val front = playing?.let { withContext(Dispatchers.IO) { app.database.lines().before(it.id, Double.MAX_VALUE, 1).firstOrNull() } }
+                if (playing != null && latest?.gameId != playing.id) overlays.onSession(playing.title, null, front)
+                else overlays.onSession(latest?.gameName, withContext(Dispatchers.IO) { sessionLine(latest) }, front)
             }
         }
         scope.launch { captureLoop() }
@@ -760,9 +762,13 @@ class LfgAccessibilityService : AccessibilityService() {
         val vn = app.characterNames.vnFor(line.gameId)
         val text = line.text
         val found = ArrayList<Word>()
+        val language = app.settings.prefs.value.learning
+        // Japanese is looked up from any kana or kanji; another language from a letter, or, where spaces or the pack mark words, only from a word’s start.
+        fun starts(at: Int) = if (language.japanese) Furigana.japanese(text[at]) else
+            Character.isLetter(text[at]) && (!(language.wordStart || language.spaced) || at == 0 || !Character.isLetterOrDigit(text[at - 1]))
         var i = 0
         while (i < text.length) {
-            if (!Furigana.japanese(text[i])) {
+            if (!starts(i)) {
                 i++
                 continue
             }
@@ -1005,8 +1011,12 @@ class LfgAccessibilityService : AccessibilityService() {
         Log.i(TAG, "read on demand: ${treeLines.size} from the tree, ${ocrLines.size} by OCR, ${tree.sensitive.size} sensitive, kept ${lines.size}, secure=${shot?.secure}")
         if (lines.isEmpty()) {
             shot?.bitmap?.recycle()
+            // The game's own lines were taken away for this reading: they come back.
+            if (front != null) gameReadsAgain()
             toast(
                 when {
+                    reader == null && treeLines.isEmpty() -> "The screen can’t be read yet: the text reader isn’t ready."
+                    shot == null && treeLines.isEmpty() -> "Android gave no picture of the screen. Try again."
                     shot?.secure != true -> "No text was found here."
                     shot.bitmap == null -> "This app blocks pictures of its screen, and shares no text here."
                     else -> "The screen came back black: the app may block pictures of it, or it was dark. Try again when something is showing."
@@ -1022,9 +1032,11 @@ class LfgAccessibilityService : AccessibilityService() {
         val keep = !game.app || app.settings.prefs.value.keepAppLines
         val saved = if (keep) withContext(Dispatchers.IO) {
             now.framePath = now.frame?.let(::writeFrame)
+            val nowMs = System.currentTimeMillis()
             lines.map { line ->
                 val source = if (line in fromTree) LineStore.SOURCE_TREE else LineStore.SOURCE_OCR
-                app.lines.saveLine(
+                // A box read again while its text stays, or a line the game's reading kept already, is that line, not a new one.
+                app.lines.lineOf(game, line.text)?.takeIf { nowMs - it.createdAt < SAME_LINE_MS } ?: app.lines.saveLine(
                     game, line.text, source, if (source == LineStore.SOURCE_OCR) reader?.name.orEmpty() else "",
                     now.framePath, target.displayId, line.box,
                 )
@@ -1123,6 +1135,14 @@ class LfgAccessibilityService : AccessibilityService() {
         if (controller.state.value.controllerMode) controller.exitControllerMode()
         controller.setLines(emptyList())
         overlays.onScreen(Display.INVALID_DISPLAY, true, false)
+        // Over a game, its own lines come back: the screen is read afresh, as the same reading would not be published again.
+        if (front != null) gameReadsAgain()
+    }
+
+    /** The game in front is read again from its next picture, its lines published even if the screen has not changed. */
+    private fun gameReadsAgain() {
+        pipeline.forget()
+        pipeline.readNext()
     }
 
     /**
@@ -1332,7 +1352,11 @@ class LfgAccessibilityService : AccessibilityService() {
             Log.w(TAG, "reading the app failed", e)
             emptyList()
         }
-        return Blocks.group(rows.filter { it.text.isNotBlank() }.map { it.moved(left + offsetX, top + offsetY) })
+        // Made the game's own and put right as a game's reading is (ReadingPipeline.keep), since these are kept as lines too.
+        val ja = app.settings.prefs.value.learning.japanese
+        val clean = rows.mapNotNull { io.github.beesan.lfg.ocr.TextClean.line(it, ja) }.filter { it.text.isNotBlank() }
+            .let { cleaned -> if (ja) cleaned.map { io.github.beesan.lfg.ocr.KanaRepair.line(it) { s -> app.dictionaries.matchLength(s) } } else cleaned }
+        return Blocks.group(clean.map { it.moved(left + offsetX, top + offsetY) })
     }
 
     /** Writes a picture for a card or a kept line, beside the game's frames. */
@@ -1678,6 +1702,7 @@ class LfgAccessibilityService : AccessibilityService() {
                     row.copy(title = label).also {
                         app.database.games().update(it)
                         app.database.games().renameLines(it.id, label)
+                        app.database.games().renameNotes(it.id, label)
                     }
                 } else {
                     row
@@ -1889,6 +1914,9 @@ class LfgAccessibilityService : AccessibilityService() {
     )
 
     companion object {
+        /** A line read again within this long is the one kept, not a new one: a box read once, then again. */
+        private const val SAME_LINE_MS = 10 * 60_000L
+
         private const val TAG = "LfgService"
 
         /** The tutorial's row in the games table: this app's own package, as the practice line before it had. */

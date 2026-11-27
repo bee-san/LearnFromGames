@@ -32,7 +32,7 @@ class Translator(private val db: LfgDatabase, private val offline: OfflineTransl
         val p = prefs()
         // The language the line was read as, which the one being learnt now may not be.
         val language = Language.orJapanese(line.language)
-        val before = if (p.translateContext > 0) db.lines().before(line.gameId, line.timestamp, p.translateContext).reversed() else emptyList()
+        val before = if (p.translateContext > 0) db.lines().before(line.gameId, line.timestamp, p.translateContext, line.id).reversed() else emptyList()
         val text = try {
             OpenRouter.ask(
                 p.openRouterKey, p.model, system(p.translateInto, language), prompt(line.gameName, before.map { it.lineText }, line.lineText, language),
@@ -42,7 +42,7 @@ class Translator(private val db: LfgDatabase, private val offline: OfflineTransl
             // It is marked as Google's, which its terms ask for, and which says it is not the model Settings picked.
             (if (e.offline) offline?.translate(line.lineText, language, p.translateInto) else null)?.let { "$it $OFFLINE_MARK" } ?: throw e
         }
-        db.lines().setTranslation(line.id, text)
+        db.lines().setTranslation(line.id, line.lineText, text)
         return text
     }
 

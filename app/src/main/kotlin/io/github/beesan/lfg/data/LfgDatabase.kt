@@ -42,7 +42,8 @@ interface LineDao {
     suspend fun lineOf(gameId: String, text: String): GameLine?
 
     /** A line that was read half typed is the whole of it now, with the picture that shows the whole of it. */
-    @Query("UPDATE game_lines SET line_text = :text, char_count = :chars, box = :box, screenshot_path = :picture, last_modified = :now WHERE id = :id")
+    // The translation of the half it was is no longer its translation.
+    @Query("UPDATE game_lines SET line_text = :text, char_count = :chars, box = :box, screenshot_path = :picture, last_modified = :now, translation = NULL WHERE id = :id")
     suspend fun grow(id: String, text: String, chars: Int, box: String, picture: String?, now: Long)
 
     /** The line read next after a given moment in the same game: where the earlier line's sound ends. */
@@ -92,12 +93,16 @@ interface LineDao {
     @Query("UPDATE game_lines SET crop_path = :path WHERE id = :id")
     suspend fun setCrop(id: String, path: String)
 
-    @Query("UPDATE game_lines SET translation = :text WHERE id = :id")
-    suspend fun setTranslation(id: String, text: String)
+    /** Kept only while the line still reads [asked]: a line that grew meanwhile is translated afresh. */
+    @Query("UPDATE game_lines SET translation = :text WHERE id = :id AND line_text = :asked")
+    suspend fun setTranslation(id: String, asked: String, text: String)
 
-    /** The lines of a game read before [before], newest first: what a translation is given as context. */
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND timestamp < :before AND source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC, rowid DESC LIMIT :count")
-    suspend fun before(gameId: String, before: Double, count: Int): List<GameLine>
+    /**
+     * The lines of a game read before [before], newest first: what a translation is given as context. Lines kept from one
+     * look share their time, so those kept before [lineId] in the same look count too.
+     */
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND (timestamp < :before OR (timestamp = :before AND rowid < (SELECT rowid FROM game_lines WHERE id = :lineId))) AND source != 'practice' AND interface_text = 0 ORDER BY timestamp DESC, rowid DESC LIMIT :count")
+    suspend fun before(gameId: String, before: Double, count: Int, lineId: String = ""): List<GameLine>
 
     /** A game's lines in the order they were read. */
     @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND source != 'practice' AND interface_text = 0 ORDER BY timestamp, rowid")
@@ -176,6 +181,10 @@ interface GameDao {
 
     @Query("UPDATE game_lines SET game_name = :title WHERE game_id = :gameId")
     suspend fun renameLines(gameId: String, title: String)
+
+    /** The diary's entries on a game carry its name too. */
+    @Query("UPDATE notes SET game_name = :title WHERE game_id = :gameId")
+    suspend fun renameNotes(gameId: String, title: String)
 }
 
 @Dao

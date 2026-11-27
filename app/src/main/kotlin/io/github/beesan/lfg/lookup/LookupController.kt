@@ -47,7 +47,13 @@ data class LookupLine(
     val source: String = LineStore.SOURCE_OCR,
     /** The game's row, whose visual novel's character names are looked in first; null for none. */
     val gameId: String? = null,
+    /** Kept as a menu's or a label's text, not the story's: the wheel acts on a line of the story first. */
+    val menu: Boolean = false,
 )
+
+/** The line the wheel and the panel act on with nothing picked: the story's newest on screen, else any kept line there. */
+fun List<LookupLine>.storyLine(): LookupLine? =
+    lastOrNull { it.geometry != null && it.lineId != null && !it.menu } ?: lastOrNull { it.geometry != null && it.lineId != null }
 
 data class LookupState(
     val lines: List<LookupLine> = emptyList(),

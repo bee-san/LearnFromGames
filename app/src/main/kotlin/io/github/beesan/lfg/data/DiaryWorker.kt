@@ -42,7 +42,7 @@ class DiaryWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
             if (game.app) continue
             val lines = app.database.lines().ofGame(game.id)
             val last = app.database.recaps().latest(game.id)
-            val fresh = lines.size - (lines.indexOfFirst { it.id == last?.lastLineId } + 1)
+            val fresh = lines.size - (last?.let { io.github.beesan.lfg.ask.Recapper.start(lines, it, app.database.lines().byId(it.lastLineId)) } ?: 0)
             if (!due(lines.map { it.timestamp }, fresh, today, zone) { day, end -> (written[game.id to day.toEpochDay()]?.writtenAt ?: 0) >= end }) continue
             try {
                 app.recapper.write(game.id, game.title)

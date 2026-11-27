@@ -148,6 +148,9 @@ class LineSorter {
      * not. [places] is where each piece is on screen, when that is known.
      * [recheck]: this is the text of the reading before read again, more
      * clearly; a piece still on screen and read otherwise is corrected.
+     * [drawn]: the pieces in a box the player drew beside box 1, which are
+     * lines whatever else is on screen: they are never a menu's, and do not
+     * count towards a crowd that would make the story's line one.
      */
     suspend fun sort(
         pieces: List<String>,
@@ -156,6 +159,7 @@ class LineSorter {
         apart: Boolean = true,
         places: List<Box>? = null,
         recheck: Boolean = false,
+        drawn: Set<Int> = emptySet(),
         older: suspend (String) -> KeptLine? = { null },
     ): Sorted {
         val far = recent.map { Row(it.id, Squeezed(it.text), it.savedAtMs) }
@@ -171,6 +175,8 @@ class LineSorter {
         val menuStays = still.count { it?.flagged == true } >= BUSY
         /** Pieces nothing on screen lately explains, in the pieces' order. */
         val open = ArrayList<Int>()
+        /** Pieces of [drawn] nothing explains: new lines, kept apart from the crowd. */
+        val drawnOpen = ArrayList<Int>()
         var labels = 0
         for (i in pieces.indices) {
             val text = texts[i]
@@ -178,13 +184,13 @@ class LineSorter {
                 ?.let { (if (recheck) corrected(it, text) else null) ?: again(it, text) }
                 ?: last.firstNotNullOfOrNull { more(it, text, rows) } ?: pieceIn(story, text)?.let { again(it, text) }
             if (parts[i] != null) continue
-            if (apart && InterfaceText.short(pieces[i]) && pieces[i] in known) {
+            if (apart && i !in drawn && InterfaceText.short(pieces[i]) && pieces[i] in known) {
                 parts[i] = listOf(Part.New(0, pieces[i].length, interfaceText = true))
                 labels++
                 continue
             }
             parts[i] = story.firstNotNullOfOrNull { more(it, text, rows) } ?: rest(text, 0, rows, emptySet()).takeIf { it.isNotEmpty() && it[0] !is Part.New }
-            if (parts[i] == null) open += i
+            if (parts[i] == null) (if (i in drawn) drawnOpen else open) += i
         }
 
         // Words in the picture itself (a book's spine, a sign) and labels are read differently from one look
@@ -216,11 +222,12 @@ class LineSorter {
         val busy = open.size >= BUSY
         val onStory = story.flatMapTo(HashSet()) { shown -> shown.parts.map { it.id } }
         val movingOn = before != null && !menuBefore && newest.any { it.id in onStory }
-        open.removeAll { i ->
+        for (list in listOf(open, drawnOpen)) list.removeAll { i ->
             val row = old(texts[i], far, newest, busy, movingOn) ?: return@removeAll false
             parts[i] = listOf(Part.Same(0, pieces[i].length, row.id))
             true
         }
+        for (i in drawnOpen) parts[i] = listOf(Part.New(0, pieces[i].length))
         // A text box that scrolled up a row, or the next box of a sentence that ran on.
         if (open.size == 1 && labels == 0 && !menuBefore) {
             val i = open[0]

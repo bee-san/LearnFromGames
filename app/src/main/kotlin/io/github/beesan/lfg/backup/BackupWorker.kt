@@ -41,6 +41,17 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         private const val NAME = "backup"
 
         /** Starts, changes or stops the automatic backup for [every] ([Prefs.BACKUP_OFF] and the others). */
+        /**
+         * Schedules the backup when it is on and nothing is waiting: settings put back from a backup, or set on
+         * another device, never told WorkManager. Work already waiting keeps its next run.
+         */
+        fun ensure(context: Context, every: String) {
+            if (every == Prefs.BACKUP_OFF) return
+            val waiting = runCatching { WorkManager.getInstance(context).getWorkInfosForUniqueWork(NAME).get() }.getOrNull()
+                ?: return
+            if (waiting.none { !it.state.isFinished }) schedule(context, every)
+        }
+
         fun schedule(context: Context, every: String) {
             val work = WorkManager.getInstance(context)
             if (every == Prefs.BACKUP_OFF) {

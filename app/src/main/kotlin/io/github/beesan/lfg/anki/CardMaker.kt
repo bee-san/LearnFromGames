@@ -91,6 +91,13 @@ class CardMaker(
                 continue
             }
             try {
+                // The word may have been added since the card was made, or twice while AnkiDroid was away: it is the note already there.
+                val there = anki.target?.let { anki.noteId(it, content.expression) }
+                if (there != null) {
+                    db.cards().update(card.copy(noteId = there, state = Card.STATE_ADDED))
+                    store.attachNote(card.lineId, there)
+                    continue
+                }
                 if (send(card, content) is CardResult.Added) added++
             } catch (_: Exception) {
                 // AnkiDroid stopped answering: the rest stay pending for the next attempt.
