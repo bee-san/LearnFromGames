@@ -130,7 +130,14 @@ class OverlayHost(
     enum class SheetTab(val label: String) { TRANSLATE("Translate"), EXPLAIN("Explain"), RECAP("Recap") }
 
     /** What Recap on the lines' screen can tell: the scene being read, the last session, or the whole story so far. */
-    enum class RecapOf(val label: String) { SCENE("Scene"), LAST("Last time"), STORY("Story so far") }
+    /** What a recap tells; [NEXT] is the What am I meant to do? tile's, and no choice on the recap's card. */
+    enum class RecapOf(val label: String) {
+        SCENE("Scene"), LAST("Last time"), STORY("Story so far"), NEXT("What to do");
+
+        companion object {
+            val recaps = listOf(SCENE, LAST, STORY)
+        }
+    }
 
     private val displays = service.getSystemService(DisplayManager::class.java)
     private val managers = HashMap<Int, Pair<Context, WindowManager>>()
@@ -1385,7 +1392,7 @@ class OverlayHost(
                 else -> "Writing…"
             }
             return PanelSheet.Recap(
-                choices = if (!ai) emptyList() else RecapOf.entries.map { what ->
+                choices = if (!ai) emptyList() else RecapOf.recaps.map { what ->
                     RecapChoice(what, if (recaps[what]?.busy == true) what.label + "…" else what.label, chosen = what == recapOf, enabled = !busy)
                 },
                 text = text,
@@ -1632,7 +1639,7 @@ class OverlayHost(
      */
     private fun askRecapOf(line: GameLine?, what: RecapOf) {
         if (recaps.values.any { it.busy }) return
-        recapOf = what
+        if (what != RecapOf.NEXT) recapOf = what
         if (line == null) {
             recaps[what] = Answer(error = "Nothing has been read in this game yet.")
         } else {
@@ -1643,14 +1650,14 @@ class OverlayHost(
             onRecapAsked(line.gameId, line.gameName, what)
         }
         panelView?.refresh()
-        if (cardFor == WheelAction.RECAP) render()
+        if (cardFor == WheelAction.RECAP || cardFor == WheelAction.NEXT) render()
     }
 
     /** The recap asked for, from the service. */
     fun onRecap(what: RecapOf, text: String?, error: String?) {
         recaps[what] = Answer(text ?: recaps[what]?.text, error = error)
         panelView?.refresh()
-        if (cardFor == WheelAction.RECAP) render()
+        if (cardFor == WheelAction.RECAP || cardFor == WheelAction.NEXT) render()
     }
 
     private fun ask(lineId: String, what: Ask) {
@@ -1877,7 +1884,7 @@ class OverlayHost(
                 wheelLine?.lineId == null -> "This text is not a kept line"
                 else -> null
             }
-            WheelAction.RECAP -> when {
+            WheelAction.RECAP, WheelAction.NEXT -> when {
                 !p.aiReady -> setUp
                 gameLineNow() == null -> "Nothing read in this game yet"
                 else -> null
@@ -1950,7 +1957,7 @@ class OverlayHost(
                 val kept = line?.takeIf { it.lineId != null }
                 beginNote(Noting(kept, null), if (kept != null) "Diary entry on this line" else "Diary entry on " + (line?.gameName?.ifBlank { null } ?: "this game"))
             }
-            WheelAction.TRANSLATE, WheelAction.EXPLAIN, WheelAction.RECAP, WheelAction.ASK, WheelAction.LINES -> openCard(slice.action)
+            WheelAction.TRANSLATE, WheelAction.EXPLAIN, WheelAction.RECAP, WheelAction.NEXT, WheelAction.ASK, WheelAction.LINES -> openCard(slice.action)
             WheelAction.RECENT -> {
                 recentCursor = 0
                 openCard(slice.action)
@@ -2008,6 +2015,8 @@ class OverlayHost(
             WheelAction.EXPLAIN -> if (ai && id != null && conversation(id) == null) ask(id, Ask.EXPLAIN)
             // A fresh question each time, unless one is still being answered.
             WheelAction.ASK -> if (gameAnswer?.busy != true) gameAnswer = null
+            // Asked afresh each time: what to do changes as the game goes on.
+            WheelAction.NEXT -> if (ai) gameLineNow()?.let { askRecapOf(it, RecapOf.NEXT) }
             else -> if (action.asksOfLine && ai) cardSlice?.let(::askLine)
         }
         render()
@@ -2253,7 +2262,7 @@ class OverlayHost(
                 }
                 CardContent(
                     title = "Recap",
-                    choices = if (!p.aiReady || game == null) emptyList() else RecapOf.entries.map { kind ->
+                    choices = if (!p.aiReady || game == null) emptyList() else RecapOf.recaps.map { kind ->
                         CardChoice(
                             if (mine && recaps[kind]?.busy == true) kind.label + "…" else kind.label,
                             chosen = kind == chosen, marked = pad && kind.ordinal == recapCursor, enabled = !busy,
@@ -2265,6 +2274,26 @@ class OverlayHost(
                     body = text,
                     bodyColor = color,
                     hints = keys(if (p.aiReady && game != null) "◀ ▶ Choose    $confirm Tell    $close Close    ▲ ▼ Scroll" else "$close Close"),
+                )
+            }
+            WheelAction.NEXT -> {
+                val game = gameLineNow()
+                val answer = recaps[RecapOf.NEXT]?.takeIf { game != null && recapGame == game.gameId }
+                val (text, color) = when {
+                    !p.aiReady -> "This is written by the model in Settings › Translation, with your OpenRouter key." to Ink.DIM
+                    game == null -> "Nothing has been read in this game yet." to Ink.DIM
+                    answer?.busy == true -> "Thinking…" to Ink.DIM
+                    answer?.error != null -> answer.error to Ink.ACCENT
+                    answer?.text != null -> answer.text to Ink.TEXT
+                    else -> "Thinking…" to Ink.DIM
+                }
+                val usable = p.aiReady && game != null
+                CardContent(
+                    title = what.label,
+                    body = text,
+                    bodyColor = color,
+                    pills = if (usable) listOf(CardPill("Again", enabled = answer?.busy != true) { askRecapOf(game, RecapOf.NEXT) }) else emptyList(),
+                    hints = keys(if (usable) "$confirm Again    $close Close    ▲ ▼ Scroll" else "$close Close"),
                 )
             }
             WheelAction.ASK -> {
@@ -2539,7 +2568,7 @@ class OverlayHost(
 
     private fun moveRecapCursor(by: Int) {
         if (cardFor != WheelAction.RECAP) return
-        recapCursor = (recapCursor + by).coerceIn(0, RecapOf.entries.size - 1)
+        recapCursor = (recapCursor + by).coerceIn(0, RecapOf.recaps.size - 1)
         render()
     }
 
@@ -2557,7 +2586,8 @@ class OverlayHost(
                     else -> openCard(WheelAction.TRANSLATE)
                 }
             }
-            WheelAction.RECAP -> gameLineNow()?.takeIf { prefs().aiReady }?.let { askRecapOf(it, RecapOf.entries[recapCursor]) }
+            WheelAction.RECAP -> gameLineNow()?.takeIf { prefs().aiReady }?.let { askRecapOf(it, RecapOf.recaps[recapCursor]) }
+            WheelAction.NEXT -> gameLineNow()?.takeIf { prefs().aiReady }?.let { askRecapOf(it, RecapOf.NEXT) }
             WheelAction.LINES -> {
                 putAwayWheel()
                 openApp()

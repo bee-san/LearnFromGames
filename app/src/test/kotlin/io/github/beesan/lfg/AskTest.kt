@@ -188,4 +188,12 @@ class AskTest {
         val row = QuestionRow(gameId = "g", question = "q", answer = "a", sources = "https://a.example\tA\nhttps://b.example", model = "m", createdAt = 0)
         assertEquals(listOf(OpenRouter.Source("https://a.example", "A"), OpenRouter.Source("https://b.example", "")), Asker.sources(row))
     }
+
+    @Test
+    fun whatToDoSendsTheLinesAndAsksForASteps() {
+        val prompt = Recapper.nextPrompt("Dragon Quest", listOf("北の洞窟へ\n行け", "鍵を忘れるな"), "English")
+        assertTrue(prompt.contains("北の洞窟へ 行け\n鍵を忘れるな\n"))
+        assertTrue(prompt.contains("in English the next concrete step"))
+        assertTrue(prompt.contains("Never tell me what happens after."))
+    }
 }

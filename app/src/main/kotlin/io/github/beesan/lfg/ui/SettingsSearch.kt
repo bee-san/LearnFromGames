@@ -154,7 +154,7 @@ object SettingsIndex {
             setting("Leave out menus and labels", "They stay tappable, but out of Lines, the stats and recaps", "ocr interface hud filter hide")
         },
         page(Page.GAMES, "Games and apps", "Rename one, choose when it is read", "game app list") {
-            setting("Rename", "Give a game or an app another name", "title name")
+            setting("Rename", "Give a game or an app another name", "title name rename game")
             setting("Read this app", "Automatic, on demand, always or never", "stop ignore off disable block")
             setting("Profile", "The profile LFG changes to when a game is played", "per game automatic switch language")
             setting("Boxes", "Draw the dialogue box, and only what is in it is read", "dialogue box draw region area text ocr always read continuous second subtitles")

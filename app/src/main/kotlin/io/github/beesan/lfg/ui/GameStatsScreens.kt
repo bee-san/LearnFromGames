@@ -296,7 +296,13 @@ private fun Cell(text: String, width: Dp, bold: Boolean = false, dim: Boolean = 
  * have them, its sessions and cards, a bar a day or month, and its sessions.
  */
 @Composable
-fun GameStatsScreen(stats: StatsState, game: Game?, gameId: String, startPeriod: StatsPeriod, onBack: () -> Unit) {
+fun GameStatsScreen(
+    stats: StatsState, game: Game?, gameId: String, startPeriod: StatsPeriod, onBack: () -> Unit,
+    /** The game under a new name, which its lines take too. */
+    onRename: (Game) -> Unit = {},
+) {
+    // The name as typed, while the game is being renamed.
+    var typed by rememberSaveable(gameId) { mutableStateOf<String?>(null) }
     var period by rememberSaveable { mutableStateOf(startPeriod) }
     var showTime by rememberSaveable { mutableStateOf(false) }
     var picked by remember(period) { mutableIntStateOf(-1) }
@@ -322,6 +328,19 @@ fun GameStatsScreen(stats: StatsState, game: Game?, gameId: String, startPeriod:
             GameCover(game, 184.dp, 86.dp)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (game != null) {
+                    val name = typed
+                    if (name == null) {
+                        LfgButton("Rename", { typed = game.title })
+                    } else {
+                        val save = {
+                            name.trim().takeIf { it.isNotEmpty() && it != game.title }?.let { onRename(game.copy(title = it)) }
+                            typed = null
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            NameField(name, { typed = it }, game.title, save)
+                            LfgButton("Save", save, primary = true)
+                        }
+                    }
                     val host = remember(game.packageName) { appLabel(context, game.packageName) }
                     Text(
                         if (game.namedBy.isEmpty()) host else "In $host, named by ${game.namedBy}",

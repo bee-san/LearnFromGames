@@ -31,7 +31,7 @@ enum class WheelAction(val id: String, val label: String, val about: String, val
     AI("ai", "AI", "A wheel of Translate, Explain, Recap and Ask", WheelGroup.WHEELS, "A ready-made wheel of Translate, Explain, Recap and Ask. It can be changed like any wheel."),
     BOXES("boxes", "Boxes", "A wheel of the game’s boxes", WheelGroup.WHEELS, "A wheel that fills itself with the game’s boxes, plus New box."),
 
-    READ_ONCE("readonce", "Read once", "Two corners, read at once", WheelGroup.READ, "Two corners, read at once, nothing kept."),
+    READ_ONCE("readonce", "Read once", "Two corners, read at once", WheelGroup.READ, "Two corners, read at once."),
     BOX("box", "Box", "Read one of the game’s boxes", WheelGroup.READ, "Read one of the game’s boxes: box 1 unless another number is set. Its icon shows the number. In a game without that box, nothing happens."),
     NEW_BOX("newbox", "New box", "Draw another box", WheelGroup.READ, "Draw another box for this game."),
     READ_SCREEN("screen", "Read screen", "Read the whole screen now", WheelGroup.READ, "Read the whole screen now, as the quick settings tile does."),
@@ -44,6 +44,7 @@ enum class WheelAction(val id: String, val label: String, val about: String, val
     TRANSLATE("translate", "Translate", "This line in your language", WheelGroup.AI, "This line in your language."),
     EXPLAIN("explain", "Explain", "The line, part by part", WheelGroup.AI, "The line, part by part, with questions after."),
     RECAP("recap", "Recap", "The scene, or the story so far", WheelGroup.AI, "The scene, the last session or the story so far."),
+    NEXT("next", "What am I meant to do?", "Where the story wants you to go next", WheelGroup.AI, "What you are meant to do now to move the story on, from the lines read last."),
     ASK("ask", "Ask", "A question about the game", WheelGroup.AI, "A question about the game, answered from the web."),
     NUANCE("nuance", "Nuance", "Tone, politeness and feeling in the line", WheelGroup.AI, "Tone, politeness and feeling: what the line says between the words, and how it would land on a native speaker."),
     CULTURE("culture", "Culture", "References, customs and wordplay", WheelGroup.AI, "References, customs, idioms and wordplay in the line that a learner might miss."),

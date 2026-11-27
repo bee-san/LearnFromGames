@@ -199,6 +199,7 @@ class LfgAccessibilityService : AccessibilityService() {
                         runCatching {
                             when (what) {
                                 OverlayHost.RecapOf.SCENE -> app.recapper.scene(gameId, name)
+                                OverlayHost.RecapOf.NEXT -> app.recapper.next(gameId, name)
                                 else -> {
                                     val recap = Json.decodeFromString<Recap>(app.recapper.write(gameId, name).json)
                                     if (what == OverlayHost.RecapOf.LAST) recap.last else Recapper.storyText(recap)

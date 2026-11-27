@@ -153,7 +153,7 @@ fun GameProfileRow(game: Game, profiles: List<Profile>, linked: String?, onPick:
 
 /** The one-line field a profile is named in. */
 @Composable
-private fun NameField(value: String, onChange: (String) -> Unit, hint: String, onDone: () -> Unit) {
+internal fun NameField(value: String, onChange: (String) -> Unit, hint: String, onDone: () -> Unit) {
     val shape = RoundedCornerShape(6.dp)
     BasicTextField(
         value = value,

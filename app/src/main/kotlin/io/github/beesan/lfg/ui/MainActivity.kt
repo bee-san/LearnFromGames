@@ -504,7 +504,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = ::back,
                             )
                         }
-                        page == Page.GAME_STATS -> GameStatsScreen(stats, games.firstOrNull { it.id == statsGame }, statsGame, statsGamePeriod, ::back)
+                        page == Page.GAME_STATS -> GameStatsScreen(stats, games.firstOrNull { it.id == statsGame }, statsGame, statsGamePeriod, ::back, onRename = model::updateGame)
                         page == Page.GOALS -> GoalsScreen(prefs, model::updatePrefs, ::back)
                         page == Page.SETTINGS -> SettingsScreen(onOpen = { page = it }, onBack = ::back)
                         // Settings › Tutorial: the practice screen opens, and Settings is what it comes back to.

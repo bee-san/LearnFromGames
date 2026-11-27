@@ -80,7 +80,36 @@ class Recapper(
         ).trim()
     }
 
+    /** What the player is meant to do now to move the story on, from the [NEXT] lines read last. Not kept: it changes as they play. */
+    suspend fun next(gameId: String, gameName: String): String {
+        val p = prefs()
+        val lines = db.lines().ofGame(gameId).takeLast(NEXT)
+        if (lines.isEmpty()) throw OpenRouter.Failure("Nothing has been read in this game yet.")
+        return OpenRouter.ask(
+            p.openRouterKey, p.model, nextSystem(p.learning), nextPrompt(gameName, lines.map { it.lineText }, p.translateInto, p.learning),
+        ).trim()
+    }
+
     companion object {
+        /** Lines what to do next is told from: enough to hold the last thing the player was asked to do. */
+        const val NEXT = 150
+
+        /** The prompt for what to do next, after [lines] (oldest first). */
+        fun nextPrompt(game: String, lines: List<String>, into: String, language: Language = Language.JAPANESE): String = buildString {
+            append("I’m playing ").append(game.ifBlank { "a game" }).append(", ").append(language.aGame)
+            append(". Here are the lines I read last, oldest first:\n<lines>\n")
+            lines.forEach { append(it.replace('\n', ' ')).append('\n') }
+            append("</lines>\n\nI may know what the quest is but not what to actually do for it. Read the lines closely and work it out: ")
+            append("what has been asked of me, by whom, and what the lines say about where to go, who to see, what to find, use or choose. ")
+            append("Then tell me in ").append(into).append(" the next concrete step or two to take, plainly, as a friend watching over my ")
+            append("shoulder would. Point to the line that tells me, quoting the ").append(language.title).append(" briefly. ")
+            append("Where the lines only hint, say what they hint at and that it is a guess. Never tell me what happens after.")
+        }
+
+        fun nextSystem(language: Language = Language.JAPANESE) =
+            "You help someone learning ${language.title} who is stuck in ${language.aGame}: you work out from what they have read " +
+                "what they are meant to do next, and nudge them along with concrete steps, without spoiling the story. You answer with the telling alone, in plain text."
+
         /** Lines sent in one request: well inside gpt-oss's context, with room for the earlier recap and the answer. */
         const val CHUNK = 2000
 
