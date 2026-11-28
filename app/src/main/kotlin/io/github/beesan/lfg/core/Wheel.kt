@@ -209,7 +209,7 @@ data class WheelSet(val wheels: Map<String, Wheel> = DEFAULT.wheels) {
     fun edit(id: String, index: Int, change: (WheelSlice) -> WheelSlice): WheelSet =
         change(id) { list -> list.mapIndexed { i, s -> if (i == index) change(s) else s } }
 
-    fun rename(id: String, name: String): WheelSet = wheels[id]?.let { WheelSet(wheels + (id to it.copy(name = name.take(NAME_LENGTH)))) } ?: this
+    fun rename(id: String, name: String): WheelSet = wheels[id]?.let { WheelSet(wheels + (id to it.copy(name = name.takeCharacters(NAME_LENGTH)))) } ?: this
 
     private fun change(id: String, slices: (List<WheelSlice>) -> List<WheelSlice>): WheelSet {
         val wheel = wheels[id] ?: return this
@@ -280,7 +280,7 @@ data class WheelSet(val wheels: Map<String, Wheel> = DEFAULT.wheels) {
                 val wheel = value.jsonObject
                 fun JsonObject.text(key: String) = (this[key] as? JsonPrimitive)?.content.orEmpty()
                 Wheel(
-                    wheel.text("name").take(NAME_LENGTH),
+                    wheel.text("name").takeCharacters(NAME_LENGTH),
                     (wheel["slices"] as? JsonArray).orEmpty().mapNotNull { item ->
                         val s = item as? JsonObject ?: return@mapNotNull null
                         val opens = s.text("wheel").ifEmpty { s.text("tile").takeIf { it == AI }.orEmpty() }
@@ -294,7 +294,7 @@ data class WheelSet(val wheels: Map<String, Wheel> = DEFAULT.wheels) {
                                 wheel = opens,
                                 icon = s.text("icon").takeIf { it in WheelIcons.ALL }.orEmpty(),
                                 glyph = WheelIcons.lastGlyph(s.text("glyph")),
-                                prompt = s.text("prompt").take(PROMPT_LENGTH),
+                                prompt = s.text("prompt").takeCharacters(PROMPT_LENGTH),
                             )
                         }
                     },

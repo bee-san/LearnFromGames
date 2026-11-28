@@ -109,6 +109,16 @@ class WheelTest {
     }
 
     @Test
+    fun `a wheel's name is never cut inside an emoji`() {
+        val made = WheelSet.DEFAULT.add(WheelSet.TOP, WheelAction.WHEEL).first.let { it to it.top.slices.last().wheel }
+        val smile = "😀"
+        val long = "x".repeat(WheelSet.NAME_LENGTH - 1) + smile + smile
+        val set = made.first.rename(made.second, long)
+        assertEquals("x".repeat(WheelSet.NAME_LENGTH - 1) + smile, set.wheels[made.second]?.name)
+        assertEquals(set, WheelSet.decode(set.encode()))
+    }
+
+    @Test
     fun `a wheel comes back from its file as it went in`() {
         var set = WheelSet.DEFAULT.add(WheelSet.TOP, WheelAction.WHEEL).first
         val made = set.top.slices.last().wheel

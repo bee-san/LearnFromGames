@@ -83,6 +83,7 @@ import io.github.beesan.lfg.Wheels
 import io.github.beesan.lfg.core.WheelAction
 import io.github.beesan.lfg.core.WheelAim
 import io.github.beesan.lfg.core.WheelGroup
+import io.github.beesan.lfg.core.takeCharacters
 import io.github.beesan.lfg.core.WheelIcons
 import io.github.beesan.lfg.core.WheelSet
 import io.github.beesan.lfg.core.WheelSize
@@ -528,7 +529,7 @@ fun WheelEditScreen(
                     else -> Text(slice.action.label, color = Lfg.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
                 if (slice.action == WheelAction.PROMPT) {
-                    BarField(slice.prompt, { typed -> edit { it.copy(prompt = typed.take(WheelSet.PROMPT_LENGTH)) } }, Modifier.fillMaxWidth(), hint = "The question to ask of a line")
+                    BarField(slice.prompt, { typed -> edit { it.copy(prompt = typed.takeCharacters(WheelSet.PROMPT_LENGTH)) } }, Modifier.fillMaxWidth(), hint = "The question to ask of a line")
                 } else {
                     Text(
                         when {

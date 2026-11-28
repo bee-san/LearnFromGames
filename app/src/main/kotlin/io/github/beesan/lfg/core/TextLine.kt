@@ -133,6 +133,10 @@ fun Box.mirrored() = Box(-right, top, -left, bottom)
 /** [this] in a mirror; twice is as it was. */
 fun TextLine.mirrored() = copy(box = box.mirrored(), chars = chars.map { it.copy(box = it.box.mirrored()) }, rows = rows.map { it.mirrored() })
 
+/** The first [count] characters of [this], one beyond the BMP (an emoji) counting as one: none is cut in half. */
+fun String.takeCharacters(count: Int): String =
+    if (codePointCount(0, length) <= count) this else substring(0, offsetByCodePoints(0, count))
+
 /** Whether [text] is written right to left: its first letter is Arabic, Hebrew, Syriac or another such script's. */
 fun rightToLeft(text: String): Boolean = direction(text) == true
 
