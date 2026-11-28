@@ -487,6 +487,7 @@ class ReadingPipeline(
         val byId = HashMap(memory.rows)
         recent.forEach { byId[it.id] = it }
         // Each piece is a line still on screen, one read before, more of one, a menu's text, or new: only the new is saved.
+        memory.sorter.dotEnds = !japanese()
         val sorted = Perf.measure("sort") {
             memory.sorter.sort(
                 pieces.map { it.text }, recent.map { KeptLine(it.id, it.lineText, it.createdAt) }, interfaceKnown, telling, pieces.map { it.box },

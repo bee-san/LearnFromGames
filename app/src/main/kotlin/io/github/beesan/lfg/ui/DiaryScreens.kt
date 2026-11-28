@@ -327,7 +327,7 @@ fun DiaryDayScreen(
         }
         val quote = @Composable {
             if (page.lineText.isNotBlank()) {
-                Text("「${page.lineText.replace('\n', ' ')}」", color = Lfg.Text, fontFamily = Paper, fontSize = 15.sp, lineHeight = 24.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text(io.github.beesan.lfg.core.Sentence.quoted(page.lineText), color = Lfg.Text, fontFamily = Paper, fontSize = 15.sp, lineHeight = 24.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 if (page.lineAt > 0) Text(clock.format(Date(page.lineAt)), color = Lfg.Dim, fontSize = 13.sp)
             }
         }
@@ -503,7 +503,7 @@ fun DiaryWriteScreen(
         val moment = @Composable {
             draft.picture?.let { Picture(it, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(5.dp))) }
             val line = draft.line
-            if (line != null) Text("「${line.lineText.replace('\n', ' ')}」", color = Lfg.Text, fontFamily = Paper, fontSize = 16.sp, lineHeight = 25.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            if (line != null) Text(io.github.beesan.lfg.core.Sentence.quoted(line.lineText), color = Lfg.Text, fontFamily = Paper, fontSize = 16.sp, lineHeight = 25.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
             Text(
                 listOfNotNull(draft.gameName.takeIf { it.isNotBlank() }, when_.format(Date(draft.at.takeIf { it > 0 } ?: System.currentTimeMillis()))).joinToString(" · "),
                 color = Lfg.Dim, fontSize = 13.sp,

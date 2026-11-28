@@ -82,6 +82,8 @@ class CharacterNames(
      * Steam's ID for it, or empty.
      */
     fun onGameSeen(gameId: String, steamAppId: String) {
+        // VNDB's names are Japanese: a game played to learn another language is not looked for there.
+        if (!prefs().learning.japanese) return
         val now = System.currentTimeMillis()
         val last = seenAt[gameId]
         if (last != null && now - last < SEEN_EVERY_MS) return
@@ -135,6 +137,7 @@ class CharacterNames(
 
     /** The question for the game's uncertain visual novel, at most once per game: asking marks it asked. */
     suspend fun question(gameId: String): VnQuestion? {
+        if (!prefs().learning.japanese) return null
         val game = db.games().byId(gameId) ?: return null
         if (game.vndb.isNotEmpty() || game.vndbSuggested.isEmpty() || game.vndbAsked) return null
         db.games().setVn(game.id, game.vndb, game.vndbHow, game.vndbSuggested, true)

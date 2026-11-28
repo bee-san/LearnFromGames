@@ -116,16 +116,20 @@ class TextCursor(private val lines: List<TextLine>, private val japaneseOnly: Bo
     private val cells: List<Cell> = buildList {
         var firstRow = 0
         lines.forEachIndexed { l, line ->
-            val boxes = line.chars.associateBy { it.start }
             val text = line.text
+            // The box each character is in: its own, or its word's when the reader gave only the word one.
+            val boxes = arrayOfNulls<CharBox>(text.length)
+            for (c in line.chars) for (k in c.start.coerceAtLeast(0) until c.end.coerceAtMost(text.length)) if (boxes[k] == null) boxes[k] = c
+            val placed = line.chars.isNotEmpty()
             var i = 0
             while (i < text.length) {
                 val cp = text.codePointAt(i)
                 if (Selectable.codePoint(cp, japaneseOnly)) {
                     val box = boxes[i]
                     if (box == null) {
-                        // No place on screen (a line from the store): one row, a column per character.
-                        add(Cell(CursorPos(l, i), firstRow, i * 2, i * 2 + 2))
+                        // No place on screen (a line from the store): one row, a column per character. A character a
+                        // placed line has no box for (scrolled out of sight) is no stop: nothing could be marked there.
+                        if (!placed) add(Cell(CursorPos(l, i), firstRow, i * 2, i * 2 + 2))
                     } else {
                         val along = if (line.vertical) box.box.top to box.box.bottom else box.box.left to box.box.right
                         add(Cell(CursorPos(l, i), firstRow + line.rowOf(box), along.first, along.second))
@@ -142,6 +146,13 @@ class TextCursor(private val lines: List<TextLine>, private val japaneseOnly: Bo
 
     /** Up and Down's column, kept while the cursor stays where they left it. */
     private var goal: Pair<CursorPos, Int>? = null
+
+    /** Takes over [from]'s Rights and column: the same lines, only more of them typed out. */
+    fun carry(from: TextCursor) {
+        history.clear()
+        history.addAll(from.history)
+        goal = from.goal
+    }
 
     /**
      * Where lookup mode starts: the first character of the longest line. On a
@@ -178,7 +189,7 @@ class TextCursor(private val lines: List<TextLine>, private val japaneseOnly: Bo
     }
 
     /** The left stick's right: the next character, never past the word shown. */
-    fun stickRight(pos: CursorPos): CursorPos = forward(pos, 0, wrap = false)
+    fun stickRight(pos: CursorPos, matchedEnd: Int = 0): CursorPos = forward(pos, matchedEnd, wrap = false)
 
     /** The left stick's left: the character before, never a Right retraced. */
     fun stickLeft(pos: CursorPos): CursorPos {
@@ -220,7 +231,10 @@ class TextCursor(private val lines: List<TextLine>, private val japaneseOnly: Bo
     /** The nearest row above or below with a character, and on it the one nearest the column. */
     private fun vertical(pos: CursorPos, direction: Int): CursorPos {
         val here = cells.firstOrNull { it.pos == pos } ?: cells.lastOrNull { it.pos < pos } ?: cells.firstOrNull() ?: return pos
-        val column = goal?.takeIf { it.first == pos }?.second ?: ((here.from + here.to) / 2)
+        // The column kept across presses, also when the lookup took the cursor back to its word's first letter on the same row.
+        val column = goal?.takeIf { (at, _) ->
+            at == pos || (at.line == pos.line && pos.index < at.index && lines.getOrNull(at.line)?.text?.let { Selectable.wordStart(it, at.index) } == pos.index)
+        }?.second ?: ((here.from + here.to) / 2)
         val row = (if (direction < 0) cells.lastOrNull { it.row < here.row } else cells.firstOrNull { it.row > here.row })?.row ?: return pos
         // Inside a cell is no distance; else the distance to its nearer edge. The earlier wins a tie.
         val best = cells.filter { it.row == row }.minBy { if (column < it.from) it.from - column else if (column > it.to) column - it.to else 0 }

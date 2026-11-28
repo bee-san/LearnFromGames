@@ -126,6 +126,7 @@ class App : Application() {
                 first = false
             }
         }
+        scope.launch { settings.prefs.map { it.learning.tag }.distinctUntilChanged().collect { io.github.beesan.lfg.dict.EntryHtml.lang = it } }
         // Sentence audio turned off: the game's sound stops being taken, and Android's notification of it goes.
         scope.launch {
             settings.prefs.map { it.sentenceAudio }.distinctUntilChanged().collect { on ->

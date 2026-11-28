@@ -158,7 +158,7 @@ class SettleDetector(private val stillMs: Long = 300, private val restlessMs: Lo
 
     companion object {
         private const val ENDS = "。．！？!?‼⁉⁈⁇"
-        private const val CLOSES = "」』）)】"
+        private const val CLOSES = "」』）)】\"”»"
         private const val OPENS = "「『（(【"
 
         /**

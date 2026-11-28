@@ -204,6 +204,11 @@ fun TappableSentence(
                 else -> spanStart - 1
             }
             if (next in sentence.indices && Character.isLowSurrogate(sentence[next]) && next > 0) next--
+            // Never onto punctuation or a space, which the lookup refuses: on past it to the next character it takes.
+            while (next in sentence.indices && !io.github.beesan.lfg.core.Selectable.at(sentence, next, false)) {
+                next = if (forward) next + Character.charCount(sentence.codePointAt(next)) else next - 1
+                if (next in sentence.indices && Character.isLowSurrogate(sentence[next]) && next > 0 && !forward) next--
+            }
             if (next in sentence.indices) onTapCharacter(next)
         }
     }

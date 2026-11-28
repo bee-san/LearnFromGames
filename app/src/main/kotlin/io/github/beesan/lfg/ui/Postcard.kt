@@ -72,7 +72,7 @@ object Postcard {
         }
         val parts = listOfNotNull(
             words.label.takeIf { it.isNotBlank() }?.let { Part(it, 20f, 28f, serif = false, bold = true, alpha = 225, lines = 1) },
-            words.line.takeIf { it.isNotBlank() }?.let { Part("「${it.replace('\n', ' ')}」", 26f, 38f, serif = true, bold = false, alpha = 225, lines = 2) },
+            words.line.takeIf { it.isNotBlank() }?.let { Part(io.github.beesan.lfg.core.Sentence.quoted(it), 26f, 38f, serif = true, bold = false, alpha = 225, lines = 2) },
             words.translation.takeIf { it.isNotBlank() }?.let { Part("“${it.trim()}”", 22f, 30f, serif = false, bold = false, alpha = 225, lines = 2) },
             words.entry.takeIf { it.isNotBlank() }?.let { Part(it.trim(), 40f, 56f, serif = true, bold = true, alpha = 255, lines = 8) },
             words.meta.takeIf { it.isNotBlank() }?.let { Part(it, 20f, 28f, serif = false, bold = false, alpha = 225, lines = 1) },

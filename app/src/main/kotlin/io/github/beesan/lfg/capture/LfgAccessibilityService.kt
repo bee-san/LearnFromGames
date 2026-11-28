@@ -221,7 +221,8 @@ class LfgAccessibilityService : AccessibilityService() {
                 val picture = line?.framePath ?: pipeline.latest.value?.framePath
                 scope.launch {
                     val note = Note(
-                        gameId = game?.id.orEmpty(), gameName = line?.gameName ?: game?.title.orEmpty(),
+                        // The line's own game: the one in front may have lost its name inside an emulator meanwhile.
+                        gameId = line?.gameId ?: game?.id.orEmpty(), gameName = line?.gameName ?: game?.title.orEmpty(),
                         lineId = line?.lineId, lineText = line?.text.orEmpty(),
                         term = entry?.expression.orEmpty(), reading = entry?.reading.orEmpty(), gloss = entry?.senses()?.firstOrNull().orEmpty(),
                         text = text, createdAt = System.currentTimeMillis(),
@@ -424,6 +425,11 @@ class LfgAccessibilityService : AccessibilityService() {
         _pipeline.value = null
         if (::overlays.isInitialized) overlays.destroy()
         scope.cancel()
+        // The Hear tile's sound, up to twenty seconds of it held in memory, goes with the service.
+        hearing?.release()
+        hearing = null
+        hearingTrack?.release()
+        hearingTrack = null
         shots.execute { thumbnails.close() }
         shots.shutdown()
     }
@@ -714,19 +720,22 @@ class LfgAccessibilityService : AccessibilityService() {
             hearingTrack?.release()
             hearingTrack = null
             if (kept != null) {
+                val player = android.media.MediaPlayer()
                 hearing = runCatching {
-                    android.media.MediaPlayer().apply {
+                    player.apply {
                         setDataSource(kept.path)
                         setOnCompletionListener { it.release(); if (hearing === it) hearing = null }
                         prepare()
                         start()
                     }
-                }.getOrNull()
+                }.onFailure { player.release() }.getOrNull()
                 return@launch
             }
             val start = line.appearedAtMs ?: row?.createdAt
             val samples = if (start == null) null else withContext(Dispatchers.IO) {
-                val next = row?.let { app.database.lines().nextAfter(it.gameId, it.createdAt) }?.createdAt
+                // Where the next line began to appear, not when it had settled after typing out.
+                val settled = row?.let { app.database.lines().nextAfter(it.gameId, it.createdAt) }?.createdAt
+                val next = settled?.let { at -> app.media.appearedAfter(start)?.takeIf { it <= at } ?: at }
                 SoundCapture.clip(start - HEAR_LEAD_MS, minOf(next ?: System.currentTimeMillis(), start + HEAR_MOST_MS))
             }
             if (samples == null || samples.size < SoundCapture.SAMPLE_RATE / 4) {
@@ -805,7 +814,13 @@ class LfgAccessibilityService : AccessibilityService() {
         val split = lines.filter { it.geometry != null }.map { line -> line to words(line) }
         // For each line, its words worth marking, each with whether it is on the list.
         val worth = if (!marking) emptyList() else split.map { (line, words) ->
-            words.filter { Furigana.worthKnowing(line.text.substring(it.start, it.end)) }
+            words.filter { w ->
+                val surface = line.text.substring(w.start, w.end)
+                // Japanese leaves out its particles and endings, short and all hiragana; another language keeps
+                // a word of two letters or more (친구, 학교), or a Han character alone.
+                if (prefs.learning.japanese) Furigana.worthKnowing(surface)
+                else surface.codePointCount(0, surface.length) >= 2 || surface.any(Furigana::isKanji)
+            }
                 .map { it to KnownWordList.knows(list, it.expression, it.reading, line.text.substring(it.start, it.end)) }
         }
         // Anki is asked about the words of every line at once, but for those on the list.
@@ -1088,6 +1103,8 @@ class LfgAccessibilityService : AccessibilityService() {
                     },
                 )
                 overlays.onScreen(r.displayId, true, true, asking = true)
+                // A new subtitle ends the sound of the one before, as a line of the game's own reading does.
+                if (!r.game.app) r.appearedAtMs.maxOrNull()?.let { app.media.onNextLine(it) }
             }
         }
         val looking = scope.launch {

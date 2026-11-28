@@ -164,10 +164,21 @@ object Blocks {
         val text = StringBuilder()
         val chars = ArrayList<CharBox>()
         for (row in rows) {
+            // Rows of a language that spaces its words are one sentence wrapped at a space, which the reader leaves
+            // out at the row's end: put back, or "across" and "the" become one word. Not after a hyphen, nor in
+            // Japanese or Chinese, which wrap anywhere.
+            if (text.isNotEmpty() && spacedEnd(text.last()) && spacedStart(row.text.firstOrNull())) text.append(' ')
             val offset = text.length
             row.chars.mapTo(chars) { CharBox(it.start + offset, it.end + offset, it.box) }
             text.append(row.text)
         }
         return TextLine(text.toString(), rows.map { it.box }.reduce(Box::union), chars, rows[0].vertical, rows.map { it.box })
     }
+
+    /** A letter of a script that spaces its words (Latin, Cyrillic, Hangul, Arabic…): not Han, kana or a CJK mark. */
+    private fun spacedLetter(c: Char) = c.isLetterOrDigit() && !isKana(c) && !isKanji(c) && c !in '\u3000'..'\u303F' && c !in '\uFF00'..'\uFFEF'
+
+    private fun spacedEnd(c: Char) = spacedLetter(c) || c in ".,;:!?)\"'”’»"
+
+    private fun spacedStart(c: Char?) = c != null && (spacedLetter(c) || c in "(\"'“‘«¿¡")
 }

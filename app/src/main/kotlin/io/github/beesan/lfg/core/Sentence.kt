@@ -13,6 +13,12 @@ object Sentence {
         }
     }
 
+    /** [text] on one row in quotation marks: 「」 around Japanese or Chinese, “” around any other language. */
+    fun quoted(text: String): String {
+        val one = text.replace('\n', ' ')
+        return if (one.any(Furigana::japanese)) "「$one」" else "“$one”"
+    }
+
     /** The sentence as card HTML with `[start, end)` wrapped in [open] and [close]. */
     fun mark(sentence: String, start: Int, end: Int, open: String = "<b>", close: String = "</b>"): String {
         val s = start.coerceIn(0, sentence.length)

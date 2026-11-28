@@ -69,10 +69,14 @@ object AnkiWords {
     fun anyField(words: Collection<String>): String {
         val alternatives = words.joinToString("|") { word ->
             buildString {
-                for (c in word) {
-                    if (c in META) append('\\')
-                    append(c)
+                // By code point: a character past the BMP (𠮟, 𩸽) stays whole, its two halves never parted by a reading.
+                var i = 0
+                while (i < word.length) {
+                    val cp = word.codePointAt(i)
+                    if (Character.charCount(cp) == 1 && word[i] in META) append('\\')
+                    appendCodePoint(cp)
                     append(READING)
+                    i += Character.charCount(cp)
                 }
             }
         }

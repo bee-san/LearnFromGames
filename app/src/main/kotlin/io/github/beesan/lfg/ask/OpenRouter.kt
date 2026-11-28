@@ -101,14 +101,18 @@ object OpenRouter {
         }
     }.toString()
 
+    /** An address a page can be opened at: http or https, nothing else a web page could slip in. */
+    fun webAddress(url: String): Boolean = url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true)
+
     /** The pages the answer cites, each once, in the order cited. */
     fun sources(response: String): List<Source> = try {
         val message = Json.parseToJsonElement(response).jsonObject["choices"]?.jsonArray?.firstOrNull()
             ?.jsonObject?.get("message")?.jsonObject
         (message?.get("annotations") as? JsonArray).orEmpty().mapNotNull { a ->
             val cite = (a as? JsonObject)?.get("url_citation") as? JsonObject ?: return@mapNotNull null
-            val url = cite.text("url").takeIf { it.startsWith("http") } ?: return@mapNotNull null
-            Source(url, cite.text("title"))
+            val url = cite.text("url").takeIf(::webAddress) ?: return@mapNotNull null
+            // A page's title is kept on one line, as the sources are.
+            Source(url, cite.text("title").replace(Regex("[\t\r\n]+"), " ").trim())
         }.distinctBy { it.url }
     } catch (_: Exception) {
         emptyList()

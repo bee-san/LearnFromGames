@@ -52,7 +52,9 @@ class MediaAttacher(
             // A card made from an older line: the next line has already come, so its sound is complete.
             val next = db.lines().nextAfter(line.gameId, line.createdAt)
             if (next != null) {
-                finish(Waiting(card, target, start), next.createdAt)
+                // Where the next line began to appear, when that is remembered: its row's time is when it had
+                // settled, after it typed out, and its voice ran from the start.
+                finish(Waiting(card, target, start), appearedAfter(start)?.takeIf { it <= next.createdAt } ?: next.createdAt)
                 return@launch
             }
             val pending = Waiting(card, target, start)
@@ -66,6 +68,10 @@ class MediaAttacher(
 
     /** A new line began to appear: that is where the sound of every waiting card ends. */
     fun onNextLine(appearedAtMs: Long) {
+        synchronized(appearances) {
+            appearances.addLast(appearedAtMs)
+            while (appearances.size > APPEARANCES) appearances.removeFirst()
+        }
         val ready = synchronized(waiting) {
             val due = waiting.filter { appearedAtMs > it.startMs + MIN_CLIP_MS }
             waiting.removeAll(due.toSet())
@@ -73,6 +79,12 @@ class MediaAttacher(
         }
         for (pending in ready) scope.launch(Dispatchers.IO) { finish(pending, appearedAtMs) }
     }
+
+    /** When the lines read lately began to appear, oldest first. */
+    private val appearances = ArrayDeque<Long>()
+
+    /** When the first line after [startMs] (and its shortest clip) began to appear, if it is remembered. */
+    fun appearedAfter(startMs: Long): Long? = synchronized(appearances) { appearances.firstOrNull { it > startMs + MIN_CLIP_MS } }
 
     private suspend fun finish(pending: Waiting, endMs: Long) {
         try {
@@ -132,6 +144,9 @@ class MediaAttacher(
     private fun mediaDir() = File(context.filesDir, "media").apply { mkdirs() }
 
     private companion object {
+        /** How many lines' appearance times are remembered: more than the sound kept covers. */
+        private const val APPEARANCES = 64
+
         const val TAG = "LfgMedia"
         const val MAX_WAIT_MS = 20_000L
         const val MAX_CLIP_MS = 30_000L

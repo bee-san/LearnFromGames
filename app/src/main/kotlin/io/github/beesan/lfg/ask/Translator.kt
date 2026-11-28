@@ -55,8 +55,12 @@ class Translator(private val db: LfgDatabase, private val offline: OfflineTransl
     /** Fetches the models for translating [language] with no internet, behind the reading, once for each two languages. */
     private fun prepareOffline(language: Language, p: Prefs) {
         val offline = offline ?: return
-        if (!prepared.add("${language.tag}>${p.translateInto}")) return
-        scope.launch { offline.prepare(language, p.translateInto, p.wifiOnly) }
+        // Asked again when Wi-Fi only changes, and after a try that failed.
+        val key = "${language.tag}>${p.translateInto}>${p.wifiOnly}"
+        if (!prepared.add(key)) return
+        scope.launch {
+            if (!offline.prepare(language, p.translateInto, p.wifiOnly)) prepared.remove(key)
+        }
     }
 
     companion object {

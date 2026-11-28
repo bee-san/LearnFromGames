@@ -179,7 +179,14 @@ class LookupController(
             if (still >= 0) {
                 val next = lines + listOfNotNull(away)
                 _state.update { it.copy(lines = next, line = still) }
-                if (cursor != null) cursor = cursorOver(next)
+                // The same lines in the same places, only more typed out: the Rights retraced by Left are kept.
+                if (cursor != null) cursor = cursorOver(next).also { fresh -> if (still == before.line) cursor?.let(fresh::carry) }
+                // A lookup still on its way, or the stick resting, would land on the line that is at the old place now.
+                if (still != before.line && (selecting?.isActive == true || resting?.isActive == true)) {
+                    selecting?.cancel()
+                    resting?.cancel()
+                    lookUp(still, before.spanStart)
+                }
                 return
             }
         }
@@ -285,12 +292,13 @@ class LookupController(
             _state.update {
                 it.copy(
                     entries = entries, entryIndex = 0,
-                    buttons = entries.map { e -> done[line.lineId to e.expression] ?: CardButton.ADD },
+                    // A kanji's card is not the card of the one-kanji word of the same spelling.
+                    buttons = entries.map { e -> done[line.lineId to KANJI + e.expression] ?: CardButton.ADD },
                     message = null, vnQuestion = null,
                     kanjiFrom = from.entries.firstOrNull { kanji in it.expression }?.expression ?: from.entry?.expression ?: kanji,
                 )
             }
-            for (entry in entries.distinctBy { it.expression }) checkDuplicate(line, entry)
+            // Not looked for in Anki by its spelling alone, which would find the word's note.
         }
     }
 
@@ -421,7 +429,7 @@ class LookupController(
                 fromApp = line.fromApp, kanji = kanji,
             )
             val result = cards.add(lineId, content)
-            val key = lineId to entry.expression
+            val key = lineId to (if (kanji) KANJI + entry.expression else entry.expression)
             when (result) {
                 is CardResult.Added, CardResult.Duplicate -> done[key] = CardButton.IN_ANKI
                 is CardResult.Waiting -> done[key] = CardButton.WAITING
@@ -520,8 +528,10 @@ class LookupController(
         // inside the word would come back where it began, so right goes on past the word, by stick too.
         val wordEnd = if (selection().wordStart) state.lines.getOrNull(state.line)?.text?.let { Selectable.wordEnd(it, state.spanStart) } ?: 0 else 0
         val to = when (move) {
-            Move.RIGHT -> if (wordEnd > state.spanStart) cursor.right(from, maxOf(matchedEnd, wordEnd))
-                else if (stick) cursor.stickRight(from) else cursor.right(from, matchedEnd)
+            // The stick past the word too, but it never goes round the ends: only the D-pad does.
+            Move.RIGHT -> if (wordEnd > state.spanStart) {
+                if (stick) cursor.stickRight(from, maxOf(matchedEnd, wordEnd)) else cursor.right(from, maxOf(matchedEnd, wordEnd))
+            } else if (stick) cursor.stickRight(from) else cursor.right(from, matchedEnd)
             Move.LEFT -> if (stick) cursor.stickLeft(from) else cursor.left(from)
             Move.UP -> cursor.up(from)
             Move.DOWN -> cursor.down(from)
@@ -551,6 +561,9 @@ class LookupController(
     }
 
     companion object {
+        /** Before a kanji card's headword in what is remembered of cards made: kept apart from the word's. */
+        private const val KANJI = "kanji:"
+
         const val STICK_REST_MS = 200L
     }
 }

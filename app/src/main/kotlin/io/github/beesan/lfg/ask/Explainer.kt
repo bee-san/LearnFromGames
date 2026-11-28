@@ -82,8 +82,10 @@ class Explainer(
             p.model, followUp(p.translateInto, language), prompt(line.gameName, before(line, p), line.lineText, language), talk = talk(so, asked),
         )
         val (text, next) = split(OpenRouter.answer(OpenRouter.request(p.openRouterKey, body)))
-        // "Explain again" may have run meanwhile: the answer belongs to the conversation it was asked in.
-        val now = conversation(line.id)?.takeIf { it.explanation == so.explanation } ?: so
+        // "Explain again" may have run meanwhile: the answer belongs to the conversation it was asked in, which
+        // is gone. The new explanation is kept as it is, not written over with the old one and this answer.
+        val now = conversation(line.id) ?: so
+        if (now.explanation != so.explanation) return now
         return save(line.id, now.copy(turns = now.turns + Turn(asked, text), suggestions = next), p.model)
     }
 

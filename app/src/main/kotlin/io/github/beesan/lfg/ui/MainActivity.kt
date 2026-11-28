@@ -702,7 +702,8 @@ class MainActivity : ComponentActivity() {
                                 onAlwaysBox = model::setBoxAlways,
                                 names = (dictionary as? DictState.Ready)?.dictionaries.orEmpty().filter { it.vndb != null },
                                 builds = nameBuilds,
-                                namesActions = NamesRowActions(
+                                // VNDB's character names are Japanese's alone.
+                                namesActions = if (!prefs.learning.japanese) null else NamesRowActions(
                                     title = model::vnTitle,
                                     onSearch = { game ->
                                         model.startVnSearch(game)

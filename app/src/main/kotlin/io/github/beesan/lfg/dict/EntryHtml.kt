@@ -19,6 +19,10 @@ import java.net.URLEncoder
 object EntryHtml {
     const val MEDIA_SCHEME = "lfgdict"
 
+    /** The language being learnt's tag, which headwords are marked with: Chinese is drawn in its own shapes, not Japanese's. */
+    @Volatile
+    var lang = "ja"
+
     /** The link the audio button follows; the view plays the word instead of going anywhere. In the popup's list, `/<index>` follows. */
     const val AUDIO_URL = "$MEDIA_SCHEME://audio/play"
 
@@ -104,7 +108,7 @@ object EntryHtml {
      */
     fun listBody(entries: List<Entry>, notes: Boolean = true, askVn: String? = null, back: String? = null, audio: (Entry) -> Boolean): String = buildString {
         if (back != null) {
-            append("<a class=\"lfg-back\" href=\"").append(BACK_URL).append("/0\"><span aria-hidden=\"true\">‹</span> <span lang=\"ja\">")
+            append("<a class=\"lfg-back\" href=\"").append(BACK_URL).append("/0\"><span aria-hidden=\"true\">‹</span> <span lang=\"").append(lang).append("\">")
             append(escape(back)).append("</span></a>")
         }
         if (askVn != null) {
@@ -141,7 +145,7 @@ object EntryHtml {
     fun body(entry: Entry, audio: Boolean = false, index: Int? = null, notes: Boolean = true): String = buildString {
         val accents = Pronunciation.accents(entry)
         val term = furigana(entry.expression, entry.reading)
-        append("<div class=\"lfg-head\"><span class=\"lfg-term\" lang=\"ja\">").append(if (index != null) kanjiLinks(term) else term).append("</span>")
+        append("<div class=\"lfg-head\"><span class=\"lfg-term\" lang=\"").append(lang).append("\">").append(if (index != null) kanjiLinks(term) else term).append("</span>")
         accents.firstOrNull()?.let { append(graph(it)) }
         append("<span class=\"lfg-actions\">")
         if (audio) {
@@ -481,6 +485,8 @@ object EntryHtml {
 html{background:var(--page);color:var(--text);font:16px/1.5 system-ui,sans-serif;-webkit-text-size-adjust:100%}
 body{margin:0;padding:10px 12px 14px;overflow-wrap:anywhere}
 :lang(ja){font-family:"Noto Sans CJK JP","Noto Sans JP",sans-serif}
+:lang(zh){font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif}
+:lang(ko){font-family:"Noto Sans CJK KR","Noto Sans KR",sans-serif}
 .lfg-head{display:flex;align-items:flex-end;column-gap:.7em;padding:0 2px}
 .lfg-term{font-size:1.75em;font-weight:650;line-height:1.2}
 .lfg-term rt{font-size:.5em;font-weight:400;color:var(--dim)}

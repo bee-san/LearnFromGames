@@ -157,6 +157,10 @@ object SoundCapture {
                     }
                 }
             }
+            // Stopping the muxer is what writes the file's index: one that fails here would not play.
+            muxer.stop()
+            muxer.release()
+            muxer = null
             true
         } catch (e: Exception) {
             Log.w("LfgSound", "encoding failed", e)

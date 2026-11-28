@@ -102,9 +102,10 @@ class Asker(
         }
 
         /** [QuestionRow.sources] as pages. */
-        fun sources(row: QuestionRow): List<OpenRouter.Source> = row.sources.lines().filter { it.isNotBlank() }.map {
+        fun sources(row: QuestionRow): List<OpenRouter.Source> = row.sources.lines().filter { it.isNotBlank() }.mapNotNull {
             val (url, title) = (it.split('\t', limit = 2) + "").let { parts -> parts[0] to parts[1] }
-            OpenRouter.Source(url, title)
+            // Only a web page's address is offered to be opened, whatever was saved.
+            OpenRouter.Source(url, title).takeIf { OpenRouter.webAddress(url) }
         }
     }
 }

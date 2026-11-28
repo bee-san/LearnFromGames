@@ -25,8 +25,9 @@ object KnownWordList {
      * Whether a word of a line is on the list, whose words are [list] as [key]
      * makes them: by its dictionary form, as the marks are worked out on, or,
      * when the line writes it in kana alone, by its reading, so ありがとう on the
-     * list is known where the dictionary's form is 有難う.
+     * list is known where the dictionary's form is 有難う; or as the line writes it, so ネコ on the list is known
+     * where the dictionary gives 猫, ねこ.
      */
     fun knows(list: Set<String>, expression: String, reading: String, surface: String): Boolean =
-        key(expression) in list || (reading.isNotEmpty() && surface.none(Furigana::isKanji) && key(reading) in list)
+        key(expression) in list || (surface.none(Furigana::isKanji) && ((reading.isNotEmpty() && key(reading) in list) || key(surface) in list))
 }

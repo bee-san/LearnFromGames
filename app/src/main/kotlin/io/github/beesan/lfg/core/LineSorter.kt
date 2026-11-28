@@ -90,6 +90,10 @@ class Sorted(val parts: List<List<Part>>, val menu: Boolean)
  * as a line does over a row of buttons.
  */
 class LineSorter {
+    /** A single full stop ends a sentence: in a language other than Japanese, where dots are not typed one at a time for 「……」. */
+    @Volatile
+    var dotEnds = false
+
     private class Shown(val text: String, val parts: List<Held>, val place: Box? = null) {
         val squeezed = Squeezed(text)
         val flagged = parts.any { it.interfaceText }
@@ -480,7 +484,10 @@ class LineSorter {
     /** Whether [text] ends a sentence and is not inside a quote still open, as 「そうか。 is while the rest is typed out. */
     private fun endsLine(text: Squeezed): Boolean {
         val last = text.points.lastOrNull() ?: return false
-        if (last > 0xFFFF || SENTENCE_ENDS.indexOf(last.toChar()) < 0) return false
+        // Outside Japanese a full stop ends a sentence too, but not dots trailing off, and so does a quote closed after one.
+        val dot = dotEnds && (last == '.'.code && text.points.getOrNull(text.size - 2) != '.'.code ||
+            last in listOf('"'.code, '»'.code) && text.points.getOrNull(text.size - 2) in listOf('.'.code, '!'.code, '?'.code))
+        if (!dot && (last > 0xFFFF || SENTENCE_ENDS.indexOf(last.toChar()) < 0)) return false
         return QUOTES.chunked(2).all { pair -> text.points.count { it == pair[0].code } <= text.points.count { it == pair[1].code } }
     }
 
