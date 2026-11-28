@@ -215,15 +215,18 @@ class ReadingPipeline(
     private var watchFirst: String? = null
     private var watchLast: String? = null
 
+    /** Whether the last look was the one ours moved at, whose picture may have them in two places. */
+    private var watchMoved = false
+
     /** The pictures watched are copied here: [buffer] keeps the last clean one, which they are held against. */
     private var watchBuffer: IntArray? = null
 
     /**
      * A look at a picture that has our own mark and entry on it ([ours], display pixels), which cannot
      * be read as it is: whether the text around them is no longer the text of the last clean picture,
-     * and has held still for two looks or come whole. The caller then takes them off the screen for a clean picture,
-     * which [onFrame] reads. Nothing here is kept or settled: the pipeline's own state stays at the
-     * last clean picture.
+     * and has held still for two looks (the same picture again is one) or come whole. The caller then
+     * takes them off the screen for a clean picture, which [onFrame] reads. Nothing here is kept or
+     * settled: the pipeline's own state stays at the last clean picture.
      *
      * Both pictures are compared with ours painted out of them, so what is under the entry counts for
      * nothing either way; when ours move, the clean picture is painted afresh. A picture taken as they
@@ -239,7 +242,18 @@ class ReadingPipeline(
     ): Boolean {
         if (reader() == null) return false
         val moved = ours != watchOurs
-        if (!moved && hash != 0L && hash == watchHash) return false
+        if (!moved && hash != 0L && hash == watchHash) {
+            // The same picture again: the text on it has held still. After the look ours moved at, the first such
+            // picture only shows that look was not taken as they moved, and the next one is waited for.
+            if (watchMoved) {
+                watchMoved = false
+                return false
+            }
+            val last = watchLast ?: return false
+            if (SettleDetector.same(last, watchFirst ?: "")) return false
+            endWatch()
+            return true
+        }
         val bitmap = picture() ?: return false
         val size = bitmap.width * bitmap.height
         val pixels = watchBuffer?.takeIf { it.size == size } ?: IntArray(size).also { watchBuffer = it }
@@ -277,6 +291,7 @@ class ReadingPipeline(
         val growing = !last.isNullOrEmpty() && now != last && now.startsWith(last)
         val atOnce = !moved && last != null && !growing && SettleDetector.ended(now, watchFirst ?: "")
         watchLast = now
+        watchMoved = moved
         if (!(changed && (held || atOnce))) return false
         endWatch()
         return true
@@ -288,6 +303,7 @@ class ReadingPipeline(
         watchOurs = emptyList()
         watchFirst = null
         watchLast = null
+        watchMoved = false
     }
 
     /** Forget what was on screen, so the next settled frame is read even if it is the same text. */
@@ -357,7 +373,13 @@ class ReadingPipeline(
         // The same picture has the same text: only the clock has moved. Nothing is copied or probed
         // unless that text has now been still long enough to read.
         if (still && known != null && !detector.offer(known, nowMs)) return true
-        val bitmap = picture() ?: return still
+        val bitmap = picture() ?: run {
+            // Not copied out after all: the next picture is looked at afresh, and text that had just held still
+            // on this one settles again, so that it is read.
+            lastHash = 0L
+            if (still && known != null) detector.reset()
+            return still
+        }
         val size = bitmap.width * bitmap.height
         val fresh = !(still && known != null)
         if (fresh) {
@@ -584,6 +606,11 @@ class ReadingPipeline(
             store.markInterface(game, text, nowMs)
             interfaceKnown += text
             recent.removeAll { it.lineText == text }
+        }
+        // And on screen, as the store has them now: not the story's lines (one a card was made from stays a line).
+        if (newly.isNotEmpty()) for (i in saved.indices) {
+            val row = saved[i]
+            if (row.lineText in newly && !row.interfaceText && row.noteIds.isEmpty()) saved[i] = row.copy(interfaceText = true)
         }
         // What was marked just now is interface text to the sorter too.
         val shown = if (newly.isEmpty()) held else held.map { parts -> parts.map { if (it.text in newly) it.copy(interfaceText = true) else it } }

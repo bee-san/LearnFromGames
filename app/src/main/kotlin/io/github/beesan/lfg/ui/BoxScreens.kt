@@ -193,12 +193,16 @@ fun BoxDrawScreen(
     val confirm = if (swapConfirm) "B" else "A"
     val back = if (swapConfirm) "A" else "B"
 
-    /** Drawn again; and, with the second corner set, saved. */
-    fun changed() {
+    /**
+     * Drawn again; and saved when this was the second corner being set ([finished]). Only then: a key let go
+     * after it, before the page has gone, would otherwise save it again and go back twice.
+     */
+    fun changed(finished: Boolean = false) {
         drawn++
+        if (!finished) return
         val d = drawing ?: return
         val p = picture ?: return
-        if (d.stage == BoxDrawing.Stage.DONE) d.box?.let { onSave(DialogueBox(it, p.width, p.height)) }
+        d.box?.let { onSave(DialogueBox(it, p.width, p.height)) }
     }
 
     Page("Draw box $slot", onBack) {
@@ -221,17 +225,18 @@ fun BoxDrawScreen(
                         .focusRequester(focus)
                         .onKeyEvent { event ->
                             val down = event.type == KeyEventType.KeyDown
+                            var finished = false
                             when (event.key.nativeKeyCode) {
                                 KeyEvent.KEYCODE_DPAD_LEFT -> if (down) drawing.move(-step, 0)
                                 KeyEvent.KEYCODE_DPAD_RIGHT -> if (down) drawing.move(step, 0)
                                 KeyEvent.KEYCODE_DPAD_UP -> if (down) drawing.move(0, -step)
                                 KeyEvent.KEYCODE_DPAD_DOWN -> if (down) drawing.move(0, step)
-                                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, confirmKey -> if (down) drawing.confirm()
+                                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, confirmKey -> if (down) finished = drawing.confirm()
                                 // On release, as over the game. With no corner to take back, it leaves.
                                 backKey -> if (!down && !drawing.back()) onBack()
                                 else -> return@onKeyEvent false
                             }
-                            changed()
+                            changed(finished)
                             true
                         }
                         .focusable()
@@ -249,8 +254,7 @@ fun BoxDrawScreen(
                                     toPicture(change.position).let { (x, y) -> drawing.touchMove(x, y) }
                                     changed()
                                 }
-                                drawing.touchUp()
-                                changed()
+                                changed(drawing.touchUp())
                             }
                         },
                 ) {

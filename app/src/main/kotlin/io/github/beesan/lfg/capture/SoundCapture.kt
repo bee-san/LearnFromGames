@@ -98,6 +98,9 @@ object SoundCapture {
 
     internal fun onSamples(samples: ShortArray, count: Int, endMs: Long) = ring.write(samples, count, endMs)
 
+    /** The newest [ms] of sound is heard again by a recorder begun beside the one before: what it gives goes over that. */
+    internal fun rewind(ms: Long) = ring.rewind(ms, SAMPLE_RATE)
+
     internal fun setRunning(value: Boolean) {
         // Once it has listened, the next game opened after it stops may ask again.
         if (value) asked = false
@@ -183,11 +186,15 @@ object SoundCapture {
 class SampleRing(private val capacity: Int) {
     private val data = ShortArray(capacity)
     private var written = 0L
+
+    /** The most ever written: samples taken back by [rewind] were still written over what was there before them. */
+    private var reached = 0L
     private var endMs = 0L
 
     @Synchronized
     fun clear() {
         written = 0L
+        reached = 0L
         endMs = 0L
     }
 
@@ -195,18 +202,33 @@ class SampleRing(private val capacity: Int) {
     fun write(samples: ShortArray, count: Int, endMs: Long) {
         for (i in 0 until count) data[((written + i) % capacity).toInt()] = samples[i]
         written += count
+        reached = maxOf(reached, written)
         this.endMs = endMs
     }
+
+    /**
+     * Takes back the newest [ms] of sound, as much of it as is held, so that what is written next goes in its
+     * place: a recorder begun beside the one before has heard that stretch too, and gives it again.
+     */
+    @Synchronized
+    fun rewind(ms: Long, sampleRate: Int) {
+        val back = minOf(ms * sampleRate / 1000, written - oldest())
+        if (back <= 0) return
+        written -= back
+        endMs -= back * 1000 / sampleRate
+    }
+
+    /** The first sample still held: one taken back did not bring back what it was written over. */
+    private fun oldest() = maxOf(0L, reached - capacity)
 
     /** Samples for `[fromMs, toMs)`, clamped to what is held; null when none of it is. */
     @Synchronized
     fun clip(fromMs: Long, toMs: Long, sampleRate: Int): ShortArray? {
         if (written == 0L || toMs <= fromMs) return null
-        val held = minOf(written, capacity.toLong())
         // Sample index, counted from the first ever written, of a wall-clock time.
         fun indexAt(ms: Long) = written - (endMs - ms) * sampleRate / 1000
-        val from = indexAt(fromMs).coerceIn(written - held, written)
-        val to = indexAt(toMs).coerceIn(written - held, written)
+        val from = indexAt(fromMs).coerceIn(oldest(), written)
+        val to = indexAt(toMs).coerceIn(oldest(), written)
         if (to <= from) return null
         return ShortArray((to - from).toInt()) { data[((from + it) % capacity).toInt()] }
     }
@@ -222,8 +244,11 @@ class SoundService : Service() {
     @Volatile
     private var reading = false
 
+    /** A recorder and when it began to record (uptime): what it heard before the change-over to it, the one before gave already. */
+    private class Listening(val record: AudioRecord, val startedAt: Long)
+
     /** A recorder begun since the one being read, for the reading thread to change over to. */
-    private val fresh = AtomicReference<AudioRecord?>()
+    private val fresh = AtomicReference<Listening?>()
     private val main = Handler(Looper.getMainLooper())
     private var listenedAt = 0L
 
@@ -251,9 +276,9 @@ class SoundService : Service() {
         listenedAt = SystemClock.uptimeMillis()
         thread(name = "lfg-sound-again") {
             try {
-                fresh.getAndSet(listen(granted))?.release()
+                fresh.getAndSet(listen(granted))?.record?.release()
                 // The service ended while this one was being made: nothing is left to read it.
-                if (!reading) fresh.getAndSet(null)?.release()
+                if (!reading) fresh.getAndSet(null)?.record?.release()
             } catch (e: Exception) {
                 Log.w(TAG, "could not listen again", e)
             }
@@ -282,7 +307,7 @@ class SoundService : Service() {
                 override fun onStop() = stopSelf()
             }, main)
 
-            val first = listen(granted)
+            val first = listen(granted).record
             record = first
             listenedAt = SystemClock.uptimeMillis()
             reading = true
@@ -293,11 +318,14 @@ class SoundService : Service() {
                 var current = first
                 while (reading) {
                     fresh.getAndSet(null)?.let { next ->
+                        // What the new one has heard since it began, the old one gave already: its first samples go over that.
+                        val heard = SystemClock.uptimeMillis() - next.startedAt
                         val old = current
-                        current = next
-                        record = next
+                        current = next.record
+                        record = next.record
                         runCatching { old.stop() }
                         runCatching { old.release() }
+                        SoundCapture.rewind(heard)
                     }
                     val n = current.read(buffer, 0, buffer.size)
                     if (n > 0) SoundCapture.onSamples(buffer, n, System.currentTimeMillis()) else if (n < 0) break
@@ -312,9 +340,9 @@ class SoundService : Service() {
         return START_NOT_STICKY
     }
 
-    /** A recorder of everything playing as game or media sound, already recording. */
+    /** A recorder of everything playing as game or media sound, already recording, and when it began. */
     @SuppressLint("MissingPermission")
-    private fun listen(granted: MediaProjection): AudioRecord {
+    private fun listen(granted: MediaProjection): Listening {
         val config = AudioPlaybackCaptureConfiguration.Builder(granted)
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
@@ -327,19 +355,20 @@ class SoundService : Service() {
             .setSampleRate(SoundCapture.SAMPLE_RATE)
             .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
             .build()
-        return AudioRecord.Builder()
+        val record = AudioRecord.Builder()
             .setAudioFormat(format)
             .setBufferSizeInBytes(SoundCapture.SAMPLE_RATE * 2)
             .setAudioPlaybackCaptureConfig(config)
             .build()
-            .apply { startRecording() }
+        record.startRecording()
+        return Listening(record, SystemClock.uptimeMillis())
     }
 
     override fun onDestroy() {
         runCatching { getSystemService(AudioManager::class.java).unregisterAudioPlaybackCallback(players) }
         main.removeCallbacks(listenAgain)
         reading = false
-        runCatching { fresh.getAndSet(null)?.release() }
+        runCatching { fresh.getAndSet(null)?.record?.release() }
         SoundCapture.setRunning(false)
         runCatching { record?.stop() }
         runCatching { record?.release() }

@@ -9,6 +9,8 @@ import io.github.beesan.lfg.data.Diary
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.LfgDatabase
 import io.github.beesan.lfg.data.RecapRow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -19,6 +21,7 @@ import java.io.File
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /** A part of the story: what happens in it, and the days it covers. */
 @Serializable
@@ -48,25 +51,48 @@ class Recapper(
     private val diary: Diary? = null,
 ) {
 
+    /** The recaps being written, one at a time for each game: one asked for meanwhile waits, then finds nothing new to send. */
+    private val writing = ConcurrentHashMap<String, Mutex>()
+
     /** The recap of [gameId] up to its newest line: the kept one when nothing has been read since. */
-    suspend fun write(gameId: String, gameName: String): RecapRow {
+    suspend fun write(gameId: String, gameName: String): RecapRow = writing.computeIfAbsent(gameId) { Mutex() }.withLock {
         val p = prefs()
         var row = db.recaps().latest(gameId)
         val all = db.lines().ofGame(gameId)
-        val fresh = all.drop(row?.let { start(all, it, db.lines().byId(it.lastLineId)) } ?: 0)
-        if (fresh.isEmpty()) return row ?: throw OpenRouter.Failure("Nothing has been read in this game yet.")
+        // Where the piece being sent starts in all the game's lines.
+        var at = row?.let { start(all, it, db.lines().byId(it.lastLineId)) } ?: 0
+        val fresh = all.drop(at)
+        if (fresh.isEmpty()) return@withLock row ?: throw OpenRouter.Failure("Nothing has been read in this game yet.")
         for (piece in fresh.chunked(CHUNK)) {
             val earlier = row?.let { Json.decodeFromString<Recap>(it.json) }
-            val answer = OpenRouter.ask(p.openRouterKey, p.model, system(p.learning), prompt(gameName, piece, earlier, p.translateInto, zone, p.learning))
+            val told = told(gameId, all, at, piece)
+            val answer = OpenRouter.ask(
+                p.openRouterKey, p.model, system(p.learning), prompt(gameName, piece, earlier, p.translateInto, zone, p.learning, told),
+            )
             val recap = parse(answer, piece, earlier)
             row = RecapRow(
                 gameId = gameId, json = Json.encodeToString(recap), lastLineId = piece.last().id,
                 lineCount = (row?.lineCount ?: 0) + piece.size, model = p.model, createdAt = System.currentTimeMillis(),
             )
             db.recaps().insert(row)
-            for (day in days(answer, piece, zone)) diary?.write(gameId, day.day, day.title, day.summary, p.model)
+            for (day in days(answer, piece, zone, told.mapTo(HashSet()) { it.day })) diary?.write(gameId, day.day, day.title, day.summary, p.model)
+            at += piece.size
         }
-        return row!!
+        row!!
+    }
+
+    /**
+     * What the diary already says of the day [piece] starts on, when that day began before it ([at] is where the piece
+     * starts in [all]): the answer then tells the whole day, carried on from that, and not only the part in [piece].
+     */
+    private suspend fun told(gameId: String, all: List<GameLine>, at: Int, piece: List<GameLine>): List<DayText> {
+        // The lines are in the order read, so only the piece's first day can have begun before it.
+        val first = ReadingStats.dayOf(piece.first().timestamp, zone)
+        val before = all.getOrNull(at - 1) ?: return emptyList()
+        if (ReadingStats.dayOf(before.timestamp, zone) != first) return emptyList()
+        val kept = db.diary().of(gameId, first.toEpochDay()) ?: return emptyList()
+        if (kept.title.isBlank() && kept.summary.isBlank()) return emptyList()
+        return listOf(DayText(first, kept.title, kept.summary))
     }
 
     /** What is happening in the scene being read now, from the [SCENE] lines read last. It is not kept: the scene moves on. */
@@ -142,19 +168,33 @@ class Recapper(
         }
         private val DAY = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH)
 
-        /** The prompt for the lines read since [earlier]: each day's lines, numbered across all of them. */
+        /**
+         * The prompt for the lines read since [earlier]: each day's lines, numbered across all of them. A day that began
+         * before these lines and is in the diary already ([told]) carries what was written of it, so it is told whole.
+         */
         fun prompt(
             game: String, lines: List<GameLine>, earlier: Recap?, into: String, zone: ZoneId, language: Language = Language.JAPANESE,
+            told: List<DayText> = emptyList(),
         ): String = buildString {
             append("I’m playing ").append(game.ifBlank { "a game" }).append(", ").append(language.aGame)
             append(". Here is its ").append(language.title).append(" text as I read it, ")
             append("by day, each line numbered:\n")
             var day = ""
+            var carried = false
             lines.forEachIndexed { i, line ->
-                val d = ReadingStats.dayOf(line.timestamp, zone).format(DAY)
+                val date = ReadingStats.dayOf(line.timestamp, zone)
+                val d = date.format(DAY)
                 if (d != day) {
                     if (day.isNotEmpty()) append("</day>\n")
                     append("<day date=\"").append(d).append("\">\n")
+                    // Its start went with an earlier answer: what was written of it then comes first.
+                    told.firstOrNull { it.day == date }?.let { so ->
+                        append("<told>\n")
+                        if (so.title.isNotBlank()) append("title: ").append(so.title.replace('\n', ' ')).append('\n')
+                        if (so.summary.isNotBlank()) append("summary: ").append(so.summary.replace('\n', ' ')).append('\n')
+                        append("</told>\n")
+                        carried = true
+                    }
                     day = d
                 }
                 append('[').append(i + 1).append("] ").append(line.lineText.replace('\n', ' ')).append('\n')
@@ -173,8 +213,11 @@ class Recapper(
             append("\"moments\": [{\"line\": the number of a line above, \"caption\": \"what is happening at it, a few words\"}], ")
             append("\"days\": [{\"date\": \"a day's date, as above\", \"title\": \"a few words\", \"summary\": \"what happened that day, two or three sentences\"}]}\n")
             append("Give one of \"days\" for each day above, as a diary would tell it. ")
+            if (carried) append("A day with <told> began before these lines: <told> is what you wrote of it then. Tell that day whole, carrying on from it. ")
             append("Arcs are the whole story so far, oldest first, at most five. Choose three or four moments that matter to the story")
-            if (earlier != null) append(": from the lines above, or keep an earlier one by giving its place in the earlier list as \"earlier\" instead of \"line\"")
+            if (earlier != null) {
+                append(": from the lines above, or keep an earlier one by giving its place in the earlier list, counting from 1, as \"earlier\" instead of \"line\"")
+            }
             append(", with the last one near where I stopped.")
         }
 
@@ -190,7 +233,8 @@ class Recapper(
                 val back = (m["earlier"] as? JsonPrimitive)?.content?.toIntOrNull()
                 when {
                     number != null -> lines.getOrNull(number - 1)?.let { Moment(it.id, it.lineText, picture(it), caption) }
-                    back != null -> earlier?.moments?.getOrNull(back)?.let { kept -> kept.copy(caption = caption.ifBlank { kept.caption }) }
+                    // Its place counting from 1, as the prompt asks.
+                    back != null -> earlier?.moments?.getOrNull(back - 1)?.let { kept -> kept.copy(caption = caption.ifBlank { kept.caption }) }
                     else -> null
                 }
             }
@@ -204,14 +248,16 @@ class Recapper(
         /**
          * The days told in [answer], of those [lines] were read on. A day of
          * fewer than [DAY_LINES] of them is left out: too little happened, or
-         * the rest of it went with an earlier answer.
+         * the rest of it went with an earlier answer. A day [carried] on from
+         * what was written of its start is kept whatever its count: it is told whole.
          */
-        fun days(answer: String, lines: List<GameLine>, zone: ZoneId): List<DayText> {
+        fun days(answer: String, lines: List<GameLine>, zone: ZoneId, carried: Set<java.time.LocalDate> = emptySet()): List<DayText> {
             val read = lines.groupingBy { ReadingStats.dayOf(it.timestamp, zone) }.eachCount()
             val json = runCatching { OpenRouter.jsonIn(answer) }.getOrNull() ?: return emptyList()
             return (json["days"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.mapNotNull { d ->
                 val day = runCatching { java.time.LocalDate.parse(d.text("date").trim(), DAY) }.getOrNull() ?: return@mapNotNull null
-                if ((read[day] ?: 0) < DAY_LINES || (d.text("title").isBlank() && d.text("summary").isBlank())) return@mapNotNull null
+                val count = read[day] ?: 0
+                if (count == 0 || (count < DAY_LINES && day !in carried) || (d.text("title").isBlank() && d.text("summary").isBlank())) return@mapNotNull null
                 DayText(day, d.text("title").trim(), d.text("summary").trim())
             }
         }

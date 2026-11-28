@@ -48,7 +48,8 @@ enum class StatsPeriod(val label: String) {
 
     /** `days` as [ReadingStats.byDay] gives them, in any order. */
     fun view(days: List<ReadingStats.DayTotals>, today: LocalDate, locale: Locale = Locale.getDefault()): View {
-        val first = days.minOfOrNull { it.day } ?: today
+        // Never after today: lines read while the clock was set ahead are no reason for all of time to start in the future.
+        val first = minOf(days.minOfOrNull { it.day } ?: today, today)
         val monthName = { m: YearMonth -> m.month.getDisplayName(TextStyle.FULL, locale) + " " + m.year }
         val dayName = { d: LocalDate ->
             d.dayOfWeek.getDisplayName(TextStyle.FULL, locale) + " " + d.dayOfMonth + " " + d.month.getDisplayName(TextStyle.FULL, locale)

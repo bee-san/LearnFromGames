@@ -194,6 +194,14 @@ class WheelTest {
     }
 
     @Test
+    fun `a wheel with no tiles yet points at nothing, whatever is pushed`() {
+        assertNull(WheelAim.pad(up = true, down = false, left = false, right = false, count = 0))
+        assertNull(WheelAim.pad(up = false, down = true, left = true, right = false, count = 0))
+        assertNull(WheelAim.slice(0f, -1f, 0))
+        assertNull(WheelAim.slice(1f, 0f, 0, dead = 0f))
+    }
+
+    @Test
     fun `let go soon the shortcut is a tap`() {
         val hold = ShortcutHold { 350 }
         hold.press(1_000)

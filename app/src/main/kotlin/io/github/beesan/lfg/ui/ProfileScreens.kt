@@ -86,7 +86,7 @@ fun ProfilesScreen(
             val named = profile.name.isNotBlank()
             when (profile.id) {
                 renaming -> Card("Name", "Empty: ${profile.language.title}") {
-                    NameField(typed, { typed = it.take(ProfileRules.NAME_LENGTH) }, profile.language.title) {
+                    NameField(typed, { typed = ProfileRules.fitted(it) }, profile.language.title) {
                         onRename(profile.id, typed)
                         renaming = null
                     }

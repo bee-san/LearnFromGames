@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -124,10 +125,25 @@ class DiaryModel(private val app: App, private val scope: CoroutineScope, privat
         }
     }
 
-    /** A new entry from over a game: on the line with [lineId], or the newest line read. */
-    fun writeOn(lineId: String?) {
+    /**
+     * A new entry from over a game: on the line with [lineId]; with none, on the newest line of the game [gameId],
+     * or on that game alone when none of its lines is kept; with no game either, the newest line read. Asked of the
+     * store: opened from a game, the page's own lines may not have come yet.
+     */
+    fun writeOn(lineId: String?, gameId: String? = null) {
         on(null)
-        scope.launch { on(lineId?.let { id -> withContext(Dispatchers.IO) { app.database.lines().byId(id) } } ?: newestLine()) }
+        scope.launch {
+            val (line, game) = withContext(Dispatchers.IO) {
+                val lines = app.database.lines()
+                val game = gameId?.takeIf { it.isNotEmpty() }?.let { app.database.games().byId(it) }
+                val line = lineId?.let { lines.byId(it) }
+                    ?: game?.let { lines.before(it.id, Double.MAX_VALUE, 1).firstOrNull() }
+                    // Another game's line only when no game was named.
+                    ?: if (game == null) lines.recent(1).first().firstOrNull() else null
+                line to game
+            }
+            if (line == null && game != null) start(Draft(gameId = game.id, gameName = game.title, at = System.currentTimeMillis())) else on(line)
+        }
     }
 
     fun edit(entry: Note) {
@@ -150,31 +166,46 @@ class DiaryModel(private val app: App, private val scope: CoroutineScope, privat
         }
     }
 
+    /** A save under way: Save or Share pressed again meanwhile does nothing, so the entry is kept once. */
+    private var saving = false
+
     /** Saves the draft, and opens its day and it: [then] follows with its id. */
     fun save(title: String, text: String, then: (Long) -> Unit = {}) {
+        if (saving) return
+        saving = true
         val draft = _draft.value
         scope.launch {
-            val line = draft.line
-            val id = if (draft.id == 0L) {
-                app.notes.save(
-                    Note(
-                        gameId = draft.gameId, gameName = draft.gameName, lineId = line?.id, lineText = line?.lineText.orEmpty(),
-                        title = title.trim(), text = text.trim(), inLookups = false, createdAt = draft.at.takeIf { it > 0 } ?: System.currentTimeMillis(),
-                    ),
-                    draft.picture,
-                )
-            } else {
-                val kept = withContext(Dispatchers.IO) { app.database.notes().byId(draft.id) } ?: return@launch
-                app.notes.update(
-                    kept.copy(title = title.trim(), text = text.trim(), lineId = line?.id ?: kept.lineId, lineText = line?.lineText ?: kept.lineText),
-                    draft.picture,
-                )
-                draft.id
+            try {
+                val line = draft.line
+                val id = if (draft.id == 0L) {
+                    app.notes.save(
+                        Note(
+                            gameId = draft.gameId, gameName = draft.gameName, lineId = line?.id, lineText = line?.lineText.orEmpty(),
+                            title = title.trim(), text = text.trim(), inLookups = false, createdAt = draft.at.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                        ),
+                        draft.picture,
+                    ).also { made ->
+                        // Kept now: a Save or Share after this changes this entry, and does not keep another.
+                        _draft.update { if (it.serial == draft.serial) it.copy(id = made) else it }
+                    }
+                } else {
+                    val kept = withContext(Dispatchers.IO) { app.database.notes().byId(draft.id) } ?: return@launch
+                    app.notes.update(
+                        kept.copy(title = title.trim(), text = text.trim(), lineId = line?.id ?: kept.lineId, lineText = line?.lineText ?: kept.lineText),
+                        draft.picture,
+                    )
+                    draft.id
+                }
+                val day = ReadingStats.dayOf((draft.at.takeIf { it > 0 } ?: System.currentTimeMillis()) / 1000.0, zone)
+                _state.update { it.copy(day = draft.gameId to day, entryId = id, month = YearMonth.from(day)) }
+                scope.launch { DiaryWidget.update(app) }
+                // The diary read again here, not in a launch of its own: until its page opens, a press is still this save's.
+                val books = app.diary.books()
+                _state.update { it.copy(loaded = true, books = books) }
+                then(id)
+            } finally {
+                saving = false
             }
-            val day = ReadingStats.dayOf((draft.at.takeIf { it > 0 } ?: System.currentTimeMillis()) / 1000.0, zone)
-            _state.update { it.copy(day = draft.gameId to day, entryId = id, month = YearMonth.from(day)) }
-            load { then(id) }
-            DiaryWidget.update(app)
         }
     }
 

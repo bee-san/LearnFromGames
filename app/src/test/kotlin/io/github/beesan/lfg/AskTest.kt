@@ -9,6 +9,7 @@ import io.github.beesan.lfg.ask.Arc
 import io.github.beesan.lfg.ask.Recapper
 import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.QuestionRow
+import java.time.LocalDate
 import java.time.ZoneOffset
 import io.github.beesan.lfg.ask.Translator
 import kotlinx.serialization.json.Json
@@ -109,11 +110,12 @@ class AskTest {
         assertTrue(prompt.contains("<day date=\"2 November 2026\">\n[1] 灯台の明かりが消えた。\n</day>"))
         assertTrue(prompt.contains("<day date=\"3 November 2026\">\n[2] 新しい剣を手に入れた！"))
         assertTrue(prompt.contains("<earlier>"))
+        assertTrue(prompt.contains("its place in the earlier list, counting from 1,"))
         assertFalse(prompt.contains("/gone.webp"))   // no file paths go out
 
         val answer = """```json
             {"arcs":[{"title":"The sword","from":"2 November 2026","to":"3 November 2026","summary":"…"}],
-             "last":"You got the sword.","moments":[{"line":2,"caption":"The sword"},{"earlier":0,"caption":""},{"line":9,"caption":"none"}]}
+             "last":"You got the sword.","moments":[{"line":2,"caption":"The sword"},{"earlier":1,"caption":""},{"line":9,"caption":"none"}]}
             ```"""
         val recap = Recapper.parse(answer, lines, earlier)
         assertEquals("The sword", recap.arcs.single().title)
@@ -121,6 +123,30 @@ class AskTest {
         assertEquals(listOf("b", "x"), recap.moments.map { it.lineId })   // a number past the lines is dropped
         assertEquals("The elder", recap.moments[1].caption)              // an earlier moment keeps its caption
         assertThrows(OpenRouter.Failure::class.java) { Recapper.parse("{}", lines, null) }
+    }
+
+    @Test
+    fun aDayBegunBeforeTheLinesSentIsToldWholeFromWhatWasWrittenOfIt() {
+        val lines = listOf(line("a", "灯台の明かりが消えた。", 0), line("b", "新しい剣を手に入れた！", 1))
+        val told = listOf(Recapper.Companion.DayText(LocalDate.of(2026, 11, 2), "The lighthouse", "The light went out."))
+        val prompt = Recapper.prompt("Quest", lines, null, "English", ZoneOffset.UTC, told = told)
+        assertTrue(prompt.contains("<day date=\"2 November 2026\">\n<told>\ntitle: The lighthouse\nsummary: The light went out.\n</told>\n[1] 灯台の明かりが消えた。\n</day>"))
+        assertTrue(prompt.contains("<day date=\"3 November 2026\">\n[2] 新しい剣を手に入れた！"))   // a day begun in these lines has nothing told
+        assertTrue(prompt.contains("Tell that day whole, carrying on from it."))
+        // With no such day, the prompt is as it was.
+        val plain = Recapper.prompt("Quest", lines, null, "English", ZoneOffset.UTC)
+        assertFalse(plain.contains("<told>"))
+        assertFalse(plain.contains("carrying on"))
+
+        // The day carried on is kept however few of its lines came this time; another day still needs its twenty.
+        val answer = """{"arcs": [], "last": "x", "moments": [], "days": [
+            {"date": "2 November 2026", "title": "The lighthouse", "summary": "The light went out, and came back."},
+            {"date": "3 November 2026", "title": "Short", "summary": "Too little."}]}"""
+        assertEquals(
+            listOf(Recapper.Companion.DayText(LocalDate.of(2026, 11, 2), "The lighthouse", "The light went out, and came back.")),
+            Recapper.days(answer, lines, ZoneOffset.UTC, carried = setOf(LocalDate.of(2026, 11, 2))),
+        )
+        assertTrue(Recapper.days(answer, lines, ZoneOffset.UTC).isEmpty())
     }
 
     @Test

@@ -1,6 +1,8 @@
 package io.github.beesan.lfg
 
 import io.github.beesan.lfg.dict.DictJson
+import io.github.beesan.lfg.dict.DictionaryRepository
+import io.github.beesan.lfg.dict.EntryHtml
 import io.github.beesan.lfg.dict.GlossaryText
 import io.github.beesan.lfg.dict.ImportOutcome
 import io.github.beesan.lfg.dict.DefaultDictionaries
@@ -105,5 +107,38 @@ class DictTest {
         assertTrue(source("jiten").accepts(ImportOutcome(success = true, title = "Jiten", frequencies = 500_000)))
         assertFalse(source("jiten").accepts(ImportOutcome(success = true, title = "Jiten", terms = 500_000)))
         assertTrue(source("bees-ultimate-grammar-dictionary").accepts(ImportOutcome(success = true, terms = 6_371)))
+    }
+
+    @Test
+    fun aDictionaryAddedAgainKeepsItsPlace() {
+        val all = listOf(installed("A"), installed("B"), installed("C"))
+        val again = installed("B").copy(installedAt = 1)
+        val placed = DictionaryRepository.inPlace(all, again) { it.title == "B" }
+        assertEquals(listOf("A", "B", "C"), placed.map { it.title })
+        assertEquals(1L, placed[1].installedAt)
+        assertEquals(listOf("A", "B", "C", "D"), DictionaryRepository.inPlace(all, installed("D")) { it.title == "D" }.map { it.title })
+        // A visual novel's names built again take the old ones' place, whatever their title was.
+        val names = listOf(installed("A"), installed("古い (VNDB v17)").copy(vndb = "v17"), installed("C"))
+        val rebuilt = installed("新しい (VNDB v17)").copy(vndb = "v17")
+        assertEquals(
+            listOf("A", "新しい (VNDB v17)", "C"),
+            DictionaryRepository.inPlace(names, rebuilt) { it.title == rebuilt.title || it.vndb == "v17" }.map { it.title },
+        )
+    }
+
+    @Test
+    fun aLookupGivesTheEngineRoomForLongerWords() {
+        assertEquals("短い", DictionaryRepository.ahead("短い"))
+        assertEquals("あ".repeat(64), DictionaryRepository.ahead("あ".repeat(80)))
+        // Cut between characters, never inside one past the Basic Multilingual Plane.
+        assertEquals("a".repeat(63) + "𠮟", DictionaryRepository.ahead("a".repeat(63) + "𠮟b"))
+        assertEquals("𠮟".repeat(64), DictionaryRepository.ahead("𠮟".repeat(70)))
+    }
+
+    @Test
+    fun aTitleCannotEndTheStyleElement() {
+        val scoped = EntryHtml.scope(".a{color:red}", "Evil</style><b>\nx")
+        assertFalse(scoped, scoped.contains("</"))
+        assertEquals("""[data-dictionary="Evil\3c /style>\3c b>\a x"] .a{color:red}""", scoped)
     }
 }

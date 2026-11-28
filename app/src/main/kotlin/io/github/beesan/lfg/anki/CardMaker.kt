@@ -173,8 +173,12 @@ class CardMaker(
             val index = NoteTypes.pictureField(target.family, target.fields) ?: return@withContext "The note type has no picture field."
             val name = "lfg_${card.createdAt}_${System.currentTimeMillis()}"
             val made = forCard(picture, name, prefs().trimBars)
-            val html = anki.addPicture(made ?: picture, name)
-            made?.delete()
+            // Made only to be handed to AnkiDroid: gone afterwards, whether it took it or not.
+            val html = try {
+                anki.addPicture(made ?: picture, name)
+            } finally {
+                made?.delete()
+            }
             if (html == null || !anki.setField(noteId, index, html)) return@withContext "AnkiDroid refused the picture."
             db.cards().update(card.copy(pictureName = name))
             "This screen is on the card of " + if (card.term.length > 12) card.term.take(12) + "…" else card.term

@@ -126,6 +126,8 @@ class App : Application() {
                 first = false
             }
         }
+        // A backup folder LFG may no longer write to, as after settings put back on another device, is asked for again.
+        scope.launch(Dispatchers.IO) { forgetLostBackupFolder() }
         scope.launch { settings.prefs.map { it.learning.tag }.distinctUntilChanged().collect { io.github.beesan.lfg.dict.EntryHtml.lang = it } }
         // Sentence audio turned off: the game's sound stops being taken, and Android's notification of it goes.
         scope.launch {
@@ -142,6 +144,18 @@ class App : Application() {
         scope.launch { settings.prefs.map { it.updateDictionaries to it.wifiOnly }.distinctUntilChanged().collect { (on, wifi) -> io.github.beesan.lfg.dict.DictionaryUpdateWorker.schedule(this@App, on, wifi) } }
         // And for the daily look for a newer LFG. It is fetched, and waits for a tap to be installed.
         scope.launch { settings.prefs.map { it.updateApp to it.wifiOnly }.distinctUntilChanged().collect { (on, wifi) -> io.github.beesan.lfg.update.UpdateWorker.schedule(this@App, on, wifi) } }
+    }
+
+    /**
+     * The backup folder goes when Android keeps no leave for LFG to write to it: the automatic backup would fail there
+     * every night unseen. The Backup page then asks for a folder.
+     */
+    private fun forgetLostBackupFolder() {
+        val folder = settings.prefs.value.backupFolder
+        if (folder.isEmpty()) return
+        // When Android cannot say, the folder stays.
+        val leave = runCatching { contentResolver.persistedUriPermissions.any { it.isWritePermission && it.uri.toString() == folder } }.getOrDefault(true)
+        if (!leave) settings.update { if (it.backupFolder == folder) it.copy(backupFolder = "") else it }
     }
 
     /** Starts the app again from its first screen: after a restore, which replaced the database under it. */

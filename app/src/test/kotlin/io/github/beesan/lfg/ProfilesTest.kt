@@ -25,6 +25,11 @@ class ProfilesTest {
         assertEquals("Docked", ProfileRules.named("  Docked \n"))
         assertEquals(ProfileRules.NAME_LENGTH, ProfileRules.named("x".repeat(80)).length)
         assertEquals("", ProfileRules.named("   "))
+        // An emoji at the limit is kept whole or left out, never cut in half.
+        val smile = "😀"
+        assertEquals("x".repeat(ProfileRules.NAME_LENGTH - 1) + smile, ProfileRules.named("x".repeat(ProfileRules.NAME_LENGTH - 1) + smile + smile))
+        assertEquals("x".repeat(ProfileRules.NAME_LENGTH), ProfileRules.named("x".repeat(ProfileRules.NAME_LENGTH) + smile))
+        assertEquals(smile.repeat(ProfileRules.NAME_LENGTH), ProfileRules.fitted(smile.repeat(30)))
     }
 
     @Test

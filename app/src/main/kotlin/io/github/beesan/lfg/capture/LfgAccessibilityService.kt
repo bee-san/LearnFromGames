@@ -298,8 +298,9 @@ class LfgAccessibilityService : AccessibilityService() {
                         )
                     },
                 )
-                // A new line on screen ends the sound of the one before it.
-                reading.appearedAtMs.maxOrNull()?.let { app.media.onNextLine(it) }
+                // A new line on screen ends the sound of the one before it; a menu's or a label's text does not.
+                reading.appearedAtMs.filterIndexed { i, _ -> reading.saved.getOrNull(i)?.interfaceText != true }.maxOrNull()
+                    ?.let { app.media.onNextLine(it) }
                 if (asideSince != 0L) Log.i(TAG, "read behind the entry in ${android.os.SystemClock.uptimeMillis() - asideSince} ms")
                 // The clean picture the mark and the entry stood aside for has been read.
                 endAside(read = true)
@@ -624,6 +625,9 @@ class LfgAccessibilityService : AccessibilityService() {
                 if (playing != null && screen != null && dialogueBox(playing.game, playing.displayId) != null) {
                     // Read once, with lookup on it: closing lookup brings the game's own reading back.
                     ask(screen, thenController = true)
+                } else if (asked != null) {
+                    // Over a box read once, the whole screen is read again as the game is by itself.
+                    endAsked()
                 } else {
                     controller.setLines(emptyList())
                     pipeline.forget()
@@ -949,6 +953,9 @@ class LfgAccessibilityService : AccessibilityService() {
     private var shooting = false
     private var askedJobs: List<Job> = emptyList()
 
+    /** The readings over a region read on every change are off it for a clean picture of it. */
+    private var regionMarksAside = false
+
     /** Whether a reading asked for is up, for the tiles. */
     private fun setAsked(next: Asked?) {
         asked?.takeIf { it !== next }?.frame?.recycle()
@@ -1004,9 +1011,25 @@ class LfgAccessibilityService : AccessibilityService() {
         // Nothing of ours may be in the picture, or on the text the tree is asked about.
         controller.clear()
         overlays.onScreen(target.displayId, false, false)
+        // Read or not, what was taken off the screen for the picture comes back: the reading's, or the game's as it was.
+        var shown = false
+        try {
+            shown = readAndShow(game, target, region, thenController)
+        } finally {
+            if (!shown && scope.isActive) overlays.onScreen(front?.displayId ?: target.displayId, true, front != null)
+        }
+    }
+
+    /** [readOnce] with ours off the screen: true once the lines read are on it, false when there were none. */
+    private suspend fun readAndShow(game: Game, target: Ordinary, region: Box?, thenController: Boolean): Boolean {
         shooting = true
         overlays.showReadButton(null)
         delay(OVERLAY_SETTLE_MS)
+        // Before Android 14 the picture is of the whole screen, which a window of ours that has just left may still show.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val wait = overlays.oursGoneAt + OURS_GONE_MS - SystemClock.uptimeMillis()
+            if (wait > 0) delay(wait)
+        }
 
         val window = windowsOnAllDisplays.let { all ->
             (0 until all.size()).asSequence().flatMap { all.valueAt(it).asSequence() }.firstOrNull { it.id == target.windowId }
@@ -1025,8 +1048,10 @@ class LfgAccessibilityService : AccessibilityService() {
             null
         }
         val reader = Readers.reader
+        // Our notice on a picture of the whole screen is not the app's text.
+        val ours = if (shot?.whole == true) listOfNotNull(overlays.noticeOn(target.displayId)) else emptyList()
         val ocrLines = if (shot?.bitmap != null && reader != null) {
-            withContext(Dispatchers.Default) { readPixels(reader, shot.bitmap, shot.offsetX, shot.offsetY, region) }
+            withContext(Dispatchers.Default) { readPixels(reader, shot.bitmap, shot.offsetX, shot.offsetY, region, ours) }
         } else {
             emptyList()
         }
@@ -1048,7 +1073,7 @@ class LfgAccessibilityService : AccessibilityService() {
                     else -> "The screen came back black: the app may block pictures of it, or it was dark. Try again when something is showing."
                 },
             )
-            return
+            return false
         }
         if (shot?.secure == true && shot.bitmap == null) toast("This app blocks pictures of its screen; only the text it shares was read.")
 
@@ -1081,6 +1106,7 @@ class LfgAccessibilityService : AccessibilityService() {
         )
         overlays.onScreen(target.displayId, true, true, asking = true, overGame = !game.app)
         if (thenController) controller.enterControllerMode()
+        return true
     }
 
     /** One region of the app read on every settled change, as a game is, until it is turned off. */
@@ -1106,8 +1132,10 @@ class LfgAccessibilityService : AccessibilityService() {
                     },
                 )
                 overlays.onScreen(r.displayId, true, true, asking = true, overGame = !r.game.app)
-                // A new subtitle ends the sound of the one before, as a line of the game's own reading does.
-                if (!r.game.app) r.appearedAtMs.maxOrNull()?.let { app.media.onNextLine(it) }
+                // A new subtitle ends the sound of the one before, as a line of the game's own reading does; a label does not.
+                if (!r.game.app) {
+                    r.appearedAtMs.filterIndexed { i, _ -> r.saved.getOrNull(i)?.interfaceText != true }.maxOrNull()?.let { app.media.onNextLine(it) }
+                }
             }
         }
         val looking = scope.launch {
@@ -1115,6 +1143,7 @@ class LfgAccessibilityService : AccessibilityService() {
             while (isActive && asked?.continuous == true) {
                 delay(INTERVAL_MS)
                 if (Readers.reader == null || controller.state.value.controllerMode) continue
+                val shotAtMs = SystemClock.uptimeMillis()
                 val shot = shoot(target, quiet = true) ?: continue
                 if (shot.secure) {
                     shot.bitmap?.recycle()
@@ -1129,6 +1158,14 @@ class LfgAccessibilityService : AccessibilityService() {
                 }
                 blackLooks = 0
                 val whole = shot.bitmap ?: continue
+                // A picture of the whole screen shows the readings over the text, which the region is watched past.
+                val drawn = if (shot.whole) overlays.drawnOn(target.displayId) else emptyList()
+                // Ours left the screen as it was taken, or a moment before, and may be in it still; or a mark or an entry
+                // came up as it was taken. Either way it is not read.
+                if (shot.whole && (if (drawn.isEmpty()) shotAtMs - overlays.oursGoneAt < OURS_GONE_MS else !overlays.onlyTextMarks)) {
+                    whole.recycle()
+                    continue
+                }
                 val left = (region.left - shot.offsetX).coerceIn(0, whole.width - 1)
                 val top = (region.top - shot.offsetY).coerceIn(0, whole.height - 1)
                 val width = (region.right - shot.offsetX).coerceIn(left + 1, whole.width) - left
@@ -1139,12 +1176,28 @@ class LfgAccessibilityService : AccessibilityService() {
                     null
                 }
                 try {
-                    if (cut != null) withContext(Dispatchers.Default) {
-                        regional.onFrame(
-                            cut, game, target.displayId, System.currentTimeMillis(), left + shot.offsetX, top + shot.offsetY,
-                            // A whole-screen picture has our notice in it.
-                            ours = if (shot.whole) listOfNotNull(overlays.noticeOn(target.displayId)) else emptyList(),
-                        )
+                    // A whole-screen picture has our notice in it.
+                    val notice = if (shot.whole) listOfNotNull(overlays.noticeOn(target.displayId)) else emptyList()
+                    if (cut != null && drawn.isNotEmpty()) {
+                        // Furigana and the known words' strokes: when the text under them changes, they go until the new
+                        // text is read, as over a game.
+                        val changed = withContext(Dispatchers.Default) {
+                            regional.watch(0L, { cut }, left + shot.offsetX, top + shot.offsetY, emptyList(), drawn + notice)
+                        }
+                        if (changed) {
+                            regionMarksAside = true
+                            overlays.textMarksAside = true
+                        }
+                    } else if (cut != null) {
+                        regional.endWatch()
+                        withContext(Dispatchers.Default) {
+                            regional.onFrame(cut, game, target.displayId, System.currentTimeMillis(), left + shot.offsetX, top + shot.offsetY, ours = notice)
+                        }
+                        // The text has held still, and was read if it was new: the readings come back over it.
+                        if (overlays.textMarksAside && !regional.settling) {
+                            regionMarksAside = false
+                            overlays.textMarksAside = false
+                        }
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "reading a region failed", e)
@@ -1164,6 +1217,11 @@ class LfgAccessibilityService : AccessibilityService() {
         askedJobs.forEach { it.cancel() }
         askedJobs = emptyList()
         setAsked(null)
+        // The readings over a region, put aside for a clean picture of it, come back over whatever is read next.
+        if (regionMarksAside) {
+            regionMarksAside = false
+            overlays.textMarksAside = false
+        }
         if (controller.state.value.controllerMode) controller.exitControllerMode()
         controller.setLines(emptyList())
         overlays.onScreen(Display.INVALID_DISPLAY, true, false)
@@ -1207,6 +1265,8 @@ class LfgAccessibilityService : AccessibilityService() {
             }
             pickingOn = display
             pickingPad = pad
+            // A reading asked for, ended just now, took LFG off the game: it is back first, so the box drawn has the controller at once.
+            if (playing != null) overlays.onScreen(playing.displayId, true, true)
             overlays.pickRegion(
                 // A box read once is none of the game's boxes.
                 display,
@@ -1272,7 +1332,8 @@ class LfgAccessibilityService : AccessibilityService() {
             is Picked.Once, is Picked.Keep -> {
                 // The lines under lookup are the game's own; the box's take their place, and lookup with them.
                 if (lookup) controller.exitControllerMode()
-                if (picked is Picked.Once) ask(picked.box, thenController = lookup) else ask((picked as Picked.Keep).box, continuous = true)
+                // Drawn with the controller, from the wheel, what is read once has the cursor too.
+                if (picked is Picked.Once) ask(picked.box, thenController = lookup || pickingPad) else ask((picked as Picked.Keep).box, continuous = true)
             }
             is Picked.ForGame -> if (picked.game.slot > 1) {
                 // Box 2 onwards is read when picked, or all the time beside the dialogue box: either way it was drawn
@@ -1354,8 +1415,8 @@ class LfgAccessibilityService : AccessibilityService() {
             if (error == ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) return Shot(null, 0, 0, secure = true)
             if (bitmap != null) return Shot(bitmap, target.bounds.left, target.bounds.top, secure = isBlack(bitmap))
         }
-        // The whole screen: nothing of ours may be drawn on it.
-        if (quiet && overlays.drawingOnGame) return null
+        // The whole screen: nothing of ours may be drawn on it but the readings over the text, which a region is watched past.
+        if (quiet && overlays.drawingOnGame && (overlays.covering || !overlays.onlyTextMarks)) return null
         val bitmap = displayScreenshot(target.displayId) ?: return null
         return Shot(bitmap, 0, 0, secure = isBlack(bitmap), whole = true)
     }
@@ -1370,8 +1431,8 @@ class LfgAccessibilityService : AccessibilityService() {
         return true
     }
 
-    /** OCR over the picture, or the part of it in [region], as lines in display pixels. */
-    private suspend fun readPixels(reader: TextReader, bitmap: Bitmap, offsetX: Int, offsetY: Int, region: Box?): List<TextLine> {
+    /** OCR over the picture, or the part of it in [region], as lines in display pixels; none that touches [ours] (display pixels). */
+    private suspend fun readPixels(reader: TextReader, bitmap: Bitmap, offsetX: Int, offsetY: Int, region: Box?, ours: List<Box> = emptyList()): List<TextLine> {
         val left = region?.let { (it.left - offsetX).coerceIn(0, bitmap.width - 1) } ?: 0
         val top = region?.let { (it.top - offsetY).coerceIn(0, bitmap.height - 1) } ?: 0
         val right = region?.let { (it.right - offsetX).coerceIn(left + 1, bitmap.width) } ?: bitmap.width
@@ -1390,7 +1451,8 @@ class LfgAccessibilityService : AccessibilityService() {
         val ja = app.settings.prefs.value.learning.japanese
         val clean = rows.mapNotNull { io.github.beesan.lfg.ocr.TextClean.line(it, ja) }.filter { it.text.isNotBlank() }
             .let { cleaned -> if (ja) cleaned.map { io.github.beesan.lfg.ocr.KanaRepair.line(it) { s -> app.dictionaries.matchLength(s) } } else cleaned }
-        return Blocks.group(clean.map { it.moved(left + offsetX, top + offsetY) }, app.settings.prefs.value.learning.spaced)
+        val placed = clean.map { it.moved(left + offsetX, top + offsetY) }.filter { line -> ours.none { it.intersects(line.box) } }
+        return Blocks.group(placed, app.settings.prefs.value.learning.spaced)
     }
 
     /** Writes a picture for a card or a kept line, beside the game's frames. */
@@ -1445,6 +1507,8 @@ class LfgAccessibilityService : AccessibilityService() {
 
     private suspend fun captureLoop() {
         var lastFront: String? = null
+        // The screen the game in front was on at the last look.
+        var lastDisplay = Display.INVALID_DISPLAY
         var missed = 0
         var ticks = 0
         var stillLooks = 0
@@ -1481,6 +1545,7 @@ class LfgAccessibilityService : AccessibilityService() {
             }
             if (now?.game?.id != lastFront) {
                 lastFront = now?.game?.id
+                lastDisplay = now?.displayId ?: Display.INVALID_DISPLAY
                 frontGame.value = now?.game
                 // The game went behind something else, or came back: the overlays follow at once.
                 val reading = pipeline.latest.value
@@ -1497,6 +1562,14 @@ class LfgAccessibilityService : AccessibilityService() {
                 if (now != null && now.game.packageName != packageName && arrivals.arrived(now.game.id, host)) {
                     app.profiles.forGame(now.game.id, host)?.let { overlays.say("Profile: ${it.shown}") }
                 }
+            } else if (now != null && now.displayId != lastDisplay) {
+                // The same game, moved to the other screen: what was read of it was where it was. The overlays go
+                // with it, and it is read afresh where it is now.
+                lastDisplay = now.displayId
+                controller.setLines(emptyList())
+                pipeline.forget()
+                pipeline.readNext()
+                overlays.onScreen(now.displayId, true, true)
             }
             // No reader, no picture: nothing is captured until something can read it.
             if (now == null || Readers.reader == null) continue

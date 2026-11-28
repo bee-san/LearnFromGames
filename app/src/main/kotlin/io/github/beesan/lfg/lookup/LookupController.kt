@@ -11,6 +11,7 @@ import io.github.beesan.lfg.core.Selectable
 import io.github.beesan.lfg.core.Selection
 import io.github.beesan.lfg.core.TextCursor
 import io.github.beesan.lfg.core.TextLine
+import io.github.beesan.lfg.core.rightToLeft
 import io.github.beesan.lfg.data.LineStore
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.KanjiEntry
@@ -19,10 +20,12 @@ import io.github.beesan.lfg.dict.WordAudio
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -139,9 +142,36 @@ class LookupController(
 
     /** What became of each word carded from each line, so its button reads the same on return. */
     private val done = HashMap<Pair<String?, String>, CardButton>()
+
+    /** The cards on their way to Anki, keyed as [done] is, once for each: a button left Adding by one come back since is Add again. */
+    private val making = ArrayList<Pair<String?, String>>()
     private var cursor: TextCursor? = null
     private var selecting: Job? = null
     private var resting: Job? = null
+
+    /**
+     * A lookup on its way, or the stick resting: the line it was asked of, that line's place among
+     * the lines then, and the character asked for. New text before it lands is followed
+     * ([setLines]); none once it has landed, or was let go.
+     */
+    private class Pending(val line: LookupLine, val index: Int, val at: Int) {
+        /** Where its line is among [lines]: the same row, its text the same up to and with the character asked for; -1 when it has gone. */
+        fun placeIn(lines: List<LookupLine>): Int {
+            val text = line.text
+            val upTo = (at + Character.charCount(text.codePointAt(at))).coerceAtMost(text.length)
+            // A line with no row (an app's, not kept) is known by its text alone.
+            fun same(other: LookupLine) =
+                (line.lineId == null || other.lineId == line.lineId) && upTo <= other.text.length && other.text.regionMatches(0, text, 0, upTo)
+            // Where it was, when it is there still: two lines alike are told apart by their places.
+            if (lines.getOrNull(index)?.let(::same) == true) return index
+            return lines.indexOfFirst(::same)
+        }
+    }
+
+    private var pending: Pending? = null
+
+    /** A game's question about its visual novel that came when its entries had gone: asked under the next entries in that game. */
+    private val heldQuestions = java.util.concurrent.ConcurrentHashMap<String, VnQuestion>()
 
     /**
      * A line read earlier that is being looked into beside the ones on screen
@@ -159,6 +189,7 @@ class LookupController(
      * New text on screen, which is read while a word is looked up too. A word
      * whose line is still there stays chosen; one whose line has gone is
      * replaced by the first word of the new text, so the entry follows the game.
+     * A word still on its way is looked up where its own line is now.
      */
     fun setLines(lines: List<LookupLine>) {
         val before = _state.value
@@ -168,6 +199,8 @@ class LookupController(
             _state.update { it.copy(lines = lines + listOfNotNull(away)) }
             return
         }
+        // A lookup still on its way, or the stick resting, follows its own line: it was asked for that word, not the one shown.
+        val asked = pending?.takeIf { !landed || resting?.isActive == true }
         val picked = before.selectedLine
         if (picked != null) {
             // The word's line as it was up to the word's end, with other lines changed around it or more
@@ -181,24 +214,47 @@ class LookupController(
                 _state.update { it.copy(lines = next, line = still) }
                 // The same lines in the same places, only more typed out: the Rights retraced by Left are kept.
                 if (cursor != null) cursor = cursorOver(next).also { fresh -> if (still == before.line) cursor?.let(fresh::carry) }
-                // A lookup still on its way, or the stick resting, would land on the line that is at the old place now.
-                if (still != before.line && (!landed || resting?.isActive == true)) {
-                    selecting?.cancel()
-                    resting?.cancel()
-                    lookUp(still, before.spanStart)
-                }
+                asked?.let { follow(it, next) }
                 return
             }
         }
         selecting?.cancel()
         resting?.cancel()
         cursor = null
-        away = null
         word = null
-        _state.value = LookupState(lines = lines, controllerMode = before.controllerMode)
+        // An earlier line looked into, its word still on its way, stays beside the new text, as it does once the entry has come.
+        away = away?.takeIf { asked?.line === it }
+        val next = lines + listOfNotNull(away)
+        _state.value = LookupState(lines = next, controllerMode = before.controllerMode)
+        // The word asked for, its line still here: looked up there, not dropped for the new text's first word.
+        val again = asked?.placeIn(next) ?: -1
+        if (asked != null && again >= 0) {
+            if (before.controllerMode) cursor = cursorOver(next)
+            lookUp(again, asked.at)
+            return
+        }
+        pending = null
         if (before.controllerMode) enterControllerMode()
         // A word chosen by touch is followed by the new text's first word too: the entry was up, and stays up.
         else if (picked != null) cursorOver(lines).first()?.let { lookUp(it.line, it.index) }
+    }
+
+    /**
+     * New lines came while [asked] was on its way: it is asked again where its line is now when that
+     * line moved or changed, let go when the line has gone, and left alone when it is as it was.
+     */
+    private fun follow(asked: Pending, lines: List<LookupLine>) {
+        val now = asked.placeIn(lines)
+        if (now == asked.index && lines[now].text == asked.line.text) return
+        val rested = resting?.isActive == true
+        selecting?.cancel()
+        resting?.cancel()
+        when {
+            now < 0 -> pending = null
+            // The stick still resting rests on its character where it is now, so a held stick is not looked up at each step.
+            rested -> rest(now, asked.at)
+            else -> lookUp(now, asked.at)
+        }
     }
 
     /**
@@ -217,6 +273,7 @@ class LookupController(
         if (away?.lineId != line.lineId || away?.text != line.text) {
             selecting?.cancel()
             resting?.cancel()
+            pending = null
             away = line
             _state.value = LookupState(lines = shown + line, controllerMode = state.controllerMode)
             if (state.controllerMode) cursor = cursorOver(_state.value.lines)
@@ -246,6 +303,7 @@ class LookupController(
         selecting?.cancel()
         word = null
         landed = false
+        pending = Pending(target, line, at)
         selecting = scope.launch {
             val entries = decorate(io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index), target.gameId) })
             val first = entries.firstOrNull()
@@ -254,8 +312,11 @@ class LookupController(
             val unknown = if (byWord) Selectable.wordEnd(target.text, index).coerceAtLeast(character) else character
             val end = if (first == null) unknown else (index + first.matched.length).coerceAtMost(target.text.length)
             landed = true
+            pending = null
+            var shown = false
             _state.update {
-                if (it.lines.getOrNull(line)?.text != target.text) return@update it
+                shown = it.lines.getOrNull(line)?.text == target.text
+                if (!shown) return@update it
                 it.copy(
                     line = line, spanStart = index, spanEnd = end, markEnd = if (selection().wholeWord) end else character,
                     entries = entries, entryIndex = 0,
@@ -264,10 +325,19 @@ class LookupController(
                     vnQuestion = null, kanjiFrom = null,
                 )
             }
-            if (first == null) return@launch
+            // Its line changed under it on the way, so none of it was shown: nothing is asked, kept or checked for it.
+            if (!shown || first == null) return@launch
             target.gameId?.let { gameId ->
-                val question = withContext(Dispatchers.IO) { vnQuestion(gameId) }
-                if (question != null) _state.update { if (it.entries === entries) it.copy(vnQuestion = question) else it }
+                // Asking marks the game asked, so the question is kept as soon as it comes, whatever this lookup meets
+                // meanwhile (let go on the way back, its answer would be lost), and shown under these entries or the
+                // next in this game; once shown it is let go.
+                val question = heldQuestions[gameId]
+                    ?: withContext(NonCancellable + Dispatchers.IO) { vnQuestion(gameId)?.also { heldQuestions[gameId] = it } }
+                if (question != null && isActive) {
+                    var asked = false
+                    _state.update { asked = it.entries === entries; if (asked) it.copy(vnQuestion = question) else it }
+                    if (asked) heldQuestions.remove(gameId, question)
+                }
             }
             target.lineId?.let { store.recordLookup(it, first.expression, first.reading) }
             // Every entry shows its own button, so each is checked; the first is looked at first.
@@ -286,6 +356,8 @@ class LookupController(
         val before = _state.value
         val line = before.selectedLine ?: return
         selecting?.cancel()
+        // A word on its way is let go for the kanji of the one shown.
+        pending = null
         selecting = scope.launch {
             val entries = lookupKanji(kanji)
             val shown = _state.value
@@ -317,7 +389,11 @@ class LookupController(
         _state.update {
             it.copy(
                 entries = back.entries, entryIndex = back.entryIndex,
-                buttons = back.entries.mapIndexed { i, e -> done[lineId to e.expression] ?: back.buttons.getOrElse(i) { CardButton.ADD } },
+                buttons = back.entries.mapIndexed { i, e ->
+                    val key = lineId to e.expression
+                    // Left Adding by a card that has come back since, and failed: it can be asked for again.
+                    done[key] ?: back.buttons.getOrElse(i) { CardButton.ADD }.let { b -> if (b == CardButton.ADDING && key !in making) CardButton.ADD else b }
+                },
                 message = null, vnQuestion = null, kanjiFrom = null,
             )
         }
@@ -411,50 +487,63 @@ class LookupController(
         setButtons(entry.expression, CardButton.ADDING)
         heard(Heard.CARD_ASKED)
         _state.update { it.copy(message = null) }
+        val kanji = state.kanjiFrom != null
+        // As [done] has it: a kanji's card apart from the one-kanji word's.
+        val headword = if (kanji) KANJI + entry.expression else entry.expression
+        val asked = shown.lineId to headword
+        making += asked
         scope.launch {
-            val line = if (shown.lineId != null) shown else prepare(shown).also { ready ->
-                // The line has its row now: a second card from it goes to the same one.
-                _state.update { s -> s.copy(lines = s.lines.map { if (it === shown) ready else it }) }
-            }
-            val lineId = line.lineId ?: run {
-                heard(Heard.CARD_FAILED)
-                setButtons(entry.expression, CardButton.ADD, message = "The line could not be saved.")
-                return@launch
-            }
-            val kanji = state.kanjiFrom != null
-            val content = CardContent(
-                expression = entry.expression,
-                reading = if (kanji) KanjiEntry.reading(entry) else entry.reading,
-                sentence = line.text,
-                // The entry picked marks as much of the sentence as it matched, not the first entry's whole span.
-                spanStart = state.spanStart,
-                spanEnd = if (kanji || entry.matched.isEmpty()) state.spanEnd else (state.spanStart + entry.matched.length).coerceAtMost(line.text.length),
-                senses = if (kanji) KanjiEntry.senses(entry) else entry.senses(),
-                pitchPositions = Pronunciation.accents(entry).map { it.position },
-                frequencyRank = Pronunciation.frequencyRank(entry),
-                gameName = line.gameName, picturePath = line.framePath, lineStartMs = line.appearedAtMs.takeUnless { line.fromApp },
-                fromApp = line.fromApp, kanji = kanji,
-            )
-            val result = cards.add(lineId, content)
-            val key = lineId to (if (kanji) KANJI + entry.expression else entry.expression)
-            when (result) {
-                is CardResult.Added, CardResult.Duplicate -> done[key] = CardButton.IN_ANKI
-                is CardResult.Waiting -> done[key] = CardButton.WAITING
-                is CardResult.Failed -> Unit
-            }
-            // Heard whichever word is shown by now: the card was made, or was not.
-            when (result) {
-                is CardResult.Added, is CardResult.Waiting -> heard(Heard.CARD_MADE)
-                is CardResult.Failed -> heard(Heard.CARD_FAILED)
-                CardResult.Duplicate -> Unit
-            }
-            // The reply may arrive after another word was chosen; that word's buttons are left alone.
-            if (_state.value.selectedLine?.lineId != lineId) return@launch
-            when (result) {
-                is CardResult.Added -> setButtons(entry.expression, CardButton.IN_ANKI, message = "Card added")
-                CardResult.Duplicate -> setButtons(entry.expression, CardButton.IN_ANKI)
-                is CardResult.Waiting -> setButtons(entry.expression, CardButton.WAITING, message = result.reason + " The card is kept here until it is.")
-                is CardResult.Failed -> setButtons(entry.expression, CardButton.ADD, message = result.reason)
+            var saved: Pair<String?, String>? = null
+            try {
+                val line = if (shown.lineId != null) shown else prepare(shown).also { ready ->
+                    // The line has its row now: a second card from it goes to the same one.
+                    _state.update { s -> s.copy(lines = s.lines.map { if (it === shown) ready else it }) }
+                }
+                val lineId = line.lineId ?: run {
+                    heard(Heard.CARD_FAILED)
+                    if ((_state.value.kanjiFrom != null) == kanji) setButtons(entry.expression, CardButton.ADD, message = "The line could not be saved.")
+                    return@launch
+                }
+                saved = (lineId to headword).takeIf { it != asked }?.also { making += it }
+                val content = CardContent(
+                    expression = entry.expression,
+                    reading = if (kanji) KanjiEntry.reading(entry) else entry.reading,
+                    sentence = line.text,
+                    // The entry picked marks as much of the sentence as it matched, not the first entry's whole span.
+                    spanStart = state.spanStart,
+                    spanEnd = if (kanji || entry.matched.isEmpty()) state.spanEnd else (state.spanStart + entry.matched.length).coerceAtMost(line.text.length),
+                    senses = if (kanji) KanjiEntry.senses(entry) else entry.senses(),
+                    pitchPositions = Pronunciation.accents(entry).map { it.position },
+                    frequencyRank = Pronunciation.frequencyRank(entry),
+                    gameName = line.gameName, picturePath = line.framePath, lineStartMs = line.appearedAtMs.takeUnless { line.fromApp },
+                    fromApp = line.fromApp, kanji = kanji,
+                )
+                val result = cards.add(lineId, content)
+                val key = lineId to headword
+                when (result) {
+                    is CardResult.Added, CardResult.Duplicate -> done[key] = CardButton.IN_ANKI
+                    is CardResult.Waiting -> done[key] = CardButton.WAITING
+                    is CardResult.Failed -> Unit
+                }
+                // Heard whichever word is shown by now: the card was made, or was not.
+                when (result) {
+                    is CardResult.Added, is CardResult.Waiting -> heard(Heard.CARD_MADE)
+                    is CardResult.Failed -> heard(Heard.CARD_FAILED)
+                    CardResult.Duplicate -> Unit
+                }
+                // The reply may arrive after another word was chosen, or with the other kind of entry up (the word's,
+                // or one of its kanji's, which share a spelling): those buttons are left alone.
+                val now = _state.value
+                if (now.selectedLine?.lineId != lineId || (now.kanjiFrom != null) != kanji) return@launch
+                when (result) {
+                    is CardResult.Added -> setButtons(entry.expression, CardButton.IN_ANKI, message = "Card added")
+                    CardResult.Duplicate -> setButtons(entry.expression, CardButton.IN_ANKI)
+                    is CardResult.Waiting -> setButtons(entry.expression, CardButton.WAITING, message = result.reason + " The card is kept here until it is.")
+                    is CardResult.Failed -> setButtons(entry.expression, CardButton.ADD, message = result.reason)
+                }
+            } finally {
+                making -= asked
+                saved?.let { making -= it }
             }
         }
     }
@@ -463,6 +552,8 @@ class LookupController(
     fun clear() {
         selecting?.cancel()
         resting?.cancel()
+        // A lookup let go is never asked again for new text.
+        pending = null
         word = null
         _state.update {
             // The earlier line looked into goes with its word: the lines are the screen's again.
@@ -534,7 +625,19 @@ class LookupController(
         // A language looked up from the word's start takes any letter of a word back to its first: a step
         // inside the word would come back where it began, so right goes on past the word, by stick too.
         val wordEnd = if (selection().wordStart) state.lines.getOrNull(state.line)?.text?.let { Selectable.wordEnd(it, state.spanStart) } ?: 0 else 0
-        val to = when (move) {
+        // In a row written right to left the arrows go the way they point on screen, as in Android's own text fields:
+        // there Left goes on through the text and Right back.
+        val here = state.lines[state.line]
+        val way = if (here.geometry?.vertical != true && rightToLeft(here.text)) {
+            when (move) {
+                Move.LEFT -> Move.RIGHT
+                Move.RIGHT -> Move.LEFT
+                else -> move
+            }
+        } else {
+            move
+        }
+        val to = when (way) {
             // The stick past the word too, but it never goes round the ends: only the D-pad does.
             Move.RIGHT -> if (wordEnd > state.spanStart) {
                 if (stick) cursor.stickRight(from, maxOf(matchedEnd, wordEnd)) else cursor.right(from, maxOf(matchedEnd, wordEnd))
@@ -561,9 +664,18 @@ class LookupController(
                 entries = emptyList(), entryIndex = 0, message = null, buttons = emptyList(), kanjiFrom = null,
             )
         }
+        rest(to.line, to.index)
+    }
+
+    /**
+     * The stick has stopped on [at] of line [line]: its word is looked up once it has rested there
+     * [STICK_REST_MS]. Until then it is a lookup on its way, which new text is followed for.
+     */
+    private fun rest(line: Int, at: Int) {
+        pending = _state.value.lines.getOrNull(line)?.let { Pending(it, line, at) }
         resting = scope.launch {
             delay(STICK_REST_MS)
-            lookUp(to.line, to.index)
+            lookUp(line, at)
         }
     }
 

@@ -372,7 +372,7 @@ object EntryHtml {
      * (`@font-face`, `@import`) are dropped.
      */
     fun scope(css: String, dictionary: String): String {
-        val prefix = "[data-dictionary=\"" + dictionary.replace("\\", "\\\\").replace("\"", "\\\"") + "\"]"
+        val prefix = "[data-dictionary=\"" + cssString(dictionary) + "\"]"
         val text = css.replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), "").replace("</", "<\\/")
         val out = StringBuilder()
         var i = 0
@@ -392,6 +392,22 @@ object EntryHtml {
             i = close + 1
         }
         return out.toString()
+    }
+
+    /**
+     * [text] inside a CSS string: quotes and backslashes escaped, and `<` and line breaks as CSS escapes, so a
+     * dictionary's title can end neither the string nor the page's style element.
+     */
+    private fun cssString(text: String): String = buildString(text.length) {
+        for (c in text) when (c) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '<' -> append("\\3c ")
+            '\n' -> append("\\a ")
+            '\r' -> append("\\d ")
+            '\u000c' -> append("\\c ")
+            else -> append(c)
+        }
     }
 
     private fun matching(text: String, open: Int): Int {

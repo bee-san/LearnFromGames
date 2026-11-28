@@ -53,10 +53,18 @@ object Pronunciation {
 
     /** Yomitan's average: the floored harmonic mean of each ranking dictionary's first value. */
     fun frequencyRank(entry: Entry): Int? {
-        val firsts = entry.frequencies.filter { !it.occurrence }.mapNotNull { f -> f.values.firstOrNull()?.value?.takeIf { it > 0 } }
+        val firsts = entry.frequencies.filter { !it.occurrence }.mapNotNull { f -> f.values.firstOrNull()?.let(::rank)?.takeIf { it > 0 } }
         if (firsts.isEmpty()) return null
         return (firsts.size / firsts.sumOf { 1.0 / it }).toInt()
     }
+
+    /**
+     * A figure as a rank. One that Rubi's dictionary lends a spelling from its kana form is listed past every rank of
+     * its own, so that it sorts after them ([VjdictImport.BORROWED_AFTER]); it counts as the rank it shows.
+     */
+    private fun rank(figure: FrequencyValue): Int =
+        if (figure.value >= VjdictImport.BORROWED_AFTER && figure.display.endsWith(VjdictImport.LENT_MARK)) figure.value - VjdictImport.BORROWED_AFTER
+        else figure.value
 
     /** Accents and frequencies on one line, for views that have no room for tags: `中高 2 · JPDB 1234`. */
     fun summary(entry: Entry): String = (

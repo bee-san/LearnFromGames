@@ -13,6 +13,7 @@ import io.github.beesan.lfg.dict.Pitch
 import io.github.beesan.lfg.dict.PitchValue
 import io.github.beesan.lfg.dict.Pronunciation
 import io.github.beesan.lfg.dict.Pronunciation.Kind
+import io.github.beesan.lfg.dict.VjdictImport
 import io.github.beesan.lfg.dict.WordAudio
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -104,6 +105,18 @@ class PronunciationTest {
         val e = Entry(frequencies = listOf(Frequency("A", listOf(FrequencyValue(100), FrequencyValue(9))), Frequency("B", listOf(FrequencyValue(300)))))
         assertEquals(150, Pronunciation.frequencyRank(e))
         assertNull(Pronunciation.frequencyRank(Entry()))
+    }
+
+    @Test
+    fun aRankLentFromTheKanaFormCountsAsTheRankItShows() {
+        // Rubi's converted dictionary lists 上手い's rank, lent from うまい, past every rank of its own.
+        val lent = Frequency("Bee", listOf(FrequencyValue(VjdictImport.BORROWED_AFTER + 1500, "1500" + VjdictImport.LENT_MARK)))
+        assertEquals(1500, Pronunciation.frequencyRank(Entry(frequencies = listOf(lent))))
+        assertEquals(2000, Pronunciation.frequencyRank(Entry(frequencies = listOf(lent, Frequency("Jiten", listOf(FrequencyValue(3000)))))))
+        // A figure that large without the mark is taken as it is, and so is a small one with it (JPDB's kana ranks).
+        val plain = Frequency("X", listOf(FrequencyValue(VjdictImport.BORROWED_AFTER + 1500, "")))
+        assertEquals(VjdictImport.BORROWED_AFTER + 1500, Pronunciation.frequencyRank(Entry(frequencies = listOf(plain))))
+        assertEquals(1234, Pronunciation.frequencyRank(Entry(frequencies = listOf(Frequency("JPDB", listOf(FrequencyValue(1234, "1234㋕")))))))
     }
 
     @Test

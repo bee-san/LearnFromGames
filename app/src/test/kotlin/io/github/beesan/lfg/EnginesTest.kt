@@ -195,6 +195,25 @@ class EnginesTest {
         assertNull(SampleRing(10).clip(0, 1000, 100))
     }
 
+    @Test
+    fun aNewRecordersSoundGoesOverWhatTheOldOneGaveAlready() {
+        // 100 samples a second, sample n heard at n × 10 ms. The old recorder gave sound to 3 000 ms; the new one
+        // began at 2 500 ms, so it gives that half second again before going on.
+        val ring = SampleRing(capacity = 1000)
+        ring.write(ShortArray(300) { it.toShort() }, 300, endMs = 3_000)
+        ring.rewind(500, 100)
+        ring.write(ShortArray(100) { (250 + it).toShort() }, 100, endMs = 3_500)
+        assertArrayEquals(ShortArray(350) { it.toShort() }, ring.clip(0, 3_500, 100))
+        assertArrayEquals(ShortArray(100) { (200 + it).toShort() }, ring.clip(2_000, 3_000, 100))
+        // No more is taken back than is held, and what the taken back samples were written over stays gone.
+        val small = SampleRing(capacity = 100)
+        small.write(ShortArray(250) { it.toShort() }, 250, endMs = 2_500)
+        small.rewind(300, 100)
+        assertArrayEquals(ShortArray(70) { (150 + it).toShort() }, small.clip(0, 2_500, 100))
+        small.rewind(10_000, 100)
+        assertNull(small.clip(0, 2_500, 100))
+    }
+
     // ── entries as HTML ──────────────────────────────────────────────────────
 
     private val sense = """[{"content":{"content":[{"content":"to see","tag":"li"},{"content":"to look","tag":"li"}],"data":{"content":"glossary"},"lang":"en","style":{"listStyleType":"circle"},"tag":"ul"},"type":"structured-content"}]"""

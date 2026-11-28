@@ -143,6 +143,12 @@ class LineSorter {
     /** Whether the reading before this one was a menu's screen. */
     private var menuBefore = false
 
+    /** For each part [sort] last gave, whether it was new or grown: what [shown] learns [fresh] from. */
+    private var made: List<List<Boolean>> = emptyList()
+
+    /** The rows the reading before made or grew: only these take a clearer reading of themselves. */
+    private var fresh: Set<String> = emptySet()
+
     /**
      * What each of [pieces] is. [recent] is the game's last [RECENT] lines,
      * newest first, and [known] its interface text. [apart]: whether interface
@@ -151,7 +157,9 @@ class LineSorter {
      * would otherwise be taken for a menu's, so a page of an old backlog is
      * not. [places] is where each piece is on screen, when that is known.
      * [recheck]: this is the text of the reading before read again, more
-     * clearly; a piece still on screen and read otherwise is corrected.
+     * clearly; a piece still on screen and read otherwise is corrected, if
+     * the reading before made or grew its row. An old line a backlog shows
+     * again keeps its text and its picture.
      * [drawn]: the pieces in a box the player drew beside box 1, which are
      * lines whatever else is on screen: they are never a menu's, and do not
      * count towards a crowd that would make the story's line one.
@@ -257,12 +265,19 @@ class LineSorter {
             val interfaceText = apart && (crowd || (menu && i in menus))
             parts[i] = listOf(Part.New(0, pieces[i].length, interfaceText))
         }
-        return Sorted(parts.map { it!! }, menu)
+        val sorted = Sorted(parts.map { it!! }, menu)
+        made = sorted.parts.map { list -> list.map { it !is Part.Same } }
+        return sorted
     }
 
     /** What [sort]'s answer came to: each piece's parts and the rows they are kept in now, and where each piece is. */
     fun shown(pieces: List<String>, held: List<List<Held>>, menu: Boolean, places: List<Box>? = null) {
         val now = pieces.indices.map { Shown(pieces[it], held[it], places?.getOrNull(it)) }
+        // Held is part for part what sort gave: the rows of its new and grown parts are the ones just made.
+        fresh = held.withIndex().flatMapTo(HashSet()) { (i, parts) ->
+            parts.filterIndexed { k, _ -> made.getOrNull(i)?.getOrNull(k) == true }.map { it.id }
+        }
+        made = emptyList()
         before = now
         menuBefore = menu
         if (!menu) story = now
@@ -276,6 +291,8 @@ class LineSorter {
         before = null
         menuBefore = false
         story = emptyList()
+        made = emptyList()
+        fresh = emptySet()
     }
 
     /** The one of [shown] that [text] is: the very text if it is among them, else one a character off. */
@@ -294,10 +311,14 @@ class LineSorter {
         return over(shown, text, text.size).map { (from, to, id) -> Part.Same(text.start(from), text.end(to), id) }
     }
 
-    /** [text] is [shown] read again, more clearly: its row takes the new reading. Null when there is nothing to correct. */
+    /**
+     * [text] is [shown] read again, more clearly: its row takes the new reading. Null when there is nothing to correct,
+     * and for a row the reading before did not make or grow: an old line shown again was read well when it was kept.
+     */
     private fun corrected(shown: Shown, text: Squeezed): List<Part>? {
         if (shown.text == text.raw || shown.flagged) return null
         val held = shown.parts.singleOrNull() ?: return null
+        if (held.id !in fresh) return null
         val head = head(shown, held) ?: return null
         return listOf(Part.Grown(0, text.raw.length, held.id, head))
     }
@@ -372,7 +393,8 @@ class LineSorter {
         val cuts = ArrayList<Triple<Int, Int, String>>()
         var pos = 0
         for ((k, part) in shown.parts.withIndex()) {
-            val length = if (k == shown.parts.lastIndex) -1 else prefixEnd(text, pos, Squeezed(part.text))
+            // Found by what the screen showed of it: its row may hold more, as the line a box scrolled up does.
+            val length = if (k == shown.parts.lastIndex) -1 else prefixEnd(text, pos, Squeezed(shown.text.substring(part.from, part.to)))
             // A part that cannot be found again takes what is left, with the parts after it.
             if (length <= 0 || pos + length >= end) {
                 cuts += Triple(pos, end, part.id)

@@ -334,10 +334,11 @@ object WheelAim {
     /**
      * The slice of [count] that a push to ([x], [y]) points at, y growing
      * downwards, counted clockwise from straight up; null while it is nearer
-     * the middle than [dead].
+     * the middle than [dead], and on a wheel with no slices.
      */
     fun slice(x: Float, y: Float, count: Int, dead: Float = DEAD): Int? {
-        if (x * x + y * y < dead * dead) return null
+        // A wheel with no tiles yet (a new one, or one emptied in Settings) has nothing to point at.
+        if (count <= 0 || x * x + y * y < dead * dead) return null
         val degrees = Math.toDegrees(atan2(x.toDouble(), -y.toDouble()))
         // Each slice is centred on its way, so a push half a slice either side of it is still that slice.
         val turned = (degrees + 360.0 + 180.0 / count) % 360.0

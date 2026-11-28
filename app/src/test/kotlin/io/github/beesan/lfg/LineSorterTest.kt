@@ -551,6 +551,28 @@ class LineSorterTest {
     }
 
     @Test
+    fun aRowScrolledUpIsFoundAgainWhenTheBoxIsReadOtherwise() {
+        // Pokémon's box of two rows: the row scrolled up ends the line before, the row under it is the next line.
+        val one = "ここはマサラタウン。"
+        val two = "まっしろなはじまりのいろ。"
+        val three = "あたらしいたびが はじまる。"
+        val four = "マサラタウンを でよう。"
+        val game = Game()
+        game.read(one + two)
+        val scrolled = game.read(two + three)
+        // The same box read again, its space left out: still the two lines it was, and the next scroll adds only what is new.
+        assertEquals(scrolled, game.read(two + three.replace(" ", "")))
+        game.read(three + four)
+        assertEquals(listOf(one + two, three, four), game.lines)
+        // Caught half typed after the scroll, the new line grows; the line scrolled up stays as it was.
+        val typed = Game()
+        typed.read(one + two)
+        typed.read(two + three.take(5))
+        typed.read(two + three)
+        assertEquals(listOf(one + two, three), typed.lines)
+    }
+
+    @Test
     fun aSentenceThatRunsOnIntoTheNextBoxIsOneLine() {
         val game = Game()
         val box = listOf(Box(100, 800, 1500, 950))
@@ -578,6 +600,17 @@ class LineSorterTest {
         val first = checked.read(faded)
         assertEquals(first, checked.readAt(listOf(clear), recheck = true))
         assertEquals(listOf(clear), checked.lines)
+    }
+
+    @Test
+    fun aBacklogReadAgainMoreClearlyLeavesItsOldLinesAsTheyWere() {
+        val game = Game()
+        val read = talk.map { game.read(it).single() }
+        assertEquals(read, game.read(*talk.toTypedArray()))
+        // Held still, the backlog is read once more and an old line comes out a character otherwise: it was read well when it was kept.
+        val misread = talk.map { if (it == talk[0]) it.replace('気', '汽') else it }
+        assertEquals(read, game.readAt(misread, recheck = true))
+        assertEquals(talk, game.lines)
     }
 
     @Test

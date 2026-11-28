@@ -44,6 +44,7 @@ import io.github.beesan.lfg.lookup.LookupController
 import io.github.beesan.lfg.lookup.LookupLine
 import io.github.beesan.lfg.ocr.ModelState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -169,8 +170,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsState())
 
-    /** Lookup in a stored line, for a card made after the session. */
-    val lineLookup = LookupController(viewModelScope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) }, selection = { app.settings.prefs.value.picking },
+    /** Lookup in a stored line, for a card made after the session, or in a word typed on Search. */
+    val lineLookup = LookupController(viewModelScope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) },
+        prepare = ::searchLine, selection = { app.settings.prefs.value.picking },
         vnQuestion = { app.characterNames.question(it) }, vnAnswer = { question, yes -> app.characterNames.answer(question, yes) },
         lookupKanji = { app.dictionaries.lookupKanji(it, app.settings.prefs.value.kanjiDictionary) },
         // A card that fails from a page is heard as over a game; the page's own buttons already click.
@@ -541,8 +543,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun search(text: String) {
         opened = null
         val word = text.trim()
-        lineLookup.setLines(if (word.isEmpty()) emptyList() else listOf(LookupLine(word, null, null, "")))
+        lineLookup.setLines(if (word.isEmpty()) emptyList() else listOf(LookupLine(word, null, null, "", fromApp = true, source = LineStore.SOURCE_SELECTION)))
         if (word.isNotEmpty()) lineLookup.select(0, 0)
+    }
+
+    /**
+     * A card needs its line: a word typed on Search is kept as a line when a card is made of it, and not before, under
+     * an app of its own. Not under LFG's own name, which is the tutorial's.
+     */
+    private suspend fun searchLine(line: LookupLine): LookupLine = withContext(Dispatchers.IO) {
+        val game = app.lines.gameFor("${app.packageName}.search", "Search", app = true)
+        line.copy(lineId = app.lines.saveLine(game, line.text, LineStore.SOURCE_SELECTION).id, gameName = game.title, gameId = game.id)
     }
 
     // ── backup ───────────────────────────────────────────────────────────────
@@ -647,9 +658,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val prefs = app.settings.prefs.value
-                if (prefs.backupFolder.isNotEmpty()) {
+                // A folder that can't be written to (its leave gone, the card out) keeps the copy in the app's own files instead.
+                val inFolder = prefs.backupFolder.isNotEmpty() && try {
                     Backup.toFolder(app, app.database, prefs.copy(backupKeep = 0, gsmFile = false))
-                } else {
+                    true
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("LfgBackup", "what is here could not go to the backup folder", e)
+                    false
+                }
+                if (!inFolder) {
                     val dir = File(app.filesDir, "backups").apply { mkdirs() }
                     File(dir, Backup.fileName()).outputStream().use { Backup.write(app, app.database, it, prefs.backupPictures) }
                 }
@@ -726,8 +745,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Recap opens on the game read last, and writes the story on when something has been read since the kept recap. */
     fun openRecap() = recapGame(lines.value.firstOrNull()?.gameId ?: games.value.firstOrNull()?.id)
 
+    /** The recap being written for each game: the page opened again meanwhile waits for that one, and asks for no other. */
+    private val recapsWriting = HashMap<String, Job>()
+
+    private fun writingRecap(gameId: String) = recapsWriting[gameId]?.isActive == true
+
     fun recapGame(gameId: String?) {
-        _recap.value = RecapState(gameId)
+        // One still being written for the game shows as being written.
+        _recap.value = RecapState(gameId, busy = gameId != null && writingRecap(gameId))
         if (gameId == null) return
         viewModelScope.launch {
             val row = app.database.recaps().latest(gameId)
@@ -739,24 +764,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun writeRecap() {
         val gameId = _recap.value.gameId ?: return
-        if (_recap.value.busy) return
+        if (_recap.value.busy || writingRecap(gameId)) return
         val name = games.value.firstOrNull { it.id == gameId }?.title.orEmpty()
         _recap.update { it.copy(busy = true, error = null) }
-        viewModelScope.launch {
-            try {
-                show(gameId, app.recapper.write(gameId, name))
+        recapsWriting[gameId] = viewModelScope.launch {
+            val row = try {
+                app.recapper.write(gameId, name)
             } catch (e: OpenRouter.Failure) {
+                recapsWriting.remove(gameId)
                 _recap.update { if (it.gameId == gameId) it.copy(busy = false, error = e.message) else it }
+                return@launch
             }
+            // Done before it is shown, so the page no longer waits on it.
+            recapsWriting.remove(gameId)
+            show(gameId, row)
         }
     }
 
     private fun show(gameId: String, row: RecapRow?) = _recap.update {
         if (it.gameId != gameId) return@update it
-        if (row == null) return@update it.copy(busy = false)
+        // While one is being written for the game, the page still says so.
+        val busy = writingRecap(gameId)
+        if (row == null) return@update it.copy(busy = busy)
         it.copy(
             recap = Json.decodeFromString<Recap>(row.json), lineCount = row.lineCount, model = row.model,
-            writtenAt = row.createdAt, busy = false,
+            writtenAt = row.createdAt, busy = busy,
         )
     }
 

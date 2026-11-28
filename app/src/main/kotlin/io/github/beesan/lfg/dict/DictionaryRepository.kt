@@ -115,8 +115,9 @@ class DictionaryRepository(
         if (text.isEmpty()) return@withContext emptyList()
         val handle = openSession(vndb)
         if (handle == 0L) return@withContext emptyList()
-        // The engine scans at most this many characters ahead; no word is longer.
-        val scan = text.take(SCAN_LENGTH)
+        // The engine scans SCAN_LENGTH characters for a word, and on past them for the few longer words a dictionary
+        // holds, which it can find only in the text it is given.
+        val scan = ahead(text)
         val json = io.github.beesan.lfg.core.Perf.measure("lookup.native") { Hoshidicts.lookup(handle, scan, maxResults, SCAN_LENGTH, tag()) }
         io.github.beesan.lfg.core.Perf.measure("lookup.decode") { counted(DictJson.decodeFromString<LookupResponse>(json).results) }
     }
@@ -182,7 +183,7 @@ class DictionaryRepository(
     suspend fun matchLength(text: String, vndb: String? = null): Int = withContext(native) {
         if (text.isEmpty()) return@withContext 0
         val handle = openSession(vndb)
-        if (handle == 0L) 0 else io.github.beesan.lfg.core.Perf.measure("match") { Hoshidicts.matchLength(handle, text.take(SCAN_LENGTH), SCAN_LENGTH, tag()) }
+        if (handle == 0L) 0 else io.github.beesan.lfg.core.Perf.measure("match") { Hoshidicts.matchLength(handle, ahead(text), SCAN_LENGTH, tag()) }
     }
 
     /**
@@ -286,39 +287,49 @@ class DictionaryRepository(
     }
 
     /**
-     * Imports a Yomitan zip the user picked. Returns null on success, or what
-     * went wrong in words.
+     * Imports a Yomitan zip the user picked, or a visual novel's names ([vndb]).
+     * Returns null on success, or what went wrong in words.
      */
     suspend fun addFromZip(zip: File, vndb: String? = null): String? = installing.withLock {
         // The language it is added under is the one when it was asked for, even if that changes during a long import.
         val lang = tag()
+        // Imported beside the dictionaries, not among them: the same dictionary added again, or a visual novel's names
+        // built again, stays whole and in use until the new one is, and an import that fails takes nothing with it.
+        val staging = File(context.filesDir, "dictionaries-adding")
         try {
-            if (vndb != null) {
-                // A rebuild replaces the old one, which may have had another title.
-                val old = installedOf(lang).filter { it.vndb == vndb }
-                if (old.isNotEmpty()) {
-                    save(installedOf(lang) - old.toSet(), lang)
-                    withContext(Dispatchers.IO) { old.forEach { File(it.path).deleteRecursively() } }
+            withContext(Dispatchers.IO) { staging.deleteRecursively() }
+            val outcome = importZip(zip, staging)
+            if (!outcome.success || outcome.title.isEmpty()) return outcome.error.ifEmpty { "This is not a Yomitan dictionary." }
+            if (outcome.terms + outcome.frequencies + outcome.pitches + outcome.kanji == 0L) return "The dictionary is empty."
+            val staged = File(staging, folderName(outcome.title))
+            if (outcome.frequencies > 0) withContext(Dispatchers.IO) { ranksIfSo(zip, staged) }
+            // It takes the place of the one of its title, and of the visual novel's old names, which may have had another.
+            val replaces = { d: InstalledDictionary -> d.title == outcome.title || (vndb != null && d.vndb == vndb) }
+            // One turn of the thread lookups run on: no session holds the old files while they go, nor opens on the list
+            // before it names the new one. Once begun it is finished, so a cancel cannot leave the files and the list apart.
+            val moved = withContext(NonCancellable + native) {
+                closeSession()
+                installedOf(lang).filter(replaces).forEach { ownFolder(it.path)?.deleteRecursively() }
+                val home = folderOf(outcome.title)
+                home.deleteRecursively()
+                // The first dictionary added by hand finds no dictionaries' folder yet.
+                root.mkdirs()
+                if (staged.renameTo(home)) {
+                    register(outcome, vndb, lang, replaces)
+                    true
+                } else {
+                    // The old ones are gone either way.
+                    save(installedOf(lang).filterNot(replaces), lang)
+                    false
                 }
             }
-            // The same dictionary added again is written over in place: no session may have its files mapped meanwhile,
-            // so they are closed in the same turn of the one thread lookups run on as the import itself.
-            val outcome = withContext(native) {
-                closeSession()
-                importZip(zip)
-            }
-            if (!outcome.success || outcome.title.isEmpty()) return outcome.error.ifEmpty { "This is not a Yomitan dictionary." }
-            if (outcome.terms + outcome.frequencies + outcome.pitches + outcome.kanji == 0L) {
-                folderOf(outcome.title).deleteRecursively()
-                return "The dictionary is empty."
-            }
-            if (outcome.frequencies > 0) withContext(Dispatchers.IO) { ranksIfSo(zip, folderOf(outcome.title)) }
-            register(outcome, vndb, lang)
-            null
+            if (moved) null else "The dictionary could not be put in place."
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             e.message ?: "The dictionary could not be imported."
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) { staging.deleteRecursively() }
         }
     }
 
@@ -373,9 +384,11 @@ class DictionaryRepository(
         val all = installed()
         val gone = all.firstOrNull { it.title == title } ?: return
         save(all - gone)
-        // Only ever a folder inside the dictionaries' own, never that folder or one outside it.
-        withContext(Dispatchers.IO) { File(gone.path).takeIf { it.canonicalFile.parentFile == root.canonicalFile }?.deleteRecursively() }
+        withContext(Dispatchers.IO) { ownFolder(gone.path)?.deleteRecursively() }
     }
+
+    /** The folder at [path] when it is one inside the dictionaries' own: never that folder itself, nor one outside it. */
+    private fun ownFolder(path: String): File? = File(path).takeIf { it.canonicalFile.parentFile == root.canonicalFile }
 
     /** [all] are the dictionaries of the language being learnt, in their order; the other languages' are kept as they are. */
     private suspend fun save(all: List<InstalledDictionary>, tag: String = tag()) {
@@ -604,7 +617,16 @@ class DictionaryRepository(
         DictJson.decodeFromString<ImportOutcome>(Hoshidicts.import(zip.path, into.path, lowRam = false))
     }
 
-    private suspend fun register(outcome: ImportOutcome, vndb: String? = null, tag: String = tag()) {
+    /**
+     * Lists the dictionary [outcome] made in the place of the first one it [replaces], those gone, so one added again
+     * keeps its place in the order entries show in. A new one goes last.
+     */
+    private suspend fun register(
+        outcome: ImportOutcome,
+        vndb: String? = null,
+        tag: String = tag(),
+        replaces: (InstalledDictionary) -> Boolean = { it.title == outcome.title },
+    ) {
         val added = InstalledDictionary(
             title = outcome.title,
             path = folderOf(outcome.title).path,
@@ -617,7 +639,7 @@ class DictionaryRepository(
             language = tag,
         )
         modes.remove(added.path)
-        save(installedOf(tag).filter { it.title != added.title } + added, tag)
+        save(inPlace(installedOf(tag), added, replaces), tag)
     }
 
     private fun download(name: String, url: String, minBytes: Long, to: File, report: (DictState) -> Unit) {
@@ -667,12 +689,31 @@ class DictionaryRepository(
             return folder + " #%08x".format(hash)
         }
 
+        /**
+         * As much of [text] as a lookup gives the engine: up to [LOOK_AHEAD] code points, cut between two of them,
+         * never inside a surrogate pair. It scans [SCAN_LENGTH], and further only where a longer word begins.
+         */
+        internal fun ahead(text: String): String =
+            if (text.codePointCount(0, text.length) <= LOOK_AHEAD) text else text.substring(0, text.offsetByCodePoints(0, LOOK_AHEAD))
+
+        /** [all] with [added] in the place of the first one it [replaces], those gone; last when it replaces none. */
+        internal fun inPlace(all: List<InstalledDictionary>, added: InstalledDictionary, replaces: (InstalledDictionary) -> Boolean): List<InstalledDictionary> {
+            val at = all.indexOfFirst(replaces)
+            val kept = all.filterNot(replaces)
+            return if (at < 0) kept + added else kept.toMutableList().apply { add(at, added) }
+        }
+
         private const val KEY_INSTALLED = "installed"
         private const val KEY_DEFAULTS_PENDING = "defaults_pending"
         private const val KEY_UPDATES_CHECKED = "updates_checked"
         private const val KEY_UPDATE_SKIPPED = "update_skipped:"
         private const val TAG = "LfgDictionaries"
+
+        /** How many characters the engine scans for a word. */
         private const val SCAN_LENGTH = 16
+
+        /** How much of a line a lookup gives it: hoshidicts finds a dictionary's few longer words only in text it was given. */
+        private const val LOOK_AHEAD = 64
         private const val MAX_SESSIONS = 4
 
         /** Bee's Ultimate Kanji Dictionary, which a tapped kanji is looked up in unless another is chosen. */

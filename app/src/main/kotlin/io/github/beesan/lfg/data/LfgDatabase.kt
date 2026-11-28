@@ -46,8 +46,11 @@ interface LineDao {
     @Query("UPDATE game_lines SET line_text = :text, char_count = :chars, box = :box, screenshot_path = :picture, last_modified = :now, translation = NULL WHERE id = :id")
     suspend fun grow(id: String, text: String, chars: Int, box: String, picture: String?, now: Long)
 
-    /** The line read next after a given moment in the same game: where the earlier line's sound ends. */
-    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND created_at > :afterMs ORDER BY created_at, rowid LIMIT 1")
+    /**
+     * The line read next after a given moment in the same game: where the earlier line's sound ends. A menu's or a HUD's
+     * words read meanwhile are not the next line, and the voice may still be going under them.
+     */
+    @Query("SELECT * FROM game_lines WHERE game_id = :gameId AND created_at > :afterMs AND interface_text = 0 ORDER BY created_at, rowid LIMIT 1")
     suspend fun nextAfter(gameId: String, afterMs: Long): GameLine?
 
     /** The text too: stats count its letters, not every code point as `char_count` does. */

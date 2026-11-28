@@ -903,7 +903,7 @@ class MainActivity : ComponentActivity() {
         }
         noteFromGame = intent?.action == ACTION_NOTE
         if (noteFromGame) {
-            model.diary.writeOn(intent?.getStringExtra(EXTRA_LINE))
+            model.diary.writeOn(intent?.getStringExtra(EXTRA_LINE), intent?.getStringExtra(EXTRA_GAME))
             requested.value = Page.DIARY_WRITE
         }
         if (intent?.action == ACTION_DIARY_DAY) {
@@ -1010,7 +1010,7 @@ class MainActivity : ComponentActivity() {
 
         const val ACTION_STATS = "io.github.beesan.lfg.action.STATS"
 
-        /** A diary entry written from over a game: [EXTRA_LINE] is the line's id. */
+        /** A diary entry written from over a game: [EXTRA_LINE] is the line's id, and [EXTRA_GAME] the game's, for a note on no kept line. */
         const val ACTION_NOTE = "io.github.beesan.lfg.action.NOTE"
         /** A day of the diary, opened from its widget: [EXTRA_GAME] is the game's id, [EXTRA_DAY] the day, in days since 1970. */
         const val ACTION_DIARY_DAY = "io.github.beesan.lfg.action.DIARY_DAY"

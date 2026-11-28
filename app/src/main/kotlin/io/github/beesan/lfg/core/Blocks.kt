@@ -16,10 +16,11 @@ object Blocks {
      */
     fun group(lines: List<TextLine>, spaced: Boolean = false): List<TextLine> {
         // Rows mostly of a right-to-left script start at their right edge: grouped in a mirror, so the
-        // edges and the order below hold for them as they are, then put back.
-        val rtl = mostlyRightToLeft(lines)
-        if (rtl) return groupAsLeftToRight(lines.map { it.mirrored() }, spaced).map { it.mirrored() }
-        return groupAsLeftToRight(lines, spaced)
+        // edges and the order below hold for them as they are, then put back. Columns of vertical text
+        // run right to left already, and stay as they are.
+        if (!mostlyRightToLeft(lines)) return groupAsLeftToRight(lines, spaced)
+        fun flip(line: TextLine) = if (line.vertical) line else line.mirrored()
+        return groupAsLeftToRight(lines.map(::flip), spaced).map(::flip)
     }
 
     private fun groupAsLeftToRight(lines: List<TextLine>, spaced: Boolean): List<TextLine> {
@@ -36,9 +37,19 @@ object Blocks {
             val home = blocks.lastOrNull { it[0].vertical && followsColumn(it, line) }
             if (home != null) home += line else blocks += mutableListOf(line)
         }
-        // Reading order: top to bottom, then left to right by where each piece starts; columns of vertical text right to left.
-        return blocks.flatMap(::nameApart).map { join(it, spaced) }
-            .sortedWith(compareBy({ it.rows[0].top }, { if (it.vertical) -it.rows[0].right else it.rows[0].left }))
+        // Reading order: rows top to bottom, then left to right by where each starts; columns of vertical text right
+        // to left. The two go together by how high each starts.
+        val (columns, rows) = blocks.flatMap(::nameApart).map { join(it, spaced) }.partition { it.vertical }
+        val across = rows.sortedWith(compareBy({ it.rows[0].top }, { it.rows[0].left }))
+        val down = columns.sortedWith(compareBy({ -it.rows[0].right }, { it.rows[0].top }))
+        val ordered = ArrayList<TextLine>(across.size + down.size)
+        var r = 0
+        var c = 0
+        while (r < across.size || c < down.size) {
+            val row = c == down.size || (r < across.size && across[r].rows[0].top <= down[c].rows[0].top)
+            ordered += if (row) across[r++] else down[c++]
+        }
+        return ordered
     }
 
     /**
@@ -160,7 +171,11 @@ object Blocks {
         if (ratio < 0.75f || ratio > 1.33f) return false
         val gap = last.left - line.box.right
         if (gap < -0.35f * w || gap > 1.3f * w) return false
-        return kotlin.math.abs(line.box.top - block[0].box.top) <= 0.8f * w
+        if (kotlin.math.abs(line.box.top - block[0].box.top) <= 0.8f * w) return true
+        // A paragraph's first column may be indented by a character: the columns after it start higher, level with the second.
+        val edge = if (block.size > 1) block[1].box.top else block[0].box.top
+        val indent = if (block.size > 1) 0.8f * w else 1.4f * w
+        return line.box.top >= edge - indent && line.box.top <= edge + 0.8f * w
     }
 
     private fun join(rows: List<TextLine>, spaced: Boolean): TextLine {

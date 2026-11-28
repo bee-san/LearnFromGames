@@ -965,7 +965,9 @@ fun StatsScreen(
                 "Speed", listOf((if (t.charsPerHour == 0) "–" else "%,d".format(t.charsPerHour)) to "an hour"),
                 if (before != null && t.charsPerHour > 0) StatsPeriod.change(t.charsPerHour.toDouble(), before.charsPerHour.toDouble(), view.beforeName) else "",
             )
-            Tile("Streak", listOf("${stats.streaks.current}" to if (stats.streaks.current == 1) "day" else "days"), "Longest ${stats.streaks.longest}")
+            // Against this page's day: the stats are counted as lines come, and the day can turn with none coming.
+            val streaks = remember(stats.days, today) { ReadingStats.streaks(stats.days.map { it.day }, today) }
+            Tile("Streak", listOf("${streaks.current}" to if (streaks.current == 1) "day" else "days"), "Longest ${streaks.longest}")
         }
         HorizontalDivider(color = Lfg.Border)
         GamesList(stats, byId, period, today) { onGame(it, period) }

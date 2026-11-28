@@ -13,9 +13,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -50,6 +53,9 @@ class CharacterNames(
 
     /** Games looked for on VNDB since the app started: each once, so a failed search is tried again next time only. */
     private val looked = ConcurrentHashMap.newKeySet<String>()
+
+    /** Visual novels whose build was stopped since the app started: built again only when asked, not as their game is seen. */
+    private val stopped = ConcurrentHashMap.newKeySet<String>()
 
     /** The visual novel whose names lead in lookups for the game of [gameId], once its dictionary is in; null for none. */
     suspend fun vnFor(gameId: String?): String? {
@@ -95,7 +101,7 @@ class CharacterNames(
             if (linked != null) {
                 val built = dictionaries.names(linked)
                 val stale = built != null && store.getString(KEY_BUILT + linked, null) != signature(settings())
-                if ((built == null || stale) && linked !in _builds.value) build(linked)
+                if ((built == null || stale) && linked !in _builds.value && linked !in stopped) build(linked)
                 return@launch
             }
             if (game.vndb.isNotEmpty() || game.vndbSuggested.isNotEmpty() || game.app || game.reading == Game.READ_OFF) return@launch
@@ -205,29 +211,46 @@ class CharacterNames(
 
     // ── building ────────────────────────────────────────────────────────
 
-    /** Starts building [vnId]'s names in the background, or again. */
+    /** Starts building [vnId]'s names in the background, or again. One stopped before is no longer held back. */
     fun build(vnId: String) {
+        stopped -= vnId
         _builds.update { it + (vnId to Build.Running("Waiting for the network", 0, 0)) }
         CharacterNamesWorker.start(context, vnId, prefs().wifiOnly)
     }
 
-    /** Stops a build under way. */
+    /** Stops a build under way. It is not started again as its game is seen, only when asked. */
     fun stop(vnId: String) {
+        stopped += vnId
         CharacterNamesWorker.stop(context, vnId)
         _builds.update { it - vnId }
     }
 
     /** The build itself, run by [CharacterNamesWorker]. Returns null when done, or what went wrong. */
     internal suspend fun runBuild(vnId: String): String? {
-        fun running(stage: String, done: Int = 0, total: Int = 0) = _builds.update { it + (vnId to Build.Running(stage, done, total)) }
-        val zip = File(context.cacheDir, "names-$vnId.zip")
+        // VNDB, the portraits and the zip are blocking calls that never look up: a stopped build stops at its next step.
+        val job = currentCoroutineContext().job
+        // What this run last showed, so it clears or fails only its own: not a newer run's, nor one stopped and cleared.
+        var mine: Build? = null
+        fun running(stage: String, done: Int = 0, total: Int = 0) {
+            job.ensureActive()
+            val now = Build.Running(stage, done, total)
+            mine = now
+            _builds.update { it + (vnId to now) }
+        }
+        fun fail(reason: String): String {
+            _builds.update { if (it[vnId] === mine) it + (vnId to Build.Failed(reason)) else it }
+            return reason
+        }
+        fun clear() = _builds.update { if (it[vnId] === mine) it - vnId else it }
+        // A zip of its own: a stopped run still finishing cannot delete a newer run's.
+        val zip = File(context.cacheDir, "names-$vnId-${System.nanoTime()}.zip")
         return try {
             running("Asking VNDB")
             val info = vndb.fetchVnInfo(vnId)
             val shown = info.alttitle.ifEmpty { info.title }
             rememberTitle(vnId, shown)
             val characters = vndb.fetchCharacters(vnId, info.voiceActors)
-            if (characters.isEmpty()) return fail(vnId, "VNDB lists no characters for this visual novel yet.")
+            if (characters.isEmpty()) return fail("VNDB lists no characters for this visual novel yet.")
             val settings = settings()
             val withPortraits = if (!settings.showImage) characters else characters.mapIndexed { i, c ->
                 running("Portraits", i, characters.size)
@@ -242,23 +265,18 @@ class CharacterNames(
             }
             running("Importing", withPortraits.size, withPortraits.size)
             val error = dictionaries.addFromZip(zip, vndb = vnId)
-            if (error != null) return fail(vnId, error)
+            if (error != null) return fail(error)
             store.edit().putString(KEY_BUILT + vnId, signature(settings)).apply()
-            _builds.update { it - vnId }
+            clear()
             null
         } catch (e: CancellationException) {
-            _builds.update { it - vnId }
+            clear()
             throw e
         } catch (e: Exception) {
-            fail(vnId, downloadProblem(e, "The names could not be built."))
+            fail(downloadProblem(e, "The names could not be built."))
         } finally {
             withContext(NonCancellable + Dispatchers.IO) { zip.delete() }
         }
-    }
-
-    private fun fail(vnId: String, reason: String): String {
-        _builds.update { it + (vnId to Build.Failed(reason)) }
-        return reason
     }
 
     private fun networkAllowed(): Boolean {

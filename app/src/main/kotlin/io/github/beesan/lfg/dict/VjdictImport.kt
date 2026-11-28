@@ -115,7 +115,7 @@ object VjdictImport {
                     meta.raw(if (bankMeta++ == 0) '[' else ',')
                     meta.raw('[').string(expression).raw(",\"freq\",{\"reading\":").string(reading).raw(",\"frequency\":")
                     // Rubi ranks an entry's own rank above any rank lent from its kana form, so lent ones sort after.
-                    if (borrowed) meta.raw("{\"value\":").number(rank + BORROWED_AFTER).raw(",\"displayValue\":").string("$rank㋕").raw('}')
+                    if (borrowed) meta.raw("{\"value\":").number(rank + BORROWED_AFTER).raw(",\"displayValue\":").string("$rank$LENT_MARK").raw('}')
                     else meta.number(rank)
                     meta.raw("}]")
                     frequencies++
@@ -231,7 +231,13 @@ object VjdictImport {
     private const val BANK_BYTES = 16 shl 20
     private const val INDEX_SHARE = 20
     private const val MAX_ATTRIBUTION = 64 * 1024
-    private const val BORROWED_AFTER = 1 shl 24
+
+    /** A rank lent from the word's kana form is listed this much higher, so it sorts after every rank of its own. */
+    const val BORROWED_AFTER = 1 shl 24
+
+    /** What a lent rank shows after its figure. */
+    const val LENT_MARK = "㋕"
+
     private val HOSHIDICTS_RULES = Vjdict.RULE_NAMES.take(6)
     private val ATTRIBUTION_FILES = listOf("ATTRIBUTION.md")
 

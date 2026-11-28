@@ -204,8 +204,11 @@ class OverlayHost(
     /** This game's notes show among its lines. */
     private var notes: List<Note> = emptyList()
 
-    /** What a note is being written on, while the note editor shows: a word of a line, a line alone, or the game as it is now. */
-    private class Noting(val line: LookupLine?, val entry: Entry?)
+    /**
+     * What a note is being written on, while the note editor shows: a word of a line, a line alone, or the game
+     * as it is now. [gameId] is the game it is about, which a note on no kept line has no line to say.
+     */
+    private class Noting(val line: LookupLine?, val entry: Entry?, val gameId: String? = line?.gameId)
 
     private var noting: Noting? = null
 
@@ -912,11 +915,10 @@ class OverlayHost(
         picker = null
         pickerView = null
         panelView?.refresh()
-        // Drawn from the wheel, the controller goes back to the game.
-        if (pickerPad) {
-            pickerPad = false
-            render()
-        }
+        // Drawn from the wheel, the controller goes back to the game. Drawn by touch too, the strips and
+        // readings kept off the picker come back now, not at the next line.
+        pickerPad = false
+        render()
     }
 
     /** A box was to be drawn from the wheel, and there turned out to be nothing to draw it on: the controller is the game's again. */
@@ -1205,9 +1207,12 @@ class OverlayHost(
         // With a screen for the lines, the note is written on the app's own page there: nothing
         // drawn over other apps can have the keyboard above it, and the page has the keyboard.
         if (panel?.shown == true) {
+            // Its game goes with it: a note on the game as it is now has no kept line to say whose it is.
+            val game = listOfNotNull(next.gameId, state.lines.firstNotNullOfOrNull { it.gameId }, frontLine?.gameId).firstOrNull { it.isNotEmpty() }
             openApp(
                 android.content.Intent(io.github.beesan.lfg.ui.MainActivity.ACTION_NOTE)
-                    .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_LINE, next.line?.lineId),
+                    .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_LINE, next.line?.lineId)
+                    .putExtra(io.github.beesan.lfg.ui.MainActivity.EXTRA_GAME, game),
             )
             return
         }
@@ -2008,7 +2013,8 @@ class OverlayHost(
             }
             WheelAction.NOTE -> {
                 val kept = line?.takeIf { it.lineId != null }
-                beginNote(Noting(kept, null), if (kept != null) "Diary entry on this line" else "Diary entry on " + (line?.gameName?.ifBlank { null } ?: "this game"))
+                // A line not kept is still the game's: the note is on that game as it is now.
+                beginNote(Noting(kept, null, line?.gameId), if (kept != null) "Diary entry on this line" else "Diary entry on " + (line?.gameName?.ifBlank { null } ?: "this game"))
             }
             WheelAction.TRANSLATE, WheelAction.EXPLAIN, WheelAction.RECAP, WheelAction.NEXT, WheelAction.ASK, WheelAction.LINES -> openCard(slice.action)
             WheelAction.RECENT -> {
@@ -2016,6 +2022,8 @@ class OverlayHost(
                 openCard(slice.action)
             }
             WheelAction.HIDE -> {
+                // Lookup goes too: left on under nothing drawn, it would keep the buttons and every tap from the game.
+                if (state.controllerMode) controller.exitControllerMode()
                 hidden = true
                 render()
                 notice(gameDisplay, "LFG is hidden until the shortcut is pressed")

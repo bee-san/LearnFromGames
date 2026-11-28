@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <files-path name="frames" path="frames/" />
+    <!-- A line's own picture, which goes on a card once its screen is cleared. -->
+    <files-path name="crops" path="crops/" />
     <files-path name="media" path="media/" />
     <cache-path name="dialogue" path="dialogue/" />
     <cache-path name="share" path="share/" />

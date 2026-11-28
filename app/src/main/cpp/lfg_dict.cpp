@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "lfg_dict.h"
 
+#include <cmath>
 #include <cstdio>
 #include <string_view>
 
@@ -51,6 +52,15 @@ void number(std::string& out, const char* name, long long value, bool comma = tr
   if (comma) out.push_back(',');
 }
 
+// The engine keeps a term's score as whatever number the dictionary gave; the app reads it as an int, so it is
+// held to an int's range (NaN is 0) rather than failing the whole lookup.
+long long int_score(double score) {
+  if (std::isnan(score)) return 0;
+  if (score >= 2147483647.0) return 2147483647LL;
+  if (score <= -2147483648.0) return -2147483648LL;
+  return static_cast<long long>(score);
+}
+
 void append_term(std::string& out, const hd_lookup_result& r) {
   out.push_back('{');
   field(out, "matched", view(r.matched));
@@ -69,7 +79,7 @@ void append_term(std::string& out, const hd_lookup_result& r) {
   field(out, "expression", view(t.expression));
   field(out, "reading", view(t.reading));
   field(out, "rules", view(t.rules));
-  number(out, "score", t.score);
+  number(out, "score", int_score(t.score));
   key(out, "glossaries");
   out.push_back('[');
   for (size_t i = 0; i < t.glossaries_count; ++i) {

@@ -127,6 +127,24 @@ class BlocksTest {
     }
 
     @Test
+    fun aColumnIndentedByACharacterStartsItsParagraph() {
+        // Vertical narration's first column starts a character lower (字下げ); the columns after it start level with the second.
+        val paragraph = listOf(column("傘を持って出かけた。", 1540, 120), column("今日は朝から雨が", 1760, 180), column("降っていた。", 1650, 120))
+        val block = Blocks.group(paragraph).single()
+        assertEquals("今日は朝から雨が降っていた。傘を持って出かけた。", block.text)
+        assertEquals(3, block.rows.size)
+    }
+
+    @Test
+    fun columnsApartComeRightToLeftWhereverEachStarts() {
+        // Two pieces of vertical text, the left one a little higher, and a row under both.
+        val right = column("右の吹き出し", 1700, 130)
+        val left = column("左の吹き出し", 1300, 120)
+        val under = row("つづく", 100, 900)
+        assertEquals(listOf("右の吹き出し", "左の吹き出し", "つづく"), Blocks.group(listOf(under, left, right)).map { it.text })
+    }
+
+    @Test
     fun rowsOfDifferentTypeSizesAreNotOneSentence() {
         assertEquals(2, Blocks.group(listOf(row("見出し", 100, 100, 90), row("本文です", 100, 200, 50))).size)
         assertEquals(emptyList<TextLine>(), Blocks.group(listOf(row("   ", 0, 0))))
@@ -140,6 +158,9 @@ class BlocksTest {
         val pieces = Blocks.group(listOf(first, second))
         assertEquals(1, pieces.size)
         assertTrue(pieces[0].text.startsWith("مرحبا"))
+        // Columns of vertical text on such a screen are not mirrored with the rows: they still join from the right.
+        val columns = listOf(column("だった", 1650, 300), column("静かな夜", 1760, 300))
+        assertEquals(listOf(first.text + second.text, "静かな夜だった"), Blocks.group(listOf(first, second) + columns).map { it.text })
     }
 
     @Test

@@ -50,6 +50,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -679,11 +680,25 @@ fun DiarySettingsScreen(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onBa
 
 // ── pictures ─────────────────────────────────────────────────────────────────
 
-/** A picture from a file, decoded near the size it shows at; nothing when the file is gone. */
+/** A picture as read from [path] at [width]: [bitmap] is null when the file is gone. */
+private class DecodedPicture(val path: String, val width: Int, val bitmap: ImageBitmap?)
+
+/**
+ * A picture from a file, decoded near the size it shows at, off the main thread: a month's page asks for a
+ * month of them at once. It keeps its room until it is in, and is nothing when the file is gone.
+ */
 @Composable
 fun Picture(path: String, modifier: Modifier = Modifier, width: Int = 960) {
-    val bitmap = remember(path) { decodeSmall(path, width)?.asImageBitmap() } ?: return
-    Image(bitmap, contentDescription = null, modifier = modifier, contentScale = ContentScale.Crop)
+    val decoded by produceState<DecodedPicture?>(null, path, width) {
+        value = DecodedPicture(path, width, withContext(Dispatchers.IO) { decodeSmall(path, width)?.asImageBitmap() })
+    }
+    // A picture read before is not shown in this one's place: until this one is in, its room is empty.
+    val shown = decoded?.takeIf { it.path == path && it.width == width }
+    if (shown == null) {
+        Box(modifier)
+        return
+    }
+    shown.bitmap?.let { Image(it, contentDescription = null, modifier = modifier, contentScale = ContentScale.Crop) }
 }
 
 private fun decodeSmall(path: String, width: Int): Bitmap? {

@@ -125,7 +125,8 @@ fun LinesScreen(
 ) {
     val time = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val zone = remember { ZoneId.systemDefault() }
-    val today = remember(lines.size) { ReadingStats.dayOf(System.currentTimeMillis() / 1000.0, zone) }
+    // Moves on at 04:00 while the page stays open: the list stops growing at its last few hundred lines.
+    val today = ReadingStats.dayOf(rememberNow(), zone)
     val list = rememberLazyListState()
     Column(Modifier.fillMaxSize().padScroll(list).firstFocus()) {
         PageHeader("Lines") {

@@ -76,6 +76,19 @@ class GameStatsTest {
     }
 
     @Test
+    fun daysReadWithTheClockAheadBreakNothing() {
+        // Read while the clock was set months ahead, then put right: all of time starts today, with nothing in it yet.
+        val summary = ReadingStats.summarise(stamps, zone)
+        val back = today.minusMonths(3)
+        val all = StatsPeriod.ALL.view(summary.days, back)
+        assertEquals(back, all.start)
+        assertEquals(1, all.bars.size)
+        assertEquals(0, all.totals.lines)
+        // A game read only then is left out of the list, which still opens.
+        assertEquals(emptyList<GameStats.Row>(), GameStats.rows(summary, emptyList(), StatsPeriod.ALL, back, zone, GameStats.Sort.TIME))
+    }
+
+    @Test
     fun theSessionsToStepThroughAreTodaysOrTheLastOne() {
         val sessions = ReadingStats.summarise(stamps, zone).sessions
         assertEquals(3, GameStats.recent(sessions, today, zone).size)

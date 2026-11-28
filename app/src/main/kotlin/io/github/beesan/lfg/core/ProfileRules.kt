@@ -41,7 +41,11 @@ object ProfileRules {
     }
 
     /** [name] as a profile keeps it: trimmed, and no longer than fits a tile. */
-    fun named(name: String): String = name.trim().take(NAME_LENGTH).trim()
+    fun named(name: String): String = fitted(name.trim()).trim()
+
+    /** The first [NAME_LENGTH] characters of [name], an emoji counting as one: none is cut in half. */
+    fun fitted(name: String): String =
+        if (name.codePointCount(0, name.length) <= NAME_LENGTH) name else name.substring(0, name.offsetByCodePoints(0, NAME_LENGTH))
 
     /** One more profile after [profiles], on the first tile free; null when every tile is taken. */
     fun added(profiles: List<KeptProfile>): KeptProfile? {

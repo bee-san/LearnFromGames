@@ -63,7 +63,7 @@ object TreeText {
         }
         if (chars.isEmpty()) return null
         val vertical = isVertical(chars)
-        val rows = rows(chars, vertical)
+        val rows = rows(chars, vertical, !vertical && rightToLeft(text))
         return TextLine(text, rows.reduce(Box::union), chars, vertical, rows)
     }
 
@@ -83,17 +83,20 @@ object TreeText {
         return down > across
     }
 
-    /** The rows (or columns) the characters wrap into, in reading order. */
-    private fun rows(chars: List<CharBox>, vertical: Boolean): List<Box> {
+    /**
+     * The rows (or columns) the characters wrap into, in reading order. [leftward]: right-to-left text, each
+     * character to the left of the one before, so a row is one lower down or one that starts again at the right.
+     */
+    private fun rows(chars: List<CharBox>, vertical: Boolean, leftward: Boolean): List<Box> {
         val rows = ArrayList<Box>()
         var row = chars[0].box
         for (k in 1 until chars.size) {
             val prev = chars[k - 1].box
             val b = chars[k].box
-            val wrapped = if (vertical) {
-                b.right <= prev.left + prev.width / 4 || b.top < prev.top - prev.width / 2
-            } else {
-                b.top >= prev.bottom - prev.height / 4 || b.left < prev.left - prev.height / 2
+            val wrapped = when {
+                vertical -> b.right <= prev.left + prev.width / 4 || b.top < prev.top - prev.width / 2
+                leftward -> b.top >= prev.bottom - prev.height / 4 || b.right > prev.right + prev.height / 2
+                else -> b.top >= prev.bottom - prev.height / 4 || b.left < prev.left - prev.height / 2
             }
             if (wrapped) {
                 rows += row
@@ -108,9 +111,10 @@ object TreeText {
 
     /**
      * Places for the characters of a node that gave none: square characters
-     * filling its box row by row. Close enough to land a tap on the right
-     * word in an ordinary line of text; a line [lines] makes from it reads
-     * whole and exactly, only its places are guessed.
+     * filling its box row by row, from its right edge for a paragraph written
+     * right to left. Close enough to land a tap on the right word in an
+     * ordinary line of text; a line [lines] makes from it reads whole and
+     * exactly, only its places are guessed.
      */
     fun estimate(node: TreeNode): List<Box?> {
         val b = node.bounds
@@ -124,13 +128,17 @@ object TreeText {
         val out = ArrayList<Box?>(text.length)
         var row = 0
         var col = 0
-        for (c in text) {
+        // Each paragraph runs its own way: one written right to left fills its rows from the right.
+        fun goesLeft(from: Int) = rightToLeft(text.substring(from, text.indexOf('\n', from).let { if (it < 0) text.length else it }))
+        var leftward = goesLeft(0)
+        for ((i, c) in text.withIndex()) {
             when {
                 c == '\n' -> {
                     out += null
                     // A line break starts the next row.
                     row++
                     col = 0
+                    leftward = goesLeft(i + 1)
                 }
                 Character.isLowSurrogate(c) -> out += out.lastOrNull()
                 else -> {
@@ -139,7 +147,8 @@ object TreeText {
                         col = 0
                     }
                     val top = b.top + row * size
-                    out += Box(b.left + col * step, top, b.left + (col + 1) * step, top + size)
+                    val left = if (leftward) b.right - (col + 1) * step else b.left + col * step
+                    out += Box(left, top, left + step, top + size)
                     col++
                 }
             }

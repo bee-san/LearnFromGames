@@ -28,6 +28,16 @@ class TreeTextTest {
         }
     }
 
+    /** Where a TextView draws right-to-left [rows]: each from [right] leftwards, letters 30 wide and spaces 15, rows 60 high. */
+    private fun drawnRightToLeft(rows: List<String>, right: Int, top: Int): List<Box?> = rows.flatMapIndexed { r, row ->
+        var x = right
+        row.map { c ->
+            val w = if (c == ' ') 15 else 30
+            x -= w
+            Box(x, top + r * 60, x + w, top + (r + 1) * 60)
+        }
+    }
+
     @Test
     fun aWrappedParagraphIsOneLineWithARowForEachLine() {
         val text = "京都の紅葉が見頃を迎えました"
@@ -72,6 +82,26 @@ class TreeTextTest {
         val line = TreeText.lines(listOf(node), screen).single()
         assertEquals(3, line.chars.size)
         assertEquals(1, line.charIndexAt(175, 125))
+    }
+
+    @Test
+    fun rightToLeftTextWrapsOnlyWhereItsRowsDo() {
+        // Hebrew: each letter to the left of the one before, a word apart by a space, and the next row back at the right.
+        val rows = listOf("שלום עולם ", "יפה מאוד")
+        val node = TreeNode(rows.joinToString(""), Box(400, 100, 1000, 220), drawnRightToLeft(rows, 1000, 100))
+        val line = TreeText.lines(listOf(node), screen).single()
+        assertEquals(2, line.rows.size)
+        assertEquals(Box(745, 100, 1000, 160), line.rows[0])
+        // A tap on the second word of either row lands on it.
+        assertEquals(5, line.charIndexAt(850, 130))
+        assertEquals(14, line.charIndexAt(880, 190))
+    }
+
+    @Test
+    fun aRightToLeftNodeWithoutPositionsIsPlacedFromItsRightEdge() {
+        val line = TreeText.lines(listOf(TreeNode("שלום", Box(100, 100, 300, 150))), screen).single()
+        assertEquals(0, line.charIndexAt(275, 125))
+        assertEquals(3, line.charIndexAt(125, 125))
     }
 
     @Test
