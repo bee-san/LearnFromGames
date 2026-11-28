@@ -169,6 +169,9 @@ class OverlayHost(
     /** The lines on screen were read because the user asked, over an app that is not a game. */
     private var asking = false
 
+    /** What [asking] reads is a game's: a box or its screen read once, or a region of it read on. */
+    private var askingGame = false
+
     /** When a finger last went down on something of ours, to tell a tap on the app from one on a strip or the entry. */
     private var lastOwnTouch = 0L
     private var elsewhereCheck: Runnable? = null
@@ -180,6 +183,10 @@ class OverlayHost(
 
     /** The box picker while it shows: in lookup mode the controller is its own. */
     private var pickerView: RegionPicker? = null
+
+    /** The game a box is being drawn for, and on which screen; null for a region of whatever is in front. */
+    private var pickingFor: PickFor? = null
+    private var pickingOn = Display.INVALID_DISPLAY
     private val handler = android.os.Handler(service.mainLooper)
     private var history: List<GameLine> = emptyList()
 
@@ -365,13 +372,17 @@ class OverlayHost(
     // ── state in ─────────────────────────────────────────────────────────────
 
     /** The text on screen changed, or the app in front did. */
-    fun onScreen(displayId: Int, tapStrips: Boolean, inFront: Boolean, asking: Boolean = false) {
+    fun onScreen(displayId: Int, tapStrips: Boolean, inFront: Boolean, asking: Boolean = false, overGame: Boolean = false) {
         if (displayId != gameDisplay && displayId != Display.INVALID_DISPLAY) moveTo(displayId)
         stripsOn = tapStrips
         gameInFront = inFront
         this.asking = asking && inFront
-        // The game has gone: what the wheel was opened over is not there to act on.
-        if (!inFront || this.asking) {
+        askingGame = this.asking && overGame
+        // A box being drawn for a game that has gone, or on a screen it has left, is drawn for nothing: it goes.
+        if (picker != null && pickingFor != null && (!inFront || (displayId != Display.INVALID_DISPLAY && displayId != pickingOn))) closePicker()
+        // The game has gone: what the wheel was opened over is not there to act on. A box of a game read when
+        // asked is still the game's: the wheel may be opened over it, and a new subtitle does not close it.
+        if (!inFront || (this.asking && !askingGame)) {
             wheelOpen = false
             wheelHeld = false
             closeCard()
@@ -544,7 +555,7 @@ class OverlayHost(
         // Tap strips: one per row of text with a place on screen. Not under the wheel or its card, which a
         // strip made after them would lie over.
         var used = 0
-        if (stripsOn && !wheelUp && !hidden && TapGate.open(prefs().tapLookup, hasController(), state.controllerMode, asking)) {
+        if (stripsOn && !wheelUp && !hidden && picker == null && TapGate.open(prefs().tapLookup, hasController(), state.controllerMode, asking)) {
             lines.forEachIndexed { index, line ->
                 for (box in line.geometry?.rows ?: emptyList()) {
                     if (box.width <= 0 || box.height <= 0) continue
@@ -595,8 +606,9 @@ class OverlayHost(
             // Over a game it covers the whole screen, seen through: a tap that misses the words and the entry
             // lands on it and not on the game, and nothing but our own windows is left to take the buttons.
             // The game is not told of it, as it would be of a screen put over it, so nothing pauses.
-            // An ordinary app that was asked to be read keeps its taps: one elsewhere ends the reading.
-            val whole = if (holding && !asking) bounds(gameDisplay) else null
+            // An ordinary app that was asked to be read keeps its taps: one elsewhere ends the reading. A game's box
+            // read when asked is still the game's: the wheel drawn in this window needs all of it.
+            val whole = if (holding && (!asking || askingGame)) bounds(gameDisplay) else null
             if (whole != null) cover.place(0, 0, whole.width, whole.height) else cover.place(0, 0, FOCUS_PX, FOCUS_PX)
             if (holding) cover.view.requestFocus()
         } else {
@@ -873,6 +885,8 @@ class OverlayHost(
             return
         }
         picker?.remove()
+        pickingFor = game
+        pickingOn = displayId
         // The controller is ours in lookup mode, or from the wheel, and only on the game's screen.
         val pad = lookup && displayId == gameDisplay
         if (pad) input.release()
@@ -1767,7 +1781,7 @@ class OverlayHost(
 
     /** Whether the wheel can open now: over a game, with nothing else being drawn or written on it. */
     val canOpenWheel: Boolean
-        get() = gameInFront && !asking && gameDisplay != Display.INVALID_DISPLAY && picker == null && noting == null
+        get() = gameInFront && (!asking || askingGame) && gameDisplay != Display.INVALID_DISPLAY && picker == null && noting == null
 
     /** Whether something is being written in a window of ours over the game, with the keyboard up for it. */
     val typing: Boolean get() = noting != null || (cardFor != null && cardTyping())

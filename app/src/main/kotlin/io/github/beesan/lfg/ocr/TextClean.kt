@@ -302,16 +302,24 @@ object TextClean {
                 }
                 val prev = near(-1)
                 val next = near(1)
-                // Beside a katakana word. Only 力, 二 and 八, which follow katakana as kanji (ジャンプ力が, パン二つ,
-                // ケーキ八つ), stay kanji when hiragana comes next; any other is the katakana: ヒン卜を, デー夕が.
-                val real = c in REAL_AFTER_KATAKANA && isHira(next)
-                if (!real && ((isKataWord(prev) && !isKanji(next)) || (isKataWord(next) && !isKanji(prev)))) p.text = kana
+                // A 一 passed over on the way to the next neighbour: a long vowel read as a kanji, so a word of katakana.
+                val dash = cp(pieces.getOrNull(i + 1)) == '一'.code
+                val real = c in REAL_AFTER_KATAKANA
+                // The end of a katakana word: ヒン卜を, デー夕が. Only 力, 二 and 八 stay kanji before hiragana,
+                // as they follow katakana (ジャンプ力が, パン二つ, ケーキ八つ).
+                val ends = isKataWord(prev) && !isKanji(next) && !(real && isHira(next))
+                // The start of one: not after hiragana, where a kanji starts a word too (その口コミ, あと二ターン),
+                // unless a long vowel follows it (この力一ドを); 力, 二 and 八 only then, after katakana, or at the
+                // line's start (八ンバーガー).
+                val starts = isKataWord(next) && !isKanji(prev) &&
+                    (if (real) dash || isKataWord(prev) || prev == 0 else dash || !isHira(prev))
+                if (ends || starts) p.text = kana
             }
             KANA_TWINS[c]?.let { other ->
                 val prev = cp(pieces.getOrNull(i - 1))
                 val next = cp(pieces.getOrNull(i + 1))
-                // り after a kanji is its okurigana (残りターン, 通りを): not the katakana.
-                if (isHira(c) && isKataWord(next) && !isHira(prev) && !(c == 'り'.code && isKanji(prev))) p.text = other
+                // After a kanji, り is its okurigana (残りターン) and へ the particle (町へバスで): not the katakana.
+                if (isHira(c) && isKataWord(next) && !isHira(prev) && !isKanji(prev)) p.text = other
                 if (isKata(c) && isHira(next) && !isKataWord(prev)) p.text = other
             }
         }

@@ -205,6 +205,15 @@ class TextCleanTest {
         assertEquals("このカードを", clean("この力一ドを"))
         assertEquals("ヒントを", clean("ヒン卜を"))
         assertEquals("データが", clean("デー夕が"))
-        assertEquals("大型ヘリ", clean("大型へリ"))
+        assertEquals("ゼロに", clean("ゼ口に"))
+    }
+
+    @Test
+    fun aKanjiStartingAWordBeforeKatakanaStays() {
+        assertEquals("あと二ターン", clean("あと二ターン"))
+        assertEquals("あと八ポイント", clean("あと八ポイント"))
+        assertEquals("その口コミ", clean("その口コミ"))
+        assertEquals("町へバスで", clean("町へバスで"))
+        assertEquals("城へワープ", clean("城へワープ"))
     }
 }

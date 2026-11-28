@@ -17,7 +17,7 @@ object Blocks {
     fun group(lines: List<TextLine>, spaced: Boolean = false): List<TextLine> {
         // Rows mostly of a right-to-left script start at their right edge: grouped in a mirror, so the
         // edges and the order below hold for them as they are, then put back.
-        val rtl = lines.count { !it.vertical && rightToLeft(it.text) } * 2 > lines.count { !it.vertical }
+        val rtl = mostlyRightToLeft(lines)
         if (rtl) return groupAsLeftToRight(lines.map { it.mirrored() }, spaced).map { it.mirrored() }
         return groupAsLeftToRight(lines, spaced)
     }

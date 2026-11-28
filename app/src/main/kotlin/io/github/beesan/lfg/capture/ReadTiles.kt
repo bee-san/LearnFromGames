@@ -66,7 +66,8 @@ class ReadRegionTile : ReadTile() {
                 updateTile()
             }
         } else {
-            service.pickRegion(collapse = true)
+            // A region read once, as the wheel's Read region is: over a game, never its dialogue box drawn anew.
+            service.pickRegion(collapse = true, region = true)
         }
     }
 }

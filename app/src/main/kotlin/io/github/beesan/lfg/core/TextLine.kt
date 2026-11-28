@@ -134,12 +134,21 @@ fun Box.mirrored() = Box(-right, top, -left, bottom)
 fun TextLine.mirrored() = copy(box = box.mirrored(), chars = chars.map { it.copy(box = it.box.mirrored()) }, rows = rows.map { it.mirrored() })
 
 /** Whether [text] is written right to left: its first letter is Arabic, Hebrew, Syriac or another such script's. */
-fun rightToLeft(text: String): Boolean {
+fun rightToLeft(text: String): Boolean = direction(text) == true
+
+/** Right to left (true), left to right (false), or neither for text with no letter at all ("100/100", "×3"). */
+fun direction(text: String): Boolean? {
     for (c in text) {
         when (Character.getDirectionality(c)) {
             Character.DIRECTIONALITY_RIGHT_TO_LEFT, Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC -> return true
             Character.DIRECTIONALITY_LEFT_TO_RIGHT -> return false
         }
     }
-    return false
+    return null
+}
+
+/** Whether most of [lines] that have letters, and are rows rather than columns, are right to left. Numbers alone count for neither side. */
+fun mostlyRightToLeft(lines: List<TextLine>): Boolean {
+    val sides = lines.filter { !it.vertical }.mapNotNull { direction(it.text) }
+    return sides.count { it } * 2 > sides.size
 }

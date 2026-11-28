@@ -30,8 +30,7 @@ class ScreenAi private constructor(
         val lines = decode(bytes)
         // In a mirror, a row of Arabic runs as one of English does: its first word is the one at the left. Only when
         // most rows on screen are in such a script (an English menu stays as it is), and never a column of vertical text.
-        val rows = lines.filter { !it.vertical }
-        if (!rightToLeft || rows.count { io.github.beesan.lfg.core.rightToLeft(it.text) } * 2 <= rows.size) return joined(ordered(lines))
+        if (!rightToLeft || !io.github.beesan.lfg.core.mostlyRightToLeft(lines)) return joined(ordered(lines))
         fun flip(line: TextLine) = if (line.vertical) line else line.mirrored()
         return joined(ordered(lines.map(::flip))).map(::flip)
     }

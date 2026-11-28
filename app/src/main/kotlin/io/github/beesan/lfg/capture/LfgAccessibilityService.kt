@@ -308,7 +308,8 @@ class LfgAccessibilityService : AccessibilityService() {
                 if (reading.lines.isNotEmpty() && afterBox?.isActive == true) {
                     afterBox?.cancel()
                     if (front != null && asked == null) controller.enterControllerMode()
-                    boxSaid?.let(::toast)
+                    // Off the box, whose line lookup has just opened on.
+                    boxSaid?.let { toast(it, avoid = boxSaidOf) }
                     boxSaid = null
                 }
             }
@@ -333,7 +334,8 @@ class LfgAccessibilityService : AccessibilityService() {
                 }
                 // Over a game, a box or the whole screen read once is done with when lookup on it is closed:
                 // the game's own reading comes back, and a stale entry is not left over its next page.
-                if (wasLookup && !state.controllerMode && askedOverGame()) endAsked()
+                // Not while the wheel, or a card from it, is up over what was read: that is still being used.
+                if (wasLookup && !state.controllerMode && askedOverGame() && !overlays.wheelUp) endAsked()
                 wasLookup = state.controllerMode
             }
         }
@@ -1077,7 +1079,7 @@ class LfgAccessibilityService : AccessibilityService() {
                 )
             },
         )
-        overlays.onScreen(target.displayId, true, true, asking = true)
+        overlays.onScreen(target.displayId, true, true, asking = true, overGame = !game.app)
         if (thenController) controller.enterControllerMode()
     }
 
@@ -1103,7 +1105,7 @@ class LfgAccessibilityService : AccessibilityService() {
                         )
                     },
                 )
-                overlays.onScreen(r.displayId, true, true, asking = true)
+                overlays.onScreen(r.displayId, true, true, asking = true, overGame = !r.game.app)
                 // A new subtitle ends the sound of the one before, as a line of the game's own reading does.
                 if (!r.game.app) r.appearedAtMs.maxOrNull()?.let { app.media.onNextLine(it) }
             }
@@ -1230,6 +1232,7 @@ class LfgAccessibilityService : AccessibilityService() {
      */
     private var afterBox: Job? = null
     private var boxSaid: String? = null
+    private var boxSaidOf: Box? = null
 
     /** The game's dialogue box on this screen, or null for a game read on its whole screen. */
     private fun dialogueBox(game: Game, displayId: Int): Box? = gameBox(game, displayId, 1)
@@ -1313,10 +1316,11 @@ class LfgAccessibilityService : AccessibilityService() {
             return
         }
         boxSaid = said
+        boxSaidOf = box
         afterBox = scope.launch {
             delay(LOOKUP_AFTER_BOX_MS)
             // No text there now: lookup stays closed, and the next line is read as any other.
-            boxSaid?.let(::toast)
+            boxSaid?.let { toast(it, avoid = boxSaidOf) }
             boxSaid = null
         }
     }
@@ -1404,7 +1408,8 @@ class LfgAccessibilityService : AccessibilityService() {
 
     /** A message over the app in front, drawn by us: a toast would be hidden when notifications are off. */
     private fun toast(text: String, avoid: Box? = null) {
-        val display = asked?.displayId ?: ordinaryFront?.displayId ?: front?.displayId ?: Display.DEFAULT_DISPLAY
+        // The game's screen before an ordinary app's on the other one: most notices are about the game.
+        val display = asked?.displayId ?: front?.displayId ?: ordinaryFront?.displayId ?: Display.DEFAULT_DISPLAY
         overlays.notice(display, text, avoid)
     }
 
