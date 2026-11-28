@@ -182,7 +182,7 @@ class LookupController(
                 // The same lines in the same places, only more typed out: the Rights retraced by Left are kept.
                 if (cursor != null) cursor = cursorOver(next).also { fresh -> if (still == before.line) cursor?.let(fresh::carry) }
                 // A lookup still on its way, or the stick resting, would land on the line that is at the old place now.
-                if (still != before.line && (selecting?.isActive == true || resting?.isActive == true)) {
+                if (still != before.line && (!landed || resting?.isActive == true)) {
                     selecting?.cancel()
                     resting?.cancel()
                     lookUp(still, before.spanStart)
@@ -233,6 +233,10 @@ class LookupController(
         lookUp(line, index)
     }
 
+    /** Whether the last lookup's entries are shown: until then a line moved under it is looked up again in its new place. */
+    @Volatile
+    private var landed = true
+
     private fun lookUp(line: Int, at: Int) {
         val target = _state.value.lines.getOrNull(line) ?: return
         if (at !in target.text.indices) return
@@ -241,6 +245,7 @@ class LookupController(
         val index = if (byWord) Selectable.wordStart(target.text, at) else at
         selecting?.cancel()
         word = null
+        landed = false
         selecting = scope.launch {
             val entries = decorate(io.github.beesan.lfg.core.Perf.measure("lookup") { lookup(target.text.substring(index), target.gameId) })
             val first = entries.firstOrNull()
@@ -248,6 +253,7 @@ class LookupController(
             // A word no dictionary has is still one word: marked whole, and stepped over whole.
             val unknown = if (byWord) Selectable.wordEnd(target.text, index).coerceAtLeast(character) else character
             val end = if (first == null) unknown else (index + first.matched.length).coerceAtMost(target.text.length)
+            landed = true
             _state.update {
                 if (it.lines.getOrNull(line)?.text != target.text) return@update it
                 it.copy(
@@ -298,7 +304,7 @@ class LookupController(
                     kanjiFrom = from.entries.firstOrNull { kanji in it.expression }?.expression ?: from.entry?.expression ?: kanji,
                 )
             }
-            // Not looked for in Anki by its spelling alone, which would find the word's note.
+            for (entry in entries.distinctBy { it.expression }) checkDuplicate(line, entry, kanji = true)
         }
     }
 
@@ -324,11 +330,12 @@ class LookupController(
         scope.launch { withContext(Dispatchers.IO) { vnAnswer(question, yes) } }
     }
 
-    private suspend fun checkDuplicate(line: LookupLine, entry: Entry) {
-        if (done.containsKey(line.lineId to entry.expression)) return
+    /** [kanji]: the entry is a kanji's, which only a kanji card in Anki is the card of. */
+    private suspend fun checkDuplicate(line: LookupLine, entry: Entry, kanji: Boolean = false) {
+        if (done.containsKey(line.lineId to (if (kanji) KANJI + entry.expression else entry.expression))) return
         val duplicate = withContext(Dispatchers.IO) {
             try {
-                anki.status() == AnkiStatus.READY && anki.target?.let { anki.isDuplicate(it, entry.expression) } == true
+                anki.status() == AnkiStatus.READY && anki.target?.let { anki.isDuplicate(it, entry.expression, kanji) } == true
             } catch (_: Exception) {
                 false
             }
@@ -391,7 +398,7 @@ class LookupController(
                 }
                 scope.launch(Dispatchers.IO) {
                     try {
-                        anki.target?.let { anki.noteId(it, entry.expression) }?.let { anki.openNote(it) }
+                        anki.target?.let { anki.noteId(it, entry.expression, state.kanjiFrom != null) }?.let { anki.openNote(it) }
                     } catch (_: Exception) {
                         // AnkiDroid is gone, refused, or too old for the link; the card is still there.
                     }

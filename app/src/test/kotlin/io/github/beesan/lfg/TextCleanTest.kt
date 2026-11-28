@@ -197,6 +197,14 @@ class TextCleanTest {
         assertEquals("ジャンプ力が上がった", clean("ジャンプ力が上がった"))
         assertEquals("パン二つ", clean("パン二つ"))
         assertEquals("残りターン", clean("残りターン"))
-        assertEquals("町へバスで", clean("町へバスで"))
+        assertEquals("ケーキ八つ", clean("ケーキ八つ"))
+    }
+
+    @Test
+    fun aLookalikeInsideRunningTextIsStillPutRight() {
+        assertEquals("このカードを", clean("この力一ドを"))
+        assertEquals("ヒントを", clean("ヒン卜を"))
+        assertEquals("データが", clean("デー夕が"))
+        assertEquals("大型ヘリ", clean("大型へリ"))
     }
 }

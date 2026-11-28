@@ -277,6 +277,9 @@ object TextClean {
         .flatMap { (h, k) -> listOf(h.code to k.toString(), k.code to h.toString()) }.toMap()
 
     /** Katakana a word is spelt with: not the counters ヵ ヶ. */
+    /** Kanji that follow a katakana word as themselves, before hiragana: 力 (ジャンプ力が), 二 (パン二つ), 八 (ケーキ八つ). */
+    private val REAL_AFTER_KATAKANA = setOf('力'.code, '二'.code, '八'.code)
+
     private fun isKataWord(c: Int) = isKata(c) && c != 'ヵ'.code && c != 'ヶ'.code
 
     /** A kanji drawn like a katakana, or a hiragana like a katakana, made the script its neighbours are in. */
@@ -299,14 +302,16 @@ object TextClean {
                 }
                 val prev = near(-1)
                 val next = near(1)
-                // Beside a katakana word, and not before or after hiragana or a kanji, which a real kanji has: ジャンプ力が, パン二つ.
-                if ((isKataWord(prev) && !isKanji(next) && !isHira(next)) || (isKataWord(next) && !isKanji(prev) && !isHira(prev))) p.text = kana
+                // Beside a katakana word. Only 力, 二 and 八, which follow katakana as kanji (ジャンプ力が, パン二つ,
+                // ケーキ八つ), stay kanji when hiragana comes next; any other is the katakana: ヒン卜を, デー夕が.
+                val real = c in REAL_AFTER_KATAKANA && isHira(next)
+                if (!real && ((isKataWord(prev) && !isKanji(next)) || (isKataWord(next) && !isKanji(prev)))) p.text = kana
             }
             KANA_TWINS[c]?.let { other ->
                 val prev = cp(pieces.getOrNull(i - 1))
                 val next = cp(pieces.getOrNull(i + 1))
-                // Not after a kanji either: 残りターン, 町へバスで are as written.
-                if (isHira(c) && isKataWord(next) && !isHira(prev) && !isKanji(prev)) p.text = other
+                // り after a kanji is its okurigana (残りターン, 通りを): not the katakana.
+                if (isHira(c) && isKataWord(next) && !isHira(prev) && !(c == 'り'.code && isKanji(prev))) p.text = other
                 if (isKata(c) && isHira(next) && !isKataWord(prev)) p.text = other
             }
         }

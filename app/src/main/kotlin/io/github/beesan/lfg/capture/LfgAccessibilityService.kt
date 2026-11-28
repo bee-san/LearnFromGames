@@ -146,6 +146,7 @@ class LfgAccessibilityService : AccessibilityService() {
             apart = { app.settings.prefs.value.interfaceApart },
             dialogueDir = { if (app.settings.prefs.value.keepDialogue) DialogueSamples.dir(filesDir) else null },
             matchLength = { app.dictionaries.matchLength(it) },
+            spaced = { app.settings.prefs.value.learning.spaced },
             japanese = { app.settings.prefs.value.learning.japanese },
         )
         controller = LookupController(
@@ -1084,7 +1085,7 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun startContinuous(game: Game, target: Ordinary, region: Box) {
         val regional = ReadingPipeline(
             app.lines, File(filesDir, "frames"), matchLength = { app.dictionaries.matchLength(it) },
-            japanese = { app.settings.prefs.value.learning.japanese },
+            japanese = { app.settings.prefs.value.learning.japanese }, spaced = { app.settings.prefs.value.learning.spaced },
         )
         setAsked(Asked(game, target.packageName, target.displayId, target.windowId, continuous = true, frame = null, framePath = null))
         toast("Reading this region until you turn it off.", avoid = region)
@@ -1385,7 +1386,7 @@ class LfgAccessibilityService : AccessibilityService() {
         val ja = app.settings.prefs.value.learning.japanese
         val clean = rows.mapNotNull { io.github.beesan.lfg.ocr.TextClean.line(it, ja) }.filter { it.text.isNotBlank() }
             .let { cleaned -> if (ja) cleaned.map { io.github.beesan.lfg.ocr.KanaRepair.line(it) { s -> app.dictionaries.matchLength(s) } } else cleaned }
-        return Blocks.group(clean.map { it.moved(left + offsetX, top + offsetY) })
+        return Blocks.group(clean.map { it.moved(left + offsetX, top + offsetY) }, app.settings.prefs.value.learning.spaced)
     }
 
     /** Writes a picture for a card or a kept line, beside the game's frames. */

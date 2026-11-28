@@ -28,9 +28,12 @@ class ScreenAi private constructor(
     fun read(frame: Frame, textHeight: Int = 0): List<TextLine> {
         val bytes = nativeRead(frame.argb, frame.width, frame.height, textHeight) ?: error("ScreenAI could not read the frame.")
         val lines = decode(bytes)
-        if (!rightToLeft) return joined(ordered(lines))
-        // In a mirror, a row of Arabic runs as one of English does: its first word is the one at the left.
-        return joined(ordered(lines.map { it.mirrored() })).map { it.mirrored() }
+        // In a mirror, a row of Arabic runs as one of English does: its first word is the one at the left. Only when
+        // most rows on screen are in such a script (an English menu stays as it is), and never a column of vertical text.
+        val rows = lines.filter { !it.vertical }
+        if (!rightToLeft || rows.count { io.github.beesan.lfg.core.rightToLeft(it.text) } * 2 <= rows.size) return joined(ordered(lines))
+        fun flip(line: TextLine) = if (line.vertical) line else line.mirrored()
+        return joined(ordered(lines.map(::flip))).map(::flip)
     }
 
     companion object {

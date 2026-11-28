@@ -66,9 +66,8 @@ class OfflineTranslator {
     /**
      * Fetches the models the two languages need and the device lacks, so that [translate] works
      * later with no internet. With [wifiOnly] Android waits for Wi-Fi; with no network at all it
-     * waits for one, and this comes back when the models have arrived. Models of other languages, from a
-     * language learnt or translated into before, are deleted then: each is tens of megabytes, and nothing
-     * else in the app would ever take them away. Never throws: a failure is logged, and false returned.
+     * waits for one, and this comes back when the models have arrived. Never throws: a failure is logged,
+     * and false returned.
      */
     suspend fun prepare(from: Language, into: String, wifiOnly: Boolean): Boolean {
         val (source, target) = pair(from, into) ?: return true
@@ -78,11 +77,6 @@ class OfflineTranslator {
             if (missing.isNotEmpty()) Log.i(TAG, "Fetching the models for $missing")
             // Both are asked for before either is waited on, so one failing does not hold the other back.
             missing.map { models.download(model(it), conditions) }.forEach { it.await() }
-            // English is built in and cannot go.
-            val keep = setOf(source, target, TranslateLanguage.ENGLISH)
-            models.getDownloadedModels(TranslateRemoteModel::class.java).await().filter { it.language !in keep }.forEach {
-                runCatching { models.deleteDownloadedModel(it).await() }
-            }
             true
         } catch (e: CancellationException) {
             throw e

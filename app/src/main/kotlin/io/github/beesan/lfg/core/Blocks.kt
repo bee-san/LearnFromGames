@@ -10,15 +10,19 @@ package io.github.beesan.lfg.core
  * apart.
  */
 object Blocks {
-    fun group(lines: List<TextLine>): List<TextLine> {
+    /**
+     * [spaced]: the language read spaces its words, so a sentence wrapped over rows is joined with a space where the
+     * reader left it out. Never for Japanese or Chinese, whose rows end and begin anywhere, Latin letters and all.
+     */
+    fun group(lines: List<TextLine>, spaced: Boolean = false): List<TextLine> {
         // Rows mostly of a right-to-left script start at their right edge: grouped in a mirror, so the
         // edges and the order below hold for them as they are, then put back.
         val rtl = lines.count { !it.vertical && rightToLeft(it.text) } * 2 > lines.count { !it.vertical }
-        if (rtl) return groupAsLeftToRight(lines.map { it.mirrored() }).map { it.mirrored() }
-        return groupAsLeftToRight(lines)
+        if (rtl) return groupAsLeftToRight(lines.map { it.mirrored() }, spaced).map { it.mirrored() }
+        return groupAsLeftToRight(lines, spaced)
     }
 
-    private fun groupAsLeftToRight(lines: List<TextLine>): List<TextLine> {
+    private fun groupAsLeftToRight(lines: List<TextLine>, spaced: Boolean): List<TextLine> {
         val candidates = lines.filter { it.text.isNotBlank() }
         val kept = candidates.filter { line -> candidates.none { base -> isFuriganaOf(line, base) } }
         val horizontal = kept.filter { !it.vertical }.sortedWith(compareBy({ it.box.top }, { it.box.left }))
@@ -33,7 +37,7 @@ object Blocks {
             if (home != null) home += line else blocks += mutableListOf(line)
         }
         // Reading order: top to bottom, then left to right by where each piece starts; columns of vertical text right to left.
-        return blocks.flatMap(::nameApart).map(::join)
+        return blocks.flatMap(::nameApart).map { join(it, spaced) }
             .sortedWith(compareBy({ it.rows[0].top }, { if (it.vertical) -it.rows[0].right else it.rows[0].left }))
     }
 
@@ -159,7 +163,7 @@ object Blocks {
         return kotlin.math.abs(line.box.top - block[0].box.top) <= 0.8f * w
     }
 
-    private fun join(rows: List<TextLine>): TextLine {
+    private fun join(rows: List<TextLine>, spaced: Boolean): TextLine {
         if (rows.size == 1) return rows[0]
         val text = StringBuilder()
         val chars = ArrayList<CharBox>()
@@ -167,7 +171,7 @@ object Blocks {
             // Rows of a language that spaces its words are one sentence wrapped at a space, which the reader leaves
             // out at the row's end: put back, or "across" and "the" become one word. Not after a hyphen, nor in
             // Japanese or Chinese, which wrap anywhere.
-            if (text.isNotEmpty() && spacedEnd(text.last()) && spacedStart(row.text.firstOrNull())) text.append(' ')
+            if (spaced && text.isNotEmpty() && spacedEnd(text.last()) && spacedStart(row.text.firstOrNull())) text.append(' ')
             val offset = text.length
             row.chars.mapTo(chars) { CharBox(it.start + offset, it.end + offset, it.box) }
             text.append(row.text)

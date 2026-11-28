@@ -60,9 +60,9 @@ class CardMaker(
         }
         var id = 0L
         try {
-            // Looked for where the card will go (send settles that the same way), and never for a kanji card by its
-            // kanji alone, which is also the spelling of a one-kanji word.
-            if (!content.kanji && anki.isDuplicate(resolveTarget(), content.expression)) return@withContext CardResult.Duplicate
+            // Looked for where the card will go (send settles that the same way); a kanji card only among kanji
+            // cards, since its kanji is also the spelling of a one-kanji word.
+            if (anki.isDuplicate(resolveTarget(), content.expression, content.kanji)) return@withContext CardResult.Duplicate
             id = db.cards().insert(row)
             onCard()
             send(row.copy(id = id), content)
@@ -94,7 +94,7 @@ class CardMaker(
             }
             try {
                 // The word may have been added since the card was made, or twice while AnkiDroid was away: it is the note already there.
-                val there = if (content.kanji) null else anki.noteId(resolveTarget(), content.expression)
+                val there = anki.noteId(resolveTarget(), content.expression, content.kanji)
                 if (there != null) {
                     db.cards().update(card.copy(noteId = there, state = Card.STATE_ADDED))
                     store.attachNote(card.lineId, there)

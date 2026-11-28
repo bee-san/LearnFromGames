@@ -71,6 +71,8 @@ class ReadingPipeline(
     private val matchLength: suspend (String) -> Int = { 0 },
     /** The language being read is Japanese: its text is cleaned and its kana repaired as Japanese ([TextClean], [KanaRepair]). */
     private val japanese: () -> Boolean = { true },
+    /** The language being read spaces its words: rows of a wrapped sentence are joined with a space ([Blocks.group]). */
+    private val spaced: () -> Boolean = { false },
 ) {
     private val _latest = MutableStateFlow<Reading?>(null)
     val latest: StateFlow<Reading?> = _latest
@@ -464,7 +466,7 @@ class ReadingPipeline(
             // The room read around a box is for reading its edges well, not for what lies in it.
             .let { rows -> if (cut != null && areas.isNotEmpty()) TreeText.within(rows, areas) else rows }
         // A reader returns rows; the game shows sentences. From here on a piece is a whole piece of text.
-        val pieces = Perf.measure("group") { Blocks.group(rows) }
+        val pieces = Perf.measure("group") { Blocks.group(rows, spaced()) }
         if (pieces.isEmpty()) {
             interfaceText.onReading(emptyList())
             // Nothing of the game's text is on screen now: the lines before are not there to tap.

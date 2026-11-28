@@ -141,4 +141,13 @@ class BlocksTest {
         assertEquals(1, pieces.size)
         assertTrue(pieces[0].text.startsWith("مرحبا"))
     }
+
+    @Test
+    fun aSpacedLanguagesWrappedRowsAreJoinedWithASpace() {
+        val rows = listOf(row("They ran across", 100, 100, 30), row("the playground.", 100, 140, 30))
+        assertEquals("They ran across the playground.", Blocks.group(rows, spaced = true).single().text)
+        // Japanese is never spaced, Latin letters at the rows' ends and all.
+        val japanese = listOf(row("100ゴールドを手に入れた!", 100, 100, 30), row("HPが回復した", 100, 140, 30))
+        assertEquals("100ゴールドを手に入れた!HPが回復した", Blocks.group(japanese).single().text)
+    }
 }

@@ -163,12 +163,14 @@ class AnkiBridge(private val context: Context) {
     fun targetStillValid(target: AnkiTarget): Boolean =
         api.getFieldList(target.modelId)?.toList() == target.fields && api.deckList?.containsKey(target.deckId) == true
 
-    fun isDuplicate(target: AnkiTarget, expression: String): Boolean =
-        api.findDuplicateNotes(target.modelId, expression)?.isNotEmpty() == true
+    /** [kanji]: only a kanji card counts, tagged Kanji, and not the one-kanji word of the same spelling (or the other way round). */
+    fun isDuplicate(target: AnkiTarget, expression: String, kanji: Boolean = false): Boolean = noteId(target, expression, kanji) != null
 
-    /** The note already holding this word, or null. */
-    fun noteId(target: AnkiTarget, expression: String): Long? =
-        api.findDuplicateNotes(target.modelId, expression)?.firstOrNull()?.id
+    /** The note already holding this word (or, with [kanji], this kanji's card), or null. */
+    fun noteId(target: AnkiTarget, expression: String, kanji: Boolean = false): Long? =
+        api.findDuplicateNotes(target.modelId, expression)?.firstOrNull { note ->
+            note.tags.orEmpty().any { it.equals("Kanji", ignoreCase = true) } == kanji
+        }?.id
 
     /**
      * Opens AnkiDroid's card browser on one note, through its
