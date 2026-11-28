@@ -173,7 +173,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Lookup in a stored line, for a card made after the session, or in a word typed on Search. */
     val lineLookup = LookupController(viewModelScope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, decorate = { app.notes.withNotes(it) },
         prepare = ::searchLine, selection = { app.settings.prefs.value.picking },
-        vnQuestion = { app.characterNames.question(it) }, vnAnswer = { question, yes -> app.characterNames.answer(question, yes) },
         lookupKanji = { app.dictionaries.lookupKanji(it, app.settings.prefs.value.kanjiDictionary) },
         // A card that fails from a page is heard as over a game; the page's own buttons already click.
         heard = { if (it == io.github.beesan.lfg.lookup.Heard.CARD_MADE || it == io.github.beesan.lfg.lookup.Heard.CARD_FAILED) GameSounds.play(it) },

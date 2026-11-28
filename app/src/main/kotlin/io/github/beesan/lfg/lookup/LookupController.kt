@@ -20,7 +20,6 @@ import io.github.beesan.lfg.dict.WordAudio
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -81,8 +80,6 @@ data class LookupState(
     val message: String? = null,
     /** The controller drives the app and the game receives nothing. */
     val controllerMode: Boolean = false,
-    /** Asked once under the entries: whether the game is this visual novel. */
-    val vnQuestion: VnQuestion? = null,
     /** The headword whose kanji the [entries] are, tapped there; null while they are the word's own. */
     val kanjiFrom: String? = null,
 ) {
@@ -93,9 +90,6 @@ data class LookupState(
 }
 
 enum class Move { LEFT, RIGHT, UP, DOWN }
-
-/** "Is this the visual novel [title]?" for the game of [gameId], about VNDB's [vnId]. */
-data class VnQuestion(val gameId: String, val vnId: String, val title: String)
 
 /**
  * Lookup from a character of a line, by touch or by controller, and the card
@@ -120,13 +114,6 @@ class LookupController(
     private val prepare: suspend (LookupLine) -> LookupLine = { it },
     /** Whole word or Character, and whether only Japanese characters can be picked: Settings › Controls. */
     private val selection: () -> Selection = { Selection() },
-    /**
-     * The question to ask once under a game's entries, if its visual novel is
-     * uncertain; marks it asked. Null for most games, and always for none.
-     */
-    private val vnQuestion: suspend (String) -> VnQuestion? = { null },
-    /** The answer to a [VnQuestion]. */
-    private val vnAnswer: suspend (VnQuestion, Boolean) -> Unit = { _, _ -> },
     /** The entries for one kanji in the kanji dictionary (Settings › Dictionaries). */
     private val lookupKanji: suspend (String) -> List<Entry> = { emptyList() },
     /**
@@ -169,9 +156,6 @@ class LookupController(
     }
 
     private var pending: Pending? = null
-
-    /** A game's question about its visual novel that came when its entries had gone: asked under the next entries in that game. */
-    private val heldQuestions = java.util.concurrent.ConcurrentHashMap<String, VnQuestion>()
 
     /**
      * A line read earlier that is being looked into beside the ones on screen
@@ -322,23 +306,11 @@ class LookupController(
                     entries = entries, entryIndex = 0,
                     buttons = entries.map { e -> done[target.lineId to e.expression] ?: CardButton.ADD },
                     message = if (first == null) "No entry" else null,
-                    vnQuestion = null, kanjiFrom = null,
+                    kanjiFrom = null,
                 )
             }
-            // Its line changed under it on the way, so none of it was shown: nothing is asked, kept or checked for it.
+            // Its line changed under it on the way, so none of it was shown: nothing is kept or checked for it.
             if (!shown || first == null) return@launch
-            target.gameId?.let { gameId ->
-                // Asking marks the game asked, so the question is kept as soon as it comes, whatever this lookup meets
-                // meanwhile (let go on the way back, its answer would be lost), and shown under these entries or the
-                // next in this game; once shown it is let go.
-                val question = heldQuestions[gameId]
-                    ?: withContext(NonCancellable + Dispatchers.IO) { vnQuestion(gameId)?.also { heldQuestions[gameId] = it } }
-                if (question != null && isActive) {
-                    var asked = false
-                    _state.update { asked = it.entries === entries; if (asked) it.copy(vnQuestion = question) else it }
-                    if (asked) heldQuestions.remove(gameId, question)
-                }
-            }
             target.lineId?.let { store.recordLookup(it, first.expression, first.reading) }
             // Every entry shows its own button, so each is checked; the first is looked at first.
             for (entry in entries.distinctBy { it.expression }) checkDuplicate(target, entry)
@@ -372,7 +344,7 @@ class LookupController(
                     entries = entries, entryIndex = 0,
                     // A kanji's card is not the card of the one-kanji word of the same spelling.
                     buttons = entries.map { e -> done[line.lineId to KANJI + e.expression] ?: CardButton.ADD },
-                    message = null, vnQuestion = null,
+                    message = null,
                     kanjiFrom = from.entries.firstOrNull { kanji in it.expression }?.expression ?: from.entry?.expression ?: kanji,
                 )
             }
@@ -394,16 +366,9 @@ class LookupController(
                     // Left Adding by a card that has come back since, and failed: it can be asked for again.
                     done[key] ?: back.buttons.getOrElse(i) { CardButton.ADD }.let { b -> if (b == CardButton.ADDING && key !in making) CardButton.ADD else b }
                 },
-                message = null, vnQuestion = null, kanjiFrom = null,
+                message = null, kanjiFrom = null,
             )
         }
-    }
-
-    /** Yes or No to the visual novel asked about under the entries. */
-    fun answerVn(yes: Boolean) {
-        val question = _state.value.vnQuestion ?: return
-        _state.update { it.copy(vnQuestion = null) }
-        scope.launch { withContext(Dispatchers.IO) { vnAnswer(question, yes) } }
     }
 
     /** [kanji]: the entry is a kanji's, which only a kanji card in Anki is the card of. */

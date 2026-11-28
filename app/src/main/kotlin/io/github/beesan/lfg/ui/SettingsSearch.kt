@@ -171,7 +171,7 @@ object SettingsIndex {
         },
         page(Page.CHARACTER_NAMES, "Character names", "A visual novel's cast from VNDB, so its names look up as its characters", "vn people") {
             setting("Your games", "Choose the visual novel you are reading by hand", "vn manual link search choose pick add vndb")
-            setting("Find visual novels by themselves", "Links a game when its Steam ID matches, or its title, platform and a Japanese release all do", "automatic auto link")
+            setting("Find visual novels by themselves", "By Steam ID or title, then asked over the game", "automatic auto link ask")
             setting("Names with honorifics", "さん, くん and about 270 more endings look up as one word", "san kun chan sama suffix")
             setting("Show spoilers", "Descriptions and traits VNDB marks as spoilers", "hide")
         },

@@ -494,8 +494,6 @@ class MainActivity : ComponentActivity() {
                                     EntryLink.AUDIO -> model.lineLookup.playAudio(index)
                                     // Notes on words are put away for now (data/Notes.kt).
                                     EntryLink.NOTE -> Unit
-                                    EntryLink.VN_YES -> model.lineLookup.answerVn(true)
-                                    EntryLink.VN_NO -> model.lineLookup.answerVn(false)
                                     EntryLink.KANJI -> model.lineLookup.lookUpKanji(index)
                                     EntryLink.BACK -> model.lineLookup.backToWord()
                                 }

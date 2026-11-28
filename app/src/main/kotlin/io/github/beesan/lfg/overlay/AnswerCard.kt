@@ -54,6 +54,8 @@ internal class CardContent(
     val hints: String = "",
     /** Changes when the card is about something else: its turns then start from the top. */
     val key: String = "",
+    /** Whether Close shows and the card slides away; off for a question that must be answered. */
+    val closable: Boolean = true,
 )
 
 /**
@@ -89,6 +91,8 @@ internal class AnswerCard(
     private var shownTurns = 0
     private val note = NoteEditor(context, onSaveNote, onNoteBack)
     private val hints = context.keyHints("")
+    private val close = context.pill("Close", primary = false, sizeSp = 12.5f) { onClose() }
+    private var closable = true
 
     /** Whether the note editor is up in place of the rest. */
     val writing: Boolean get() = note.visibility == VISIBLE
@@ -109,7 +113,7 @@ internal class AnswerCard(
         bar.addView(title, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         pills.orientation = HORIZONTAL
         bar.addView(pills)
-        bar.addView(context.pill("Close", primary = false, sizeSp = 12.5f) { onClose() }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
+        bar.addView(close, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8f) })
         addView(bar, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(View(context).apply { setBackgroundColor(Ink.BORDER) }, LayoutParams(LayoutParams.MATCH_PARENT, 1))
 
@@ -170,6 +174,8 @@ internal class AnswerCard(
         scroll.visibility = VISIBLE
         bar.visibility = VISIBLE
         title.text = next.title.uppercase()
+        closable = next.closable
+        close.visibility = if (next.closable) VISIBLE else GONE
 
         pills.removeAllViews()
         for (p in next.pills) {
@@ -365,7 +371,7 @@ internal class AnswerCard(
         val dx = event.rawX - downX
         val dy = event.rawY - downY
         // Not a note: a slip of the finger must not throw away what was written.
-        return !writing && dx > slop && dx > abs(dy) * 1.5f
+        return !writing && closable && dx > slop && dx > abs(dy) * 1.5f
     }
 
     private fun track(event: MotionEvent) {

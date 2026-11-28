@@ -146,7 +146,7 @@ class SelectionActivity : ComponentActivity() {
                             EntryLink.KANJI -> controller.lookUpKanji(index)
                             EntryLink.BACK -> controller.backToWord()
                             // Not shown here: a note belongs to a game's line.
-                            EntryLink.NOTE, EntryLink.VN_YES, EntryLink.VN_NO -> Unit
+                            EntryLink.NOTE -> Unit
                         }
                     },
                     Modifier.fillMaxWidth().weight(1f),

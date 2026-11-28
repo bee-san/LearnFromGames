@@ -8,14 +8,15 @@ import io.github.beesan.lfg.core.downloadProblem
 import io.github.beesan.lfg.data.Game
 import io.github.beesan.lfg.data.LfgDatabase
 import io.github.beesan.lfg.dict.DictionaryRepository
-import io.github.beesan.lfg.lookup.VnQuestion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
@@ -23,6 +24,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+
+/** "Is this the visual novel [title]?", asked over [game], the game of [gameId], about VNDB's [vnId]. */
+data class VnQuestion(val gameId: String, val game: String, val vnId: String, val title: String)
 
 /**
  * A visual novel's character names, for the games linked to it: finding the
@@ -50,6 +54,11 @@ class CharacterNames(
 
     /** Each game's linked visual novel, "" for none, so a lookup does not ask the database each time. */
     private val vnByGame = ConcurrentHashMap<String, String>()
+
+    private val _toAsk = MutableSharedFlow<String>(extraBufferCapacity = 8)
+
+    /** A game whose visual novel was just found on VNDB, by id: its [question] is ready to ask. */
+    val toAsk: SharedFlow<String> = _toAsk
 
     /** Games looked for on VNDB since the app started: each once, so a failed search is tried again next time only. */
     private val looked = ConcurrentHashMap.newKeySet<String>()
@@ -121,33 +130,29 @@ class CharacterNames(
         val steam = steamAppId.toLongOrNull()?.let { vndb.vnsForSteam(it) }.orEmpty()
         val found = if (steam.size == 1) emptyList() else vndb.search(game.title, platform = null, japaneseOnly = false)
         found.forEach { rememberTitle(it.id, it.alttitle ?: it.title) }
-        when (val outcome = VnMatcher.match(game.title, steamAppId.toLongOrNull(), platform, steam, found)) {
-            is VnMatch.Link -> {
-                if (outcome.how == Game.HOW_STEAM && title(outcome.vnId) == null) {
-                    runCatching { vndb.fetchVnInfo(outcome.vnId) }.getOrNull()?.let { rememberTitle(outcome.vnId, it.alttitle.ifEmpty { it.title }) }
-                }
-                val now = db.games().byId(game.id) ?: return
-                if (now.vndb.isNotEmpty()) return
-                link(now, outcome.vnId, outcome.how)
-            }
-            is VnMatch.Suggest -> {
-                val now = db.games().byId(game.id) ?: return
-                if (now.vndb.isNotEmpty() || now.vndbSuggested.isNotEmpty()) return
-                db.games().setVn(now.id, "", "", outcome.vnId, false)
-            }
-            VnMatch.None -> Unit
+        // Even a sure match is asked about: a game named like a visual novel may not be one.
+        val vnId = when (val outcome = VnMatcher.match(game.title, steamAppId.toLongOrNull(), platform, steam, found)) {
+            is VnMatch.Link -> outcome.vnId
+            is VnMatch.Suggest -> outcome.vnId
+            VnMatch.None -> return
         }
+        if (title(vnId) == null) {
+            runCatching { vndb.fetchVnInfo(vnId) }.getOrNull()?.let { rememberTitle(vnId, it.alttitle.ifEmpty { it.title }) }
+        }
+        val now = db.games().byId(game.id) ?: return
+        if (now.vndb.isNotEmpty() || now.vndbSuggested.isNotEmpty()) return
+        db.games().setVn(now.id, "", "", vnId, false)
+        _toAsk.tryEmit(now.id)
     }
 
-    // ── the popup's question ────────────────────────────────────────────
+    // ── the question over the game ──────────────────────────────────────
 
-    /** The question for the game's uncertain visual novel, at most once per game: asking marks it asked. */
+    /** The question for the game's visual novel found on VNDB, until it is answered; null when there is none. */
     suspend fun question(gameId: String): VnQuestion? {
         if (!prefs().learning.japanese) return null
         val game = db.games().byId(gameId) ?: return null
         if (game.vndb.isNotEmpty() || game.vndbSuggested.isEmpty() || game.vndbAsked) return null
-        db.games().setVn(game.id, game.vndb, game.vndbHow, game.vndbSuggested, true)
-        return VnQuestion(game.id, game.vndbSuggested, title(game.vndbSuggested) ?: game.vndbSuggested)
+        return VnQuestion(game.id, game.title, game.vndbSuggested, title(game.vndbSuggested) ?: game.vndbSuggested)
     }
 
     suspend fun answer(question: VnQuestion, yes: Boolean) {

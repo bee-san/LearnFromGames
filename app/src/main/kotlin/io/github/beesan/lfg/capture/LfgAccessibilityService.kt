@@ -71,10 +71,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -152,8 +154,6 @@ class LfgAccessibilityService : AccessibilityService() {
         controller = LookupController(
             scope, { text, gameId -> app.dictionaries.lookup(text, app.characterNames.vnFor(gameId)) }, app.cards, app.anki, app.lines, app.wordAudio, { app.notes.withNotes(it) }, ::prepareLine,
             selection = { app.settings.prefs.value.picking },
-            vnQuestion = { app.characterNames.question(it) },
-            vnAnswer = { question, yes -> app.characterNames.answer(question, yes) },
             lookupKanji = { app.dictionaries.lookupKanji(it, app.settings.prefs.value.kanjiDictionary) },
             // In the tutorial a word already in Anki counts as a card made, and AnkiDroid stays shut.
             alreadyInAnki = {
@@ -245,6 +245,7 @@ class LfgAccessibilityService : AccessibilityService() {
                     overlays.onLineAnswer(id, slice, result.getOrNull(), result.exceptionOrNull()?.let { it.message ?: "That did not work. Try again." })
                 }
             },
+            onVnAnswer = { question, yes -> scope.launch(Dispatchers.IO) { app.characterNames.answer(question, yes) } },
         )
         // A game just given a profile takes it up as it is next in front, though it was the last game played.
         scope.launch { app.profiles.games.drop(1).collect { arrivals.forget() } }
@@ -338,6 +339,13 @@ class LfgAccessibilityService : AccessibilityService() {
                 // Not while the wheel, or a card from it, is up over what was read: that is still being used.
                 if (wasLookup && !state.controllerMode && askedOverGame() && !overlays.wheelUp) endAsked()
                 wasLookup = state.controllerMode
+            }
+        }
+        // The game in front is asked which visual novel it is once VNDB has found one, each time it comes
+        // to the front, until it is answered.
+        scope.launch {
+            combine(frontGame, app.characterNames.toAsk.onStart { emit("") }) { game, _ -> game }.collectLatest { game ->
+                overlays.askVn(game?.let { withContext(Dispatchers.IO) { app.characterNames.question(it.id) } })
             }
         }
         scope.launch {
@@ -539,6 +547,8 @@ class LfgAccessibilityService : AccessibilityService() {
             }
             // A note being written in the box from the wheel: nothing else opens over it.
             overlays.wheelUp -> closeOverlay()
+            // The question over a new game is answered first.
+            overlays.askingVn -> Unit
             else -> toggleLookup(anyApp)
         }
     }
@@ -547,7 +557,7 @@ class LfgAccessibilityService : AccessibilityService() {
     private fun shortcutUp(anyApp: Boolean) {
         holdJob?.cancel()
         when (shortcutHold.release()) {
-            ShortcutHold.Release.TAP -> if (overlays.wheelUp) closeOverlay() else toggleLookup(anyApp)
+            ShortcutHold.Release.TAP -> if (overlays.wheelUp) closeOverlay() else if (!overlays.askingVn) toggleLookup(anyApp)
             ShortcutHold.Release.HOLD -> overlays.letGoWheel()
             ShortcutHold.Release.NONE -> Unit
         }

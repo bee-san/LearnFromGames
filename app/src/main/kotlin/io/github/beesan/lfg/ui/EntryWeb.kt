@@ -26,7 +26,7 @@ import java.io.ByteArrayInputStream
  * What a button in the list of entries asks for, with the entry's place in the list;
  * for [KANJI], the tapped kanji's code point instead. [BACK] goes from a kanji's entry back to the word's.
  */
-enum class EntryLink { CARD, AUDIO, NOTE, VN_YES, VN_NO, KANJI, BACK }
+enum class EntryLink { CARD, AUDIO, NOTE, KANJI, BACK }
 
 /** A card button's state as the entry page's script names it. */
 fun CardButton.htmlState() = when (this) {
@@ -106,8 +106,6 @@ class EntryWebView(
                 when ("${url.scheme}://${url.host}") {
                     EntryHtml.CARD_URL -> handler(EntryLink.CARD, index)
                     EntryHtml.NOTE_URL -> handler(EntryLink.NOTE, index)
-                    EntryHtml.VN_YES_URL -> handler(EntryLink.VN_YES, index)
-                    EntryHtml.VN_NO_URL -> handler(EntryLink.VN_NO, index)
                     EntryHtml.KANJI_URL -> handler(EntryLink.KANJI, index)
                     EntryHtml.BACK_URL -> handler(EntryLink.BACK, index)
                     EntryHtml.AUDIO_URL.substringBeforeLast('/') -> handler(EntryLink.AUDIO, index)
@@ -141,7 +139,7 @@ class EntryWebView(
      */
     fun showList(
         entries: List<Entry>, styles: List<EntryHtml.Style>, states: List<String>, current: Int, message: String?, palette: Palette,
-        notes: Boolean = true, askVn: String? = null, back: String? = null,
+        notes: Boolean = true, back: String? = null,
     ) {
         ground(palette)
         val scroll = entries === listed && current != listedCurrent
@@ -153,7 +151,7 @@ class EntryWebView(
             return
         }
         val head = Perf.measure("entry.head") { EntryHtml.listHead(styles, palette, glass) }
-        val body = Perf.measure("entry.html") { EntryHtml.listBody(entries, notes, askVn, back) { audio?.has(it) == true } }
+        val body = Perf.measure("entry.html") { EntryHtml.listBody(entries, notes, back) { audio?.has(it) == true } }
         val state = EntryHtml.foldScript(FoldedDictionaries.get(context)) + "lfgState([" + states.joinToString(",") { "'$it'" } + "],$current,$scroll)"
         val script = when {
             head != listHead -> {
@@ -271,7 +269,7 @@ fun EntryList(
 ) {
     AndroidView(
         factory = { EntryWebView(it, media, onLink).also { view -> scroller?.view = view } },
-        update = { it.showList(state.entries, styles, state.buttons.map { b -> b.htmlState() }, state.entryIndex, state.message, Lfg.palette, notes, state.vnQuestion?.title, state.kanjiFrom) },
+        update = { it.showList(state.entries, styles, state.buttons.map { b -> b.htmlState() }, state.entryIndex, state.message, Lfg.palette, notes, back = state.kanjiFrom) },
         modifier = modifier,
     )
 }

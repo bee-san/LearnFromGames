@@ -5,10 +5,10 @@ import io.github.beesan.lfg.games.GameTitle
 
 /** What the matcher decided for a game. */
 sealed class VnMatch {
-    /** Link the game to [vnId] without asking. [how] is "steam" or "title", as stored in `vndb_how`. */
+    /** A sure match: [vnId] by Steam app ID or by exact title. [how] is "steam" or "title". */
     data class Link(val vnId: String, val how: String) : VnMatch()
 
-    /** Offer [vnId] for one tap: plausible, but not certain enough to link. */
+    /** A plausible match, [vnId], not a sure one. */
     data class Suggest(val vnId: String) : VnMatch()
 
     /** Nothing worth offering. */
@@ -16,10 +16,10 @@ sealed class VnMatch {
 }
 
 /**
- * Decides which visual novel, if any, a game is. Linking is automatic only
- * when it is certain: by Steam app ID, or by an exact title on the right
- * platform with a Japanese release. Anything weaker is a suggestion, so a
- * game such as Journey or Inside never gets a stranger's cast by itself.
+ * Decides which visual novel, if any, a game is. A match is sure by Steam
+ * app ID, or by an exact title on the right platform with a Japanese
+ * release; anything weaker is only plausible. Either way the player is asked
+ * before the game gets its cast, so Journey or Inside never gets a stranger's.
  */
 object VnMatcher {
     /**

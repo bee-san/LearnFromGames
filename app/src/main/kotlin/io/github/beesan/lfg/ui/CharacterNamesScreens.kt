@@ -233,7 +233,7 @@ fun CharacterNamesScreen(
         }
     }
     Group("Visual novels") {
-        Card("Find visual novels by themselves", "By Steam ID, or title, platform and release") {
+        Card("Find visual novels by themselves", "By Steam ID or title, then asked over the game") {
             Switch(prefs.namesAuto) { v -> onChange { it.copy(namesAuto = v) } }
         }
         Card("Names with honorifics", "七瀬さん as one word · bigger dictionary") {

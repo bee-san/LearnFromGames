@@ -37,6 +37,7 @@ import io.github.beesan.lfg.data.GameLine
 import io.github.beesan.lfg.data.Note
 import io.github.beesan.lfg.dict.Entry
 import io.github.beesan.lfg.dict.EntryHtml
+import io.github.beesan.lfg.names.VnQuestion
 import io.github.beesan.lfg.ui.EntryLink
 import io.github.beesan.lfg.ui.EntryScroller
 import io.github.beesan.lfg.ui.GameSounds
@@ -123,6 +124,8 @@ class OverlayHost(
     private val tileNote: (WheelSlice) -> String?,
     /** A tile that asks the model about a line ([WheelAction.asksOfLine]); the answer comes back through [onLineAnswer]. */
     private val onAskLine: (lineId: String, slice: WheelSlice) -> Unit,
+    /** The question over a new game answered: yes, it is this visual novel, or no. */
+    private val onVnAnswer: (VnQuestion, Boolean) -> Unit,
 ) {
     /** What the lines' screen can ask the model about a line. */
     enum class Ask { TRANSLATE, EXPLAIN }
@@ -231,7 +234,30 @@ class OverlayHost(
     val drawingOnGame: Boolean get() = marks.any { it.shown } || popup?.shown == true || textLayer?.shown == true || covering
 
     /** True while the game's screen is covered by a box being drawn, the wheel or its card: a picture of the whole screen is no use. */
-    val covering: Boolean get() = picker != null || wheelUp
+    val covering: Boolean get() = picker != null || wheelUp || vnShown()
+
+    /** Whether the game in front is to be asked which visual novel it is, over it. */
+    val askingVn: Boolean get() = vnAsk != null
+
+    /** The visual novel found for the game in front, asked about until answered; null for none. */
+    private var vnAsk: VnQuestion? = null
+
+    /** The question over the game shows: in the card, while neither the wheel nor a card of its own is up. */
+    private fun vnShown() = vnAsk != null && cardFor == null && !wheelOpen && gameInFront
+
+    /** Asks over the game in front whether it is this visual novel; null takes the question away. */
+    fun askVn(question: VnQuestion?) {
+        if (question == vnAsk) return
+        vnAsk = question
+        if (question != null) bringController() else render()
+    }
+
+    private fun answerVn(yes: Boolean) {
+        val question = vnAsk ?: return
+        vnAsk = null
+        render()
+        onVnAnswer(question, yes)
+    }
 
     /**
      * When a window of ours last left a screen (uptime). The screen shows it a frame or two longer, and a
@@ -556,9 +582,9 @@ class OverlayHost(
         }
 
         // Tap strips: one per row of text with a place on screen. Not under the wheel or its card, which a
-        // strip made after them would lie over.
+        // strip made after them would lie over, nor under the question over a new game.
         var used = 0
-        if (stripsOn && !wheelUp && !hidden && picker == null && TapGate.open(prefs().tapLookup, hasController(), state.controllerMode, asking)) {
+        if (stripsOn && !wheelUp && !vnShown() && !hidden && picker == null && TapGate.open(prefs().tapLookup, hasController(), state.controllerMode, asking)) {
             lines.forEachIndexed { index, line ->
                 for (box in line.geometry?.rows ?: emptyList()) {
                     if (box.width <= 0 || box.height <= 0) continue
@@ -596,14 +622,14 @@ class OverlayHost(
         // unless the word was picked on the lines' screen or Settings puts every entry there.
         val other = otherDisplay()
         if (other != Display.INVALID_DISPLAY) renderPanel(other) else panel?.hide()
-        if (!aside && !wheelUp && !hidden && entryOverGame(other) && !(pickedOnPanel && panel?.shown == true)) renderPopup(host, span) else hidePopup()
+        if (!aside && !wheelUp && !vnShown() && !hidden && entryOverGame(other) && !(pickedOnPanel && panel?.shown == true)) renderPopup(host, span) else hidePopup()
         renderTextMarks(host, lines)
 
         // Lookup mode: a window that can take focus, and so the controller. It is also up for a
         // moment whenever the controller has to be brought back to the game's screen. The wheel, its
         // card and a box drawn from the wheel hold the controller too, but not while a note or a
         // question is written: the card takes the focus then, for the keyboard.
-        val padOurs = wheelOpen || (cardFor != null && !cardTyping()) || pickerPad
+        val padOurs = wheelOpen || (cardFor != null && !cardTyping()) || pickerPad || vnShown()
         val holding = (state.controllerMode || padOurs) && gameInFront && noting == null
         if (holding || bringing) {
             // Over a game it covers the whole screen, seen through: a tap that misses the words and the entry
@@ -1188,8 +1214,6 @@ class OverlayHost(
             EntryLink.CARD -> controller.addCard(index)
             EntryLink.AUDIO -> controller.playAudio(index)
             EntryLink.NOTE -> startNote(index)
-            EntryLink.VN_YES -> controller.answerVn(true)
-            EntryLink.VN_NO -> controller.answerVn(false)
             EntryLink.KANJI -> controller.lookUpKanji(index)
             EntryLink.BACK -> controller.backToWord()
         }
@@ -1251,7 +1275,7 @@ class OverlayHost(
     }
 
     private fun showEntries(view: EntryWebView, state: LookupState) =
-        view.showList(state.entries, styles(), state.buttons.map { it.htmlState() }, state.entryIndex, state.message, Ink.palette, askVn = state.vnQuestion?.title, back = state.kanjiFrom)
+        view.showList(state.entries, styles(), state.buttons.map { it.htmlState() }, state.entryIndex, state.message, Ink.palette, back = state.kanjiFrom)
 
     /** A row of the lines' screen: a kept line, text on screen that is not kept, or a note. */
     private class Row(
@@ -1786,7 +1810,7 @@ class OverlayHost(
 
     /** Whether the wheel can open now: over a game, with nothing else being drawn or written on it. */
     val canOpenWheel: Boolean
-        get() = gameInFront && (!asking || askingGame) && gameDisplay != Display.INVALID_DISPLAY && picker == null && noting == null
+        get() = gameInFront && (!asking || askingGame) && gameDisplay != Display.INVALID_DISPLAY && picker == null && noting == null && vnAsk == null
 
     /** Whether something is being written in a window of ours over the game, with the keyboard up for it. */
     val typing: Boolean get() = noting != null || (cardFor != null && cardTyping())
@@ -2128,11 +2152,12 @@ class OverlayHost(
      */
     private fun renderCard(other: Int) {
         val what = cardFor
-        if (what == null || !gameInFront) {
+        val vn = vnAsk?.takeIf { vnShown() }
+        if ((what == null && vn == null) || !gameInFront) {
             card?.hide()
             return
         }
-        val apart = other != Display.INVALID_DISPLAY && other !in ownApp && !cardTyping()
+        val apart = vn == null && other != Display.INVALID_DISPLAY && other !in ownApp && !cardTyping()
         val displayId = if (apart) other else gameDisplay
         // A window is on one screen: on another, the card is made again there.
         if (displayId != cardDisplay) {
@@ -2175,13 +2200,24 @@ class OverlayHost(
             }
         }
         val win = card ?: Win(view, host.second, POPUP_FLAGS).also { card = it }
-        if (what != WheelAction.NOTE) view.show(cardContent(what))
+        when {
+            vn != null -> view.show(vnContent(vn))
+            what != WheelAction.NOTE -> view.show(cardContent(what!!))
+        }
         win.setFocusable(cardTyping())
         if (apart) {
             win.place(0, 0, screen.width, screen.height)
             return
         }
         val edge = context.dp(10f)
+        if (vn != null) {
+            // In the middle of the game, as tall as what it says.
+            val width = minOf(context.dp(480f), screen.width - 2 * edge)
+            view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            val height = view.measuredHeight.coerceIn(context.dp(96f), screen.height - 2 * edge)
+            win.place((screen.width - width) / 2, (screen.height - height) / 2, width, height)
+            return
+        }
         val landscape = screen.width > screen.height
         // Landscape: a box down the right of the screen, the whole height of it, so what it says has
         // room. Portrait: the width of the screen, as tall as what it says, above or below the line.
@@ -2213,6 +2249,26 @@ class OverlayHost(
             }.coerceAtLeast(edge)
         }
         win.place(x, y, width, height)
+    }
+
+    /** The question over a new game: is it this visual novel? */
+    private fun vnContent(question: VnQuestion): CardContent {
+        val swap = prefs().swapConfirm
+        val confirm = if (swap) "B" else "A"
+        val close = if (swap) "A" else "B"
+        return CardContent(
+            title = "New game · " + question.game,
+            line = question.title,
+            body = "Is this the visual novel? Then its cast is added, so names look up as characters.",
+            bodyColor = Ink.DIM,
+            asks = listOf(
+                CardChoice("Use this cast", chosen = false, marked = false, enabled = true) { answerVn(true) },
+                CardChoice("Not this game", chosen = false, marked = false, enabled = true) { answerVn(false) },
+            ),
+            hints = if (hasController()) "$confirm Use this cast    $close Not this game" else "",
+            key = "vn:" + question.gameId,
+            closable = false,
+        )
     }
 
     /** What the card says for [what], as things stand. */
@@ -2445,13 +2501,31 @@ class OverlayHost(
     private fun wheelKey(event: KeyEvent): Boolean? = when {
         wheelOpen -> wheelOpenKey(event)
         cardFor != null && !cardTyping() -> cardKey(event)
+        vnShown() -> vnKey(event)
         else -> null
     }
 
     private fun wheelMotion(event: MotionEvent): Boolean? = when {
         wheelOpen -> pointWheel(event)
         cardFor != null && !cardTyping() -> cardMotion(event)
+        // Nothing to point at: the sticks and the D-pad are kept from the game until it is answered.
+        vnShown() -> event.source and InputDevice.SOURCE_CLASS_JOYSTICK != 0
         else -> null
+    }
+
+    /** A and B answer the question over a new game; the game gets no button until then. */
+    private fun vnKey(event: KeyEvent): Boolean {
+        val down = event.action == KeyEvent.ACTION_DOWN
+        val swap = prefs().swapConfirm
+        val confirm = if (swap) KeyEvent.KEYCODE_BUTTON_B else KeyEvent.KEYCODE_BUTTON_A
+        val close = if (swap) KeyEvent.KEYCODE_BUTTON_A else KeyEvent.KEYCODE_BUTTON_B
+        when (event.keyCode) {
+            confirm, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (down && event.repeatCount == 0) answerVn(true)
+            // On release, as the card's own close is: the button's up must not be left for the game.
+            close, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (!down) answerVn(false)
+            else -> return KeyEvent.isGamepadButton(event.keyCode) || event.keyCode in DPAD_KEYS
+        }
+        return true
     }
 
     private fun aim(slice: Int?) {
@@ -2679,6 +2753,8 @@ class OverlayHost(
         const val PICKER_FLAGS = BASE
 
         const val NOTICE_MS = 3500L
+
+        val DPAD_KEYS = setOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)
 
         /** How many of the game's lines the lines' screen lists, and how much unkept text on screen. */
         const val HISTORY_SHOWN = 40
